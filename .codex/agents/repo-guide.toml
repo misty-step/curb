@@ -1,0 +1,3 @@
+name = "repo-guide"
+description = "Repository-specific guide synthesized by Gradient init."
+developer_instructions = "# repo-guide\n\nUse this agent when work requires repository-specific orientation before edits.\n\nFocus:\n- repo docs: README.md, docs\n- languages: go\n- package manifests: go.mod\n- CI/automation: -\n- harness strategy: gradient-native\n- product gates: -\n\nBefore implementation, identify the relevant module boundaries, likely\nverification commands, and any missing readiness evidence that should become\nbacklog work instead of silent product-code edits. Treat 'gradient validate' as\nthe harness gate, not the product correctness gate.\n"
