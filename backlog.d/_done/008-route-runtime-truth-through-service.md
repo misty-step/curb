@@ -2,7 +2,7 @@
 id: 008-route-runtime-truth-through-service
 title: Route runtime truth through the service read model
 priority: P0
-status: ready
+status: done
 lifecycle_stage: Policy/Eval
 acceptance:
     - Terminal dashboard, API snapshot, browser dashboard, and enforcement all use one service-owned read model for worker, session, turn, and action state.
@@ -106,5 +106,20 @@ Every Curb surface shows the same live workers, usage sessions, token turns, and
 - 2026-05-26: Service snapshot tests now cover multi-session/single-worker
   collapse and uncorrelated Claude logs without a live Claude worker row.
 
-Remaining before close: route more CLI views through service-owned snapshots and
-prove `curb dashboard --json` / `/v1/snapshot` parity against the same fixture.
+## What Was Built
+
+Completed on 2026-05-26. Runtime truth now routes through the service read model
+for the dashboard/API/UI path, with process/session correlation centralized in
+`usagewatch.BestSessionForMatch`. The terminal dashboard JSON and daemon
+`/v1/snapshot` are covered by a real filesystem usage fixture that proves the
+same worker/session/action counts across both surfaces. Service regression tests
+cover multi-session/single-worker collapse and uncorrelated Claude logs without
+inventing a live Claude worker row.
+
+Evidence:
+
+- `go test ./internal/service ./internal/usagewatch ./cmd/curb -run 'Correlat|Snapshot|Dashboard'`
+- `scripts/validate.sh`
+- `go test -race ./...`
+- `cd ui && npm test -- --run`
+- `scripts/build-ui.sh --check`

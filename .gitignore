@@ -1,8 +1,8 @@
 .curb/
 .antigravitycli/
 .spellbook/
-curb
-curb.exe
+/curb
+/curb.exe
 *.test
 *.out
 node_modules/
