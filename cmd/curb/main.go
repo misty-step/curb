@@ -491,23 +491,13 @@ func cmdWatch(args []string) error {
 	if err != nil {
 		return err
 	}
-	l, err := ledger.Open(cfg.Ledger.Path)
-	if err != nil {
-		return err
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	printWatchBanner(*configPath, cfg)
-	if cfg.Usage.IsEnabled() {
-		usageService := usagewatch.New(cfg, l)
-		usageService.OnEvent(printWatchEvent)
-		if err := usageService.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		fmt.Println("\ncurb stopped")
-		return nil
+	service, err := servicepkg.New(*configPath, nil)
+	if err != nil {
+		return err
 	}
-	service := watchdog.New(cfg, l)
 	service.OnEvent(printWatchEvent)
 	if err := service.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -997,6 +987,8 @@ func printWatchBanner(path string, cfg *config.Config) {
 			tokenCount(cfg.Usage.WarnTurnTokens),
 			tokenCount(cfg.Usage.KillTurnTokens),
 		)
+	} else {
+		fmt.Println("  usage:  disabled; watch refreshes visibility only")
 	}
 	fmt.Printf("  agents: %s\n", agentLabels(cfg.Agents))
 	if cfg.Alerts.LocalNotifications {
@@ -1029,7 +1021,7 @@ func printConfigSummary(path string, cfg *config.Config) {
 		shortDuration(cfg.Defaults.AckExtension.Duration),
 		cfg.Defaults.MaxExtensions,
 	)
-	fmt.Println("  note: runtime limits are secondary; usage policy is the primary runaway-spend signal.")
+	fmt.Println("  note: runtime limits are legacy metadata; the product watcher enforces usage policy.")
 	fmt.Println()
 	fmt.Println("usage policy")
 	if cfg.Usage.IsEnabled() {
@@ -1977,7 +1969,7 @@ func usageAdvanced() {
   validate-config   validate config
   status            print config and active run count
   runs              summarize ledger runs
-  ack               acknowledge and extend a run
+  ack               legacy run-ledger acknowledgement
   doctor            check local capabilities`)
 }
 

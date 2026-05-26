@@ -690,6 +690,82 @@ func TestServiceScanRunsUsagePolicy(t *testing.T) {
 	}
 }
 
+func TestServicePolicyEventsMatchDirectUsageWatch(t *testing.T) {
+	now := time.Now().UTC()
+	writeCodexUsageFixtureWithTotal(t, "parity-session", "/tmp/curb-service-parity", now, 1500)
+	path := writeServiceTestConfig(t)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Alerts.LocalNotifications = false
+	cfg.Ledger.Path = filepath.Join(cfg.Service.StateDir, "service.ndjson")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc := newTestService(t, path)
+	var serviceEvents []ledger.Event
+	svc.OnEvent(func(event ledger.Event) {
+		serviceEvents = append(serviceEvents, event)
+	})
+
+	directCfg := config.Clone(cfg)
+	directCfg.Ledger.Path = filepath.Join(cfg.Service.StateDir, "direct.ndjson")
+	directLog, err := ledger.Open(directCfg.Ledger.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := usagewatch.New(directCfg, directLog)
+	direct.SetReader(usagewatch.EventReader(svc.reader.EventsSince))
+	direct.SetCapture(usagewatch.Capture(svc.capture))
+	var directEvents []ledger.Event
+	direct.OnEvent(func(event ledger.Event) {
+		directEvents = append(directEvents, event)
+	})
+
+	if err := svc.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := direct.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := eventTypes(serviceEvents), eventTypes(directEvents); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("service events = %v, direct events = %v", got, want)
+	}
+}
+
+func TestServiceRunUsageDisabledIsVisibilityOnly(t *testing.T) {
+	path := writeServiceTestConfig(t)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := false
+	cfg.Usage.Enabled = &disabled
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc := newTestService(t, path)
+	var events []ledger.Event
+	svc.OnEvent(func(event ledger.Event) {
+		events = append(events, event)
+	})
+
+	if err := svc.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("usage-disabled service emitted policy events: %#v", events)
+	}
+	snapshot, err := svc.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Overview.ActiveAgents != 1 {
+		t.Fatalf("snapshot did not refresh visibility: %#v", snapshot.Overview)
+	}
+}
+
 func TestServiceSessionTurnsUsesLookbackNotPolicyWindow(t *testing.T) {
 	now := time.Now().UTC()
 	writeCodexUsageFixtureWithTotal(t, "history-session", "/tmp/curb-service-history", now.Add(-30*time.Minute), 900)
@@ -1243,6 +1319,14 @@ func ledgerContains(events []ledger.Event, typ string) bool {
 		}
 	}
 	return false
+}
+
+func eventTypes(events []ledger.Event) []string {
+	out := make([]string, 0, len(events))
+	for _, event := range events {
+		out = append(out, event.Type)
+	}
+	return out
 }
 
 func writeCodexUsageFixture(t *testing.T, sessionID, cwd string, at time.Time) {

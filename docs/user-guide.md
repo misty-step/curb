@@ -149,9 +149,11 @@ use the advanced connection drawer to paste the daemon token from
 ## Enforcement Boundary
 
 Curb treats usage as the primary enforcement signal. Runtime limits are still
-available when usage monitoring is disabled, but they are a coarse stuck-process
-signal rather than a good spend signal. Curb currently enforces the latest
-metadata-reported turn size and displays rolling-window activity for context.
+kept in config for legacy run ledgers, but the default watcher does not run a
+separate duration-based kill loop when usage monitoring is disabled. With
+`usage.enabled: false`, `curb watch`, `curb daemon`, and `curb app` all refresh
+visibility only. Curb currently enforces the latest metadata-reported turn size
+and displays rolling-window activity for context.
 
 Curb enforces process agents such as `codex`, `claude`, `claude-code`, and
 Anti-Gravity's `agy` CLI. Desktop applications such as Codex Desktop and Claude
@@ -183,13 +185,16 @@ curb ack <run-id> --config configs/curb.example.yaml --extend 30m --reason "stil
 curb doctor --config configs/curb.example.yaml
 ```
 
-The local UI can also acknowledge usage sessions through the daemon API. Use
-the selected session's Extend button to record a bounded acknowledgement; Curb
-will project the session as acknowledged and usagewatch will not escalate that
-session again until the acknowledgement expires. A session can be acknowledgeable
-even when it is not stoppable, for example in alert mode, when the matched
-process is watch-only, or when Curb cannot safely correlate usage to a live
-process.
+Usage enforcement uses session acknowledgements. Use the selected session's
+Extend button in the local UI to record a bounded acknowledgement; Curb will
+project the session as acknowledged and will not escalate that session again
+until the acknowledgement expires. A session can be acknowledgeable even when
+it is not stoppable, for example in alert mode, when the matched process is
+watch-only, or when Curb cannot safely correlate usage to a live process.
+
+`curb ack <run-id>` is a legacy compatibility command for run-ledger workflows.
+It does not acknowledge usage sessions. Prefer the UI/API session
+acknowledgement path for token-spend warnings and stop-pending sessions.
 
 In enforcement mode, a selected `stop-pending` session may also show a
 destructive Stop button. That button is not an arbitrary PID killer. The UI

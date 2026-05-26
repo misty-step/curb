@@ -187,7 +187,9 @@ Some policies should warn before killing:
 Acknowledgement mechanisms:
 
 - Local menubar app.
-- CLI command: `curb ack <run-id> --extend 30m`.
+- Local dashboard/API session acknowledgement.
+- Legacy CLI command for run-ledger workflows:
+  `curb ack <run-id> --extend 30m`.
 - Local notification action.
 - Webhook callback, later.
 

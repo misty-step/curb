@@ -27,10 +27,11 @@ type Service struct {
 	cache      *SnapshotCache
 	reader     *usage.Reader
 
-	mu     sync.RWMutex
-	cfg    *config.Config
-	usage  *usagewatch.Service
-	scanMu sync.Mutex
+	mu      sync.RWMutex
+	cfg     *config.Config
+	usage   *usagewatch.Service
+	onEvent func(ledger.Event)
+	scanMu  sync.Mutex
 
 	notificationMu sync.Mutex
 	notification   NotificationView
@@ -63,7 +64,13 @@ func New(configPath string, capture CaptureFunc) (*Service, error) {
 }
 
 func (s *Service) Start(ctx context.Context) {
-	_ = s.Scan(ctx)
+	_ = s.Run(ctx)
+}
+
+func (s *Service) Run(ctx context.Context) error {
+	if err := s.Scan(ctx); err != nil {
+		return err
+	}
 	for {
 		interval := s.currentConfig().Usage.ScanInterval.Duration
 		if interval <= 0 {
@@ -73,10 +80,19 @@ func (s *Service) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return
+			return nil
 		case <-timer.C:
 			_ = s.Scan(ctx)
 		}
+	}
+}
+
+func (s *Service) OnEvent(fn func(ledger.Event)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onEvent = fn
+	if s.usage != nil {
+		s.usage.OnEvent(fn)
 	}
 }
 
@@ -239,5 +255,6 @@ func (s *Service) buildUsageWatch(cfg *config.Config) (*usagewatch.Service, *led
 	usageService.SetNotify(usagewatch.Notify(s.notify))
 	usageService.SetTerminate(usagewatch.Terminate(s.terminate))
 	usageService.SetReader(usagewatch.EventReader(s.reader.EventsSince))
+	usageService.OnEvent(s.onEvent)
 	return usageService, log, nil
 }

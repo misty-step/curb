@@ -1,7 +1,7 @@
 ---
 id: 007-unify-enforcement-runtime
 title: Unify Curb enforcement on service and usagewatch
-status: ready
+status: done
 lifecycle_stage: Policy/Eval
 acceptance:
     - `curb daemon`, `curb app`, and `curb watch` run the same policy loop when usage monitoring is enabled.
@@ -110,11 +110,21 @@ run-based ack commands.
 
 ## Acceptance Evidence
 
-- Table-driven test: same config + fixtures → same ledger events from watch
-  runner and service runner.
-- Manual smoke: `curb daemon` warns/kills correlated usage the same way
-  `curb watch` does under enforcement preset.
-- No regression in visibility/alert modes terminating processes.
+- `TestServicePolicyEventsMatchDirectUsageWatch`: same config + usage fixtures
+  produce the same policy ledger event types through the service runner and the
+  direct usagewatch runner.
+- `TestServiceRunUsageDisabledIsVisibilityOnly`: usage-disabled service scans
+  refresh visibility without emitting policy events, matching daemon/app/watch
+  behavior.
+- `curb watch` now delegates to `internal/service.Run`; daemon/app already run
+  `internal/service.Start`, which wraps the same runner.
+- Session acknowledgement remains the active usage path through the local UI/API;
+  `curb ack <run-id>` is documented as legacy run-ledger compatibility.
+- Evidence commands passed:
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go build -o /tmp/curb-darwin ./cmd/curb`
+  - `/tmp/curb-darwin validate-config configs/curb.example.yaml`
 
 ## Risks and Rollback
 
