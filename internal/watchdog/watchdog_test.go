@@ -95,6 +95,138 @@ func TestMatchRejectsOpaqueProcessEvenWithParentEvidence(t *testing.T) {
 	}
 }
 
+func TestDefaultAgentMatchersDistinguishDesktopRootsFromWorkers(t *testing.T) {
+	start := time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC)
+	cfg := defaultMatcherConfig()
+	snap := &platform.Snapshot{
+		At:       start.Add(time.Hour),
+		Platform: "darwin",
+		Processes: map[int32]platform.Process{
+			10: {
+				PID:       10,
+				Name:      "Codex",
+				Exe:       "/Applications/Codex.app/Contents/MacOS/Codex",
+				Cmdline:   "/Applications/Codex.app/Contents/MacOS/Codex",
+				CWD:       "/Users/tester/Development/curb",
+				Username:  "tester",
+				Create:    start,
+				StartedOK: true,
+			},
+			11: {
+				PID:       11,
+				PPID:      10,
+				Name:      "codex",
+				Exe:       "/Applications/Codex.app/Contents/Resources/codex",
+				Cmdline:   "/Applications/Codex.app/Contents/Resources/codex app-server --listen stdio://",
+				CWD:       "/Users/tester/.codex/worktrees/6089/gradient",
+				Username:  "tester",
+				Create:    start.Add(time.Minute),
+				StartedOK: true,
+			},
+			20: {
+				PID:       20,
+				Name:      "Claude",
+				Exe:       "/Applications/Claude.app/Contents/MacOS/Claude",
+				Cmdline:   "/Applications/Claude.app/Contents/MacOS/Claude",
+				CWD:       "/Users/tester",
+				Username:  "tester",
+				Create:    start,
+				StartedOK: true,
+			},
+			21: {
+				PID:       21,
+				PPID:      1,
+				Name:      "2.1.143",
+				Exe:       "/Users/tester/.claude/local/node_modules/.bin/claude",
+				Cmdline:   "/Users/tester/.claude/local/node_modules/.bin/claude --dangerously-skip-permissions",
+				CWD:       "/Users/tester/Development/daybook",
+				Username:  "tester",
+				Create:    start.Add(2 * time.Minute),
+				StartedOK: true,
+			},
+			30: {
+				PID:       30,
+				Name:      "helper",
+				Exe:       "/usr/bin/helper",
+				Cmdline:   "helper printing claude-code in logs",
+				CWD:       "/tmp",
+				Username:  "tester",
+				Create:    start.Add(3 * time.Minute),
+				StartedOK: true,
+			},
+			31: {
+				PID:       31,
+				Name:      "Cursor Helper",
+				Exe:       "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper",
+				Cmdline:   "Cursor Helper: mcp-process CODEX_DIR=/Users/tester/Development/codex",
+				CWD:       "/",
+				Username:  "tester",
+				Create:    start.Add(4 * time.Minute),
+				StartedOK: true,
+			},
+		},
+		Children: map[int32][]int32{10: {11}, 1: {21}},
+	}
+
+	matches := New(cfg, nil).Match(snap)
+	requireMatchedAgentPID(t, matches, "codex-desktop-worker", 11)
+	requireMatchedAgentPID(t, matches, "claude-code", 21)
+	requireNoMatchForPID(t, matches, 10)
+	requireNoMatchForPID(t, matches, 20)
+	requireNoMatchForPID(t, matches, 30)
+	requireNoMatchForPID(t, matches, 31)
+	for _, match := range matches {
+		if match.Process.PID != 11 && match.Process.PID != 21 {
+			continue
+		}
+		requireEvidencePrefix(t, match.Evidence, "pid:")
+		requireEvidencePrefix(t, match.Evidence, "started_at:")
+		requireEvidencePrefix(t, match.Evidence, "user:")
+		requireEvidencePrefix(t, match.Evidence, "cwd:")
+		requireEvidencePrefix(t, match.Evidence, "executable_path:")
+	}
+}
+
+func TestAlertModeNeverTerminatesKillableProcess(t *testing.T) {
+	dir := t.TempDir()
+	cfg := lifecycleConfig(dir, config.ModeAlert)
+	l, err := ledger.Open(cfg.Ledger.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	now := start.Add(3 * time.Second)
+	snap := syntheticSnapshot(start)
+	terminated := false
+
+	service := New(cfg, l)
+	service.capture = func(context.Context) (*platform.Snapshot, error) { return snap, nil }
+	service.notify = func(string, string) error { return nil }
+	service.terminate = func(context.Context, platform.TerminationTarget, time.Duration) platform.TerminationResult {
+		terminated = true
+		return platform.TerminationResult{SoftSignaled: []int32{4242}}
+	}
+	service.newRunID = func() string { return "run_alert" }
+	service.now = func() time.Time { return now }
+
+	if err := service.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = start.Add(5 * time.Second)
+	if err := service.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if terminated {
+		t.Fatal("alert mode terminated a process")
+	}
+	events, err := ledger.Read(cfg.Ledger.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireEvent(t, events, "policy_warning")
+	requireEvent(t, events, "would_terminate")
+}
+
 func TestVisibilityLifecycleWarningAckAndWouldTerminate(t *testing.T) {
 	dir := t.TempDir()
 	cfg := lifecycleConfig(dir, config.ModeVisibility)
@@ -365,6 +497,12 @@ func TestScoreAvoidsClaudeMentionFalsePositive(t *testing.T) {
 		t.Fatalf("observer command matched as Claude Code: confidence=%d", confidence)
 	}
 
+	helper := platform.Process{PID: 3, Name: "helper", Exe: "/usr/bin/helper", Cmdline: "helper printing claude-code in logs"}
+	confidence, _ = score(match, helper, snap)
+	if confidence != 0 {
+		t.Fatalf("helper mention matched as Claude Code: confidence=%d", confidence)
+	}
+
 	snap.Processes[10] = platform.Process{PID: 10, Name: "codex", Cmdline: "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"}
 	codexDispatched := platform.Process{PID: 11, PPID: 10, Name: "claude", Cmdline: "claude -p --dangerously-skip-permissions"}
 	confidence, _ = score(match, codexDispatched, snap)
@@ -437,6 +575,64 @@ func lifecycleConfig(dir string, mode config.Mode) *config.Config {
 	}
 }
 
+func defaultMatcherConfig() *config.Config {
+	return &config.Config{
+		Version: 1,
+		Mode:    config.ModeVisibility,
+		Service: config.ServiceConfig{MinConfidence: 50},
+		Defaults: config.Policy{
+			WarnAfter: config.Duration{Duration: time.Minute},
+			KillAfter: config.Duration{Duration: 2 * time.Minute},
+		},
+		Agents: []config.Agent{
+			{
+				ID:     "codex-desktop-worker",
+				Label:  "Codex Desktop Worker",
+				Family: "codex",
+				Kind:   config.AgentKindProcess,
+				Match: config.Match{
+					ProcessNames:        []string{"codex"},
+					RequireCommandRegex: []string{"\\bapp-server\\b", "--listen\\s+stdio://"},
+					CommandRegex:        []string{"\\bapp-server\\b", "--listen\\s+stdio://"},
+				},
+			},
+			{
+				ID:     "codex-cli",
+				Label:  "Codex CLI",
+				Family: "codex",
+				Kind:   config.AgentKindProcess,
+				Match: config.Match{
+					ProcessNames:        []string{"codex"},
+					CommandRegex:        []string{"(^|/|\\\\)codex(\\.js|\\.cmd|\\.exe)?(\\s|$)"},
+					ExcludeCommandRegex: []string{"/Applications/Codex.app"},
+				},
+			},
+			{
+				ID:     "claude-code",
+				Label:  "Claude Code",
+				Family: "claude",
+				Kind:   config.AgentKindProcess,
+				Match: config.Match{
+					ProcessNames:        []string{"claude", "claude-code"},
+					CommandRegex:        []string{"(^|/|\\\\)claude(-code)?(\\.cmd|\\.exe)?(\\s|$)"},
+					ExcludeCommandRegex: []string{"/Applications/Claude.app"},
+					ExcludeParentRegex:  []string{"/Applications/Codex\\.app/.+\\bapp-server\\b"},
+				},
+			},
+			{
+				ID:     "antigravity-cli",
+				Label:  "Anti-Gravity CLI",
+				Family: "antigravity",
+				Kind:   config.AgentKindProcess,
+				Match: config.Match{
+					ProcessNames: []string{"agy"},
+					CommandRegex: []string{"(^|/|\\\\)agy(\\.cmd|\\.exe)?(\\s|$)"},
+				},
+			},
+		},
+	}
+}
+
 func syntheticSnapshot(start time.Time) *platform.Snapshot {
 	return &platform.Snapshot{
 		At:       start,
@@ -455,6 +651,35 @@ func syntheticSnapshot(start time.Time) *platform.Snapshot {
 		},
 		Children: map[int32][]int32{1: {4242}},
 	}
+}
+
+func requireMatchedAgentPID(t *testing.T, matches []Match, agentID string, pid int32) {
+	t.Helper()
+	for _, match := range matches {
+		if match.Agent.ID == agentID && match.Process.PID == pid {
+			return
+		}
+	}
+	t.Fatalf("missing %s pid=%d in %#v", agentID, pid, matches)
+}
+
+func requireNoMatchForPID(t *testing.T, matches []Match, pid int32) {
+	t.Helper()
+	for _, match := range matches {
+		if match.Process.PID == pid {
+			t.Fatalf("unexpected match for pid=%d: %#v", pid, match)
+		}
+	}
+}
+
+func requireEvidencePrefix(t *testing.T, evidence []string, prefix string) {
+	t.Helper()
+	for _, item := range evidence {
+		if strings.HasPrefix(item, prefix) {
+			return
+		}
+	}
+	t.Fatalf("missing evidence prefix %q in %#v", prefix, evidence)
 }
 
 func requireEvent(t *testing.T, events []ledger.Event, eventType string) {

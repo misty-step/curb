@@ -145,13 +145,79 @@ func TestCLIScanJSONUsesRealProcessTable(t *testing.T) {
 	dir := t.TempDir()
 	configPath := writeTestConfig(t, dir)
 	out, err := captureStdout(func() error {
-		return run([]string{"curb", "scan", "--config", configPath, "--json"})
+		return runWithDeps(
+			[]string{"curb", "scan", "--config", configPath, "--json"},
+			func(context.Context) (*platform.Snapshot, error) {
+				now := time.Now().Add(-time.Minute)
+				return &platform.Snapshot{
+					At:       now,
+					Platform: "test",
+					Processes: map[int32]platform.Process{
+						42: {
+							PID:       42,
+							Name:      "sleep",
+							Exe:       "/bin/sleep",
+							Cmdline:   "sleep 60 SECRET_TOKEN=do-not-print",
+							CWD:       dir,
+							Username:  "tester",
+							Create:    now,
+							StartedOK: true,
+						},
+					},
+					Children: map[int32][]int32{},
+				}, nil
+			},
+			func(string, string) error { return nil },
+		)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(out) == "" {
 		t.Fatal("expected JSON output")
+	}
+	if strings.Contains(out, "SECRET_TOKEN") || strings.Contains(out, "sleep 60") || !strings.Contains(out, "redacted") {
+		t.Fatalf("scan JSON leaked command line: %q", out)
+	}
+}
+
+func TestCLIScanTextShowsMatchEvidence(t *testing.T) {
+	dir := t.TempDir()
+	configPath := writeTestConfig(t, dir)
+	now := time.Now().Add(-time.Minute)
+	out, err := captureStdout(func() error {
+		return runWithDeps(
+			[]string{"curb", "scan", "--config", configPath},
+			func(context.Context) (*platform.Snapshot, error) {
+				return &platform.Snapshot{
+					At:       now,
+					Platform: "test",
+					Processes: map[int32]platform.Process{
+						42: {
+							PID:       42,
+							PPID:      1,
+							Name:      "sleep",
+							Exe:       "/bin/sleep",
+							Cmdline:   "sleep 60",
+							CWD:       dir,
+							Username:  "tester",
+							Create:    now,
+							StartedOK: true,
+						},
+					},
+					Children: map[int32][]int32{1: {42}},
+				}, nil
+			},
+			func(string, string) error { return nil },
+		)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sleep", "target=enforceable", "evidence:", "process_name:sleep", "pid:42", "started_at:", "user:tester", "cwd:" + dir} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("scan output missing %q:\n%s", want, out)
+		}
 	}
 }
 

@@ -690,12 +690,30 @@ func cmdScan(args []string, capture processCapture) error {
 	}
 	matches := service.Match(snap)
 	if *jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(matches)
+		return json.NewEncoder(os.Stdout).Encode(redactedMatches(matches))
 	}
 	for _, match := range matches {
-		fmt.Printf("%-18s pid=%-7d confidence=%-3d name=%s exe=%s\n", match.Agent.ID, match.Process.PID, match.Confidence, match.Process.Name, match.Process.Exe)
+		target := "enforceable"
+		if !match.Agent.TerminationAllowed() {
+			target = "watch-only"
+		}
+		fmt.Printf("%-22s pid=%-7d confidence=%-3d target=%-11s name=%s exe=%s\n", match.Agent.ID, match.Process.PID, match.Confidence, target, match.Process.Name, match.Process.Exe)
+		if len(match.Evidence) > 0 {
+			fmt.Printf("  evidence: %s\n", strings.Join(match.Evidence, ", "))
+		}
 	}
 	return nil
+}
+
+func redactedMatches(matches []watchdog.Match) []watchdog.Match {
+	out := make([]watchdog.Match, len(matches))
+	for i, match := range matches {
+		out[i] = match
+		if out[i].Process.Cmdline != "" {
+			out[i].Process.Cmdline = "<redacted>"
+		}
+	}
+	return out
 }
 
 func cmdValidate(args []string) error {

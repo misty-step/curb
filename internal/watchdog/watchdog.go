@@ -153,7 +153,7 @@ func (s *Service) Scan(ctx context.Context) error {
 					"ppid":        run.Root.PPID,
 					"name":        run.Root.Name,
 					"exe":         run.Root.Exe,
-					"cmdline":     run.Root.Cmdline,
+					"cmdline":     redactedCommandLine(run.Root.Cmdline),
 					"bundle_id":   run.Root.BundleID,
 					"team_id":     run.Root.TeamID,
 					"confidence":  match.Confidence,
@@ -209,6 +209,7 @@ func (s *Service) Match(snap *platform.Snapshot) []Match {
 			if confidence < s.cfg.Service.MinConfidence {
 				continue
 			}
+			evidence = append(evidence, identityEvidence(proc, snap)...)
 			matches = append(matches, Match{
 				Agent:      agent,
 				Policy:     s.cfg.PolicyFor(agent),
@@ -497,7 +498,7 @@ func score(match config.Match, proc platform.Process, snap *platform.Snapshot) (
 	}
 	for _, raw := range match.CommandRegex {
 		re := regexp.MustCompile(raw)
-		if re.MatchString(proc.Cmdline) {
+		if re.MatchString(proc.Cmdline) && commandSignalMatchesInvocation(raw, match, proc) {
 			add(55, "command_regex:"+raw)
 		}
 	}
@@ -505,6 +506,104 @@ func score(match config.Match, proc platform.Process, snap *platform.Snapshot) (
 		add(45, "parent_process_name:"+parent.Name)
 	}
 	return score, evidence
+}
+
+func identityEvidence(proc platform.Process, snap *platform.Snapshot) []string {
+	evidence := []string{fmt.Sprintf("pid:%d", proc.PID)}
+	if proc.PPID != 0 {
+		evidence = append(evidence, fmt.Sprintf("ppid:%d", proc.PPID))
+		if parent, ok := snap.Processes[proc.PPID]; ok {
+			if parent.Name != "" {
+				evidence = append(evidence, "parent_name:"+parent.Name)
+			}
+			if parent.Exe != "" {
+				evidence = append(evidence, "parent_path:"+parent.Exe)
+			}
+		}
+	}
+	if proc.Exe != "" {
+		evidence = append(evidence, "executable_path:"+proc.Exe)
+	}
+	if proc.CWD != "" {
+		evidence = append(evidence, "cwd:"+proc.CWD)
+	}
+	if proc.Username != "" {
+		evidence = append(evidence, "user:"+proc.Username)
+	}
+	if proc.StartedOK {
+		evidence = append(evidence, "started_at:"+proc.Create.UTC().Format(time.RFC3339Nano))
+	}
+	return evidence
+}
+
+func commandSignalMatchesInvocation(raw string, match config.Match, proc platform.Process) bool {
+	if containsFold(match.ProcessNames, proc.Name) || containsFold(match.ProcessNames, executableName(proc.Exe)) {
+		return true
+	}
+	re := regexp.MustCompile(raw)
+	for _, signal := range invocationSignals(proc.Cmdline) {
+		if re.MatchString(signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func invocationSignals(cmdline string) []string {
+	fields := strings.Fields(cmdline)
+	if len(fields) == 0 {
+		return nil
+	}
+	var tokens []string
+	for _, field := range fields {
+		if field == "env" || strings.HasPrefix(field, "-") || looksLikeEnvAssignment(field) {
+			continue
+		}
+		tokens = append(tokens, field)
+		if len(tokens) >= 2 {
+			break
+		}
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	out := append([]string(nil), tokens...)
+	if len(tokens) > 1 {
+		out = append(out, strings.Join(tokens, " "))
+	}
+	return out
+}
+
+func looksLikeEnvAssignment(token string) bool {
+	eq := strings.IndexByte(token, '=')
+	if eq <= 0 {
+		return false
+	}
+	name := token[:eq]
+	for _, r := range name {
+		if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func executableName(path string) string {
+	path = strings.TrimRight(path, `/\`)
+	if path == "" {
+		return ""
+	}
+	if idx := strings.LastIndexAny(path, `/\`); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
+}
+
+func redactedCommandLine(cmdline string) string {
+	if cmdline == "" {
+		return ""
+	}
+	return "<redacted>"
 }
 
 func pathMatches(patterns []string, path string) bool {
