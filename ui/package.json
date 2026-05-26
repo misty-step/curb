@@ -7,6 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
+    "smoke": "node scripts/smoke-dashboard.mjs",
     "check": "npm run typecheck && npm run lint && npm test -- --run && npm run build",
     "build": "tsc && vite build",
     "test": "vitest run",

@@ -2,7 +2,7 @@
 id: 013-dashboard-read-model-and-ui-decomposition
 title: Decompose the dashboard around worker and usage read models
 priority: P1
-status: ready
+status: done
 lifecycle_stage: Context
 acceptance:
     - `ui/src/App.tsx` is split into focused components for operator summary, workers, sessions, turns, policy, health, alerts, and details.
@@ -10,10 +10,10 @@ acceptance:
     - The first viewport answers: who is alive, who is spending now, what is unmatched, what needs attention, and what Curb will do.
     - Browser smoke tests cover desktop and narrow viewport rendering without overlapping or misleading state labels.
 evidence_required:
-    - cd ui && npm test -- --run
-    - cd ui && npm run build
-    - scripts/build-ui.sh --check
-    - playwright smoke against http://127.0.0.1:8765/
+    - `cd ui && npm test -- --run` (2026-05-26: 36 tests passed)
+    - `cd ui && npm run build` (2026-05-26: Vite production build passed)
+    - `scripts/build-ui.sh --check` (2026-05-26: embed check ok)
+    - `cd ui && npm run smoke` against `http://127.0.0.1:8765/` (2026-05-26: desktop and narrow Playwright smoke passed)
 ---
 
 # Context Packet: Decompose the dashboard around worker and usage read models
@@ -77,3 +77,12 @@ The dashboard makes live workers, active token spend, unmatched usage, and polic
 
 Recent dashboard confusion came from React inferring product state from raw
 session fields. A tested read-model layer prevents that class of bug.
+
+## Completion
+
+- Extracted dashboard selectors into `ui/src/readModel.ts` and covered active,
+  alive, unmatched, grouped, and correlation selectors in `ui/src/readModel.test.ts`.
+- Split the React dashboard surface out of `ui/src/App.tsx` into
+  `ui/src/components/dashboard.tsx`; `App.tsx` now owns API state and actions.
+- Added `ui/scripts/smoke-dashboard.mjs` and `npm run smoke` to exercise the
+  first viewport at desktop and narrow widths against the embedded dashboard.

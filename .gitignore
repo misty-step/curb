@@ -10,3 +10,4 @@ dist/
 !internal/web/dist/
 !internal/web/dist/**
 artifacts/qa/
+ui/artifacts/
