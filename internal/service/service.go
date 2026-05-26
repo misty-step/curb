@@ -133,6 +133,10 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	return s.cache.Current(ctx)
 }
 
+func (s *Service) SnapshotSince(ctx context.Context, since time.Time) (Snapshot, error) {
+	return s.buildSnapshotSince(ctx, since)
+}
+
 func (s *Service) SessionTurns(_ context.Context, key string, query TurnQuery) ([]TurnView, error) {
 	cfg := s.currentConfig()
 	lookbackStart := time.Now().Add(-cfg.Usage.Lookback.Duration)
@@ -217,7 +221,12 @@ func (s *Service) StateDir() string {
 
 func (s *Service) buildSnapshot(ctx context.Context) (Snapshot, error) {
 	cfg := s.currentConfig()
-	events, sources, err := s.reader.EventsSince(time.Now().Add(-cfg.Usage.Lookback.Duration))
+	return s.buildSnapshotSince(ctx, time.Now().Add(-cfg.Usage.Lookback.Duration))
+}
+
+func (s *Service) buildSnapshotSince(ctx context.Context, since time.Time) (Snapshot, error) {
+	cfg := s.currentConfig()
+	events, sources, err := s.reader.EventsSince(since)
 	if err != nil {
 		return Snapshot{}, err
 	}

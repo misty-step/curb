@@ -1,7 +1,7 @@
 ---
 id: 009-route-cli-through-service-boundary
 title: Thin CLI over the service application boundary
-status: ready
+status: done
 lifecycle_stage: Context
 acceptance:
     - `cmd/curb/main.go` shrinks materially; command handlers delegate to `internal/service` or small `cmd/curb/*` files for composition only.
@@ -91,3 +91,23 @@ renderers consume `service.Snapshot` and related views only.
 ## Public-Safe Risk
 
 None.
+
+## What Was Built
+
+- Reduced `cmd/curb/main.go` from roughly 1,985 lines to 120 lines by moving
+  daemon, watch, usage, inspection, config, and formatting code into focused
+  `cmd/curb/*_cli.go` files.
+- Routed `curb dashboard` through `internal/service.SnapshotSince` instead of
+  rebuilding the service read model in the CLI.
+- Kept `curb watch` on `internal/service.Run` from the enforcement unification
+  slice.
+- Fixed `curb usage` to return usage-reader errors rather than printing a
+  partial report.
+- Added CLI coverage that verifies `curb usage --config missing.yaml` surfaces
+  the config load error.
+
+## Acceptance Evidence
+
+- `go test ./...`
+- `go test -race ./...`
+- `go build -o /tmp/curb-darwin ./cmd/curb`

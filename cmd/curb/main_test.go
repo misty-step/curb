@@ -221,6 +221,13 @@ func TestCLIScanTextShowsMatchEvidence(t *testing.T) {
 	}
 }
 
+func TestCLIUsageSurfacesConfigLoadErrors(t *testing.T) {
+	err := run([]string{"curb", "usage", "--config", filepath.Join(t.TempDir(), "missing.yaml")})
+	if err == nil || !strings.Contains(err.Error(), "missing.yaml") {
+		t.Fatalf("usage config error = %v", err)
+	}
+}
+
 func TestCLIDashboardJSONUsesUIReadModel(t *testing.T) {
 	dir := t.TempDir()
 	configPath := writeTestConfig(t, dir)
