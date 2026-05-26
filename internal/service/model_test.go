@@ -488,6 +488,61 @@ func TestBuildSnapshotDoesNotCountUncorrelatedUsageAsActiveLiveSession(t *testin
 	}
 }
 
+func TestBuildSnapshotCollapsesMultipleSessionsOntoOneWorker(t *testing.T) {
+	now := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
+	events := []usage.Event{
+		{Provider: "codex", SessionID: "first", CWD: "/work/repo", Timestamp: now, Total: 12_000},
+		{Provider: "codex", SessionID: "second", CWD: "/work/repo", Timestamp: now.Add(-time.Minute), Total: 10_000},
+	}
+	snap := &platform.Snapshot{
+		At:       now,
+		Platform: "test",
+		Processes: map[int32]platform.Process{
+			100: {PID: 100, Name: "codex", CWD: "/work/repo", Cmdline: "codex", Create: now.Add(-10 * time.Minute), StartedOK: true},
+		},
+		Children: map[int32][]int32{},
+	}
+
+	view := BuildSnapshot(testConfig(), snap, events, nil, now)
+
+	if view.Overview.ActiveAgents != 1 || len(view.Agents) != 1 || len(view.Sessions) != 2 {
+		t.Fatalf("counts: overview=%#v agents=%d sessions=%d", view.Overview, len(view.Agents), len(view.Sessions))
+	}
+	if view.Agents[0].State != "spending" || view.Agents[0].PID != 100 {
+		t.Fatalf("agent = %#v", view.Agents[0])
+	}
+	for _, session := range view.Sessions {
+		if session.CorrelatedPID != 100 || session.CorrelatedAgentID != "codex-test" {
+			t.Fatalf("session correlation = %#v", session)
+		}
+	}
+}
+
+func TestBuildSnapshotDoesNotInventLiveClaudeRowFromUncorrelatedUsage(t *testing.T) {
+	now := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
+	events := []usage.Event{
+		{Provider: "claude", SessionID: "claude-log", CWD: "/work/no-process", Timestamp: now, Total: 12_000},
+	}
+	snap := &platform.Snapshot{
+		At:       now,
+		Platform: "test",
+		Processes: map[int32]platform.Process{
+			100: {PID: 100, Name: "codex", CWD: "/work/repo", Cmdline: "codex", Create: now.Add(-10 * time.Minute), StartedOK: true},
+		},
+		Children: map[int32][]int32{},
+	}
+
+	view := BuildSnapshot(testConfig(), snap, events, nil, now)
+
+	if len(view.Agents) != 1 || view.Agents[0].Provider != "codex" {
+		t.Fatalf("agents = %#v", view.Agents)
+	}
+	session := requireSession(t, view.Sessions, "claude-log")
+	if session.CorrelatedPID != 0 || session.Provider != "claude" || session.ProcessState != "no-process" {
+		t.Fatalf("session = %#v", session)
+	}
+}
+
 func TestBuildSnapshotJSONOmitsZeroLastUsageAt(t *testing.T) {
 	now := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
 	view := BuildSnapshot(testConfig(), emptySnapshot(now), []usage.Event{{

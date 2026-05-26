@@ -97,3 +97,14 @@ Every Curb surface shows the same live workers, usage sessions, token turns, and
 
 - Carmack and Grug independently ranked this as the first shippable slice.
 - This packet intentionally absorbs the first phase of the old `008-consolidate-session-process-correlation` ticket.
+
+## Progress
+
+- 2026-05-26: `usagewatch.BestSessionForMatch` now owns best-session selection
+  for a process match, and `cmd/curb` plus `internal/service` use it instead of
+  duplicate CWD-prefix loops.
+- 2026-05-26: Service snapshot tests now cover multi-session/single-worker
+  collapse and uncorrelated Claude logs without a live Claude worker row.
+
+Remaining before close: route more CLI views through service-owned snapshots and
+prove `curb dashboard --json` / `/v1/snapshot` parity against the same fixture.
