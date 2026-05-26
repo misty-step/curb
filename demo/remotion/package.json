@@ -1,0 +1,22 @@
+{
+  "name": "curb-demo-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "remotion preview src/index.ts",
+    "still": "remotion still src/index.ts CurbDemo artifacts/curb-demo-still.png",
+    "render": "remotion render src/index.ts CurbDemo artifacts/curb-demo.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.394",
+    "remotion": "^4.0.394",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3"
+  }
+}

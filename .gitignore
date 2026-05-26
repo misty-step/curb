@@ -11,3 +11,6 @@ dist/
 !internal/web/dist/**
 artifacts/qa/
 ui/artifacts/
+demo/006/artifacts/*
+!demo/006/artifacts/.gitkeep
+demo/remotion/artifacts/

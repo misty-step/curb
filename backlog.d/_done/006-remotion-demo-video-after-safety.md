@@ -1,7 +1,7 @@
 ---
 id: 006-remotion-demo-video-after-safety
 title: Produce a Remotion demo after Curb safety semantics are solid
-status: ready
+status: done
 lifecycle_stage: Feedback
 acceptance:
     - A short demo script exists showing observe, warn, acknowledge, and enforcement behavior without risking desktop app termination.
@@ -9,9 +9,9 @@ acceptance:
     - Remotion source or storyboard can render a buyer-facing walkthrough once process identity and alert UX are stable.
     - The demo references the evidence ledger and explains what Curb does not capture.
 evidence_required:
-    - go test ./...
-    - demo script dry-run
-    - rendered local preview or storyboard artifact
+    - `go test ./...` (2026-05-26: passed)
+    - `bash demo/006/script/run-backlog-006-demo.sh --dry-run` (2026-05-26: passed)
+    - storyboard artifact: `demo/006/storyboard.md` and `demo/006/storyboard.html`
 ---
 
 ## Problem
@@ -35,3 +35,11 @@ alert semantics are trustworthy risks polishing the wrong behavior.
   implementation driver.
 - Avoid real prompt, response, screenshot, or keystroke capture in demo assets.
 - Keep the video suitable for an enterprise AI-ops/control conversation.
+
+## Completion
+
+- Added a controlled demo runbook and dry-run script under `demo/006/script`.
+- Added a rendered storyboard artifact in `demo/006/storyboard.html` and source
+  storyboard in `demo/006/storyboard.md`.
+- Added Remotion source scaffold under `demo/remotion` for the buyer-facing
+  walkthrough without coupling it to runtime behavior.

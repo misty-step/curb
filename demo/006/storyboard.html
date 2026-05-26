@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Curb Demo Storyboard</title>
+    <style>
+      body {
+        margin: 0;
+        font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172033;
+        background: #f5f7fb;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 48px 24px 72px;
+      }
+      h1 {
+        font-size: 44px;
+        margin: 0 0 10px;
+      }
+      .subtitle {
+        color: #55657d;
+        margin: 0 0 32px;
+      }
+      section {
+        background: #fff;
+        border: 1px solid #d7e1ee;
+        border-radius: 10px;
+        padding: 24px;
+        margin: 16px 0;
+      }
+      h2 {
+        margin-top: 0;
+      }
+      .badge {
+        display: inline-block;
+        color: #006b62;
+        background: #e7fbf5;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-weight: 700;
+      }
+      code {
+        background: #edf2f8;
+        padding: 2px 5px;
+        border-radius: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Curb Demo Storyboard</h1>
+      <p class="subtitle">Controlled walkthrough using a synthetic worker, not live model sessions.</p>
+
+      <section>
+        <span class="badge">Observe</span>
+        <h2>Curb starts in visibility mode</h2>
+        <p>Run <code>curb validate-config</code> and <code>curb scan --json</code> against the isolated demo config.</p>
+      </section>
+
+      <section>
+        <span class="badge">Warn</span>
+        <h2>A synthetic worker crosses the warning line</h2>
+        <p>Alert mode records and surfaces a warning while preserving the invariant that it never terminates processes.</p>
+      </section>
+
+      <section>
+        <span class="badge">Acknowledge</span>
+        <h2>The operator extends the run</h2>
+        <p>The acknowledgement is explicit, bounded, and visible in the evidence ledger.</p>
+      </section>
+
+      <section>
+        <span class="badge">Enforce</span>
+        <h2>Only the controlled worker is stopped</h2>
+        <p>Curb revalidates PID and start-time identity before terminating the synthetic process tree.</p>
+      </section>
+
+      <section>
+        <span class="badge">Privacy</span>
+        <h2>Evidence without content capture</h2>
+        <p>Curb records process and usage metadata, policy events, and ledger hashes. It does not record prompts, responses, screenshots, keystrokes, or file contents.</p>
+      </section>
+    </main>
+  </body>
+</html>
