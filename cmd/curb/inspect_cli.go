@@ -98,6 +98,17 @@ func cmdStatus(args []string) error {
 	active := activeRuns(events)
 	printConfigSummary(*configPath, cfg)
 	fmt.Printf("\nactive runs: %d\n", len(active))
+	if len(active) > 0 {
+		var runs []runSummary
+		for _, run := range active {
+			runs = append(runs, run)
+		}
+		sort.Slice(runs, func(i, j int) bool { return runs[i].Started.After(runs[j].Started) })
+		fmt.Printf("%-16s %-7s %s\n", "AGENT", "PID", "ACTION")
+		for _, run := range runs {
+			fmt.Printf("%-16s %-7v %s\n", run.AgentID, run.PID, run.Action)
+		}
+	}
 	fmt.Printf("ledger: %s\n", cfg.Ledger.Path)
 	return nil
 }
@@ -139,13 +150,13 @@ func cmdRuns(args []string) error {
 		fmt.Println("no runs")
 		return nil
 	}
-	fmt.Printf("%-10s %-16s %-7s %-10s %-8s %s\n", "STATE", "AGENT", "PID", "RUNTIME", "STARTED", "RUN")
+	fmt.Printf("%-10s %-16s %-7s %-10s %-8s %-18s %s\n", "STATE", "AGENT", "PID", "RUNTIME", "STARTED", "ACTION", "RUN")
 	for _, run := range runs {
 		state := "active"
 		if run.Ended {
 			state = "ended"
 		}
-		fmt.Printf("%-10s %-16s %-7v %-10s %-8s %s\n", state, run.AgentID, run.PID, shortDuration(run.Elapsed), run.Started.Local().Format("15:04:05"), run.RunID)
+		fmt.Printf("%-10s %-16s %-7v %-10s %-8s %-18s %s\n", state, run.AgentID, run.PID, shortDuration(run.Elapsed), run.Started.Local().Format("15:04:05"), run.Action, run.RunID)
 	}
 	return nil
 }
@@ -263,6 +274,7 @@ type runSummary struct {
 	Elapsed time.Duration `json:"elapsed"`
 	PID     any           `json:"pid,omitempty"`
 	Ended   bool          `json:"ended"`
+	Action  string        `json:"action"`
 }
 
 func activeRuns(events []ledger.Event) map[string]runSummary {
@@ -297,6 +309,9 @@ func summarizeRuns(events []ledger.Event) []runSummary {
 			run.Last = event.Time
 		}
 		run.Elapsed = time.Since(run.Started)
+		if action := runAction(event.Type); action != "" {
+			run.Action = action
+		}
 		if pid, ok := event.Data["pid"]; ok {
 			run.PID = pid
 		}
@@ -312,6 +327,33 @@ func summarizeRuns(events []ledger.Event) []runSummary {
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].Started.After(runs[j].Started) })
 	return runs
+}
+
+func runAction(eventType string) string {
+	switch eventType {
+	case "run_started", "run_heartbeat":
+		return "monitor"
+	case "policy_warning":
+		return "review or ack"
+	case "would_terminate":
+		return "would stop"
+	case "watch_only":
+		return "watch-only"
+	case "grace_started":
+		return "ack now"
+	case "termination_started":
+		return "stopping"
+	case "termination_completed":
+		return "stopped"
+	case "termination_failed":
+		return "review failure"
+	case "ack_received":
+		return "extended"
+	case "run_stopped":
+		return "ended"
+	default:
+		return ""
+	}
 }
 
 func compactRuns(runs []runSummary) []runSummary {

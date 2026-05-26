@@ -44,6 +44,9 @@ func TestCLIValidateStatusRunsAndAck(t *testing.T) {
 	if err := l.Append(ledger.Event{Type: "run_started", RunID: "run_cli", AgentID: "sleep", Data: map[string]any{"pid": 1234}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := l.Append(ledger.Event{Type: "policy_warning", RunID: "run_cli", AgentID: "sleep", Message: "warning", Data: map[string]any{"pid": 1234}}); err != nil {
+		t.Fatal(err)
+	}
 
 	out, err = captureStdout(func() error {
 		return run([]string{"curb", "status", "--config", configPath})
@@ -51,7 +54,7 @@ func TestCLIValidateStatusRunsAndAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "active runs: 1") {
+	if !strings.Contains(out, "active runs: 1") || !strings.Contains(out, "review or ack") {
 		t.Fatalf("status output = %q", out)
 	}
 
@@ -61,7 +64,7 @@ func TestCLIValidateStatusRunsAndAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "run_cli") {
+	if !strings.Contains(out, "run_cli") || !strings.Contains(out, "ACTION") || !strings.Contains(out, "review or ack") {
 		t.Fatalf("runs output = %q", out)
 	}
 

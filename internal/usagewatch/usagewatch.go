@@ -473,11 +473,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 
 	if !s.warned[key] {
 		s.warned[key] = true
-		if s.cfg.Alerts.LocalNotifications {
-			if err := s.notify("Curb usage warning", msg); err != nil {
-				_ = s.append(ledger.Event{Type: "notification_failed", Mode: string(s.cfg.Mode), Message: err.Error()})
-			}
-		}
+		s.notifyUser("Curb usage warning", msg)
 		if err := s.append(ledger.Event{
 			Type:    "usage_warning",
 			AgentID: correlation.Agent.ID,
@@ -494,6 +490,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 	if !correlation.Matched {
 		if !s.warned["uncorrelated:"+key] {
 			s.warned["uncorrelated:"+key] = true
+			s.notifyUser("Curb stop blocked", "Usage threshold exceeded, but Curb could not correlate this session to a live worker.")
 			return s.append(ledger.Event{
 				Type:    "usage_kill_blocked",
 				Mode:    string(s.cfg.Mode),
@@ -504,6 +501,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 		return nil
 	}
 	if !correlation.Agent.TerminationAllowed() {
+		s.notifyUser("Curb stop blocked", "Usage threshold exceeded, but the matched process is watch-only.")
 		return s.append(ledger.Event{
 			Type:    "usage_kill_blocked",
 			AgentID: correlation.Agent.ID,
@@ -515,9 +513,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 	if s.cfg.Mode != config.ModeEnforcement {
 		if !s.warned["would:"+key] {
 			s.warned["would:"+key] = true
-			if s.cfg.Alerts.LocalNotifications {
-				_ = s.notify("Curb would stop agent", msg)
-			}
+			s.notifyUser("Curb would stop agent", msg)
 			return s.append(ledger.Event{
 				Type:    "usage_would_terminate",
 				AgentID: correlation.Agent.ID,
@@ -532,9 +528,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 	if started.IsZero() {
 		s.grace[key] = now
 		s.targets[key] = correlation.Process
-		if s.cfg.Alerts.LocalNotifications {
-			_ = s.notify("Curb usage grace period", msg)
-		}
+		s.notifyUser("Curb usage grace period", msg)
 		return s.append(ledger.Event{
 			Type:    "usage_grace_started",
 			AgentID: correlation.Agent.ID,
@@ -555,6 +549,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 	terminationCorrelation.Process = target
 	terminationTarget, ok := snap.TerminationTarget(target)
 	if !ok {
+		s.notifyUser("Curb stop failed", "Safety guard rejected termination for a stop-pending session.")
 		return s.append(ledger.Event{
 			Type:    "usage_termination_failed",
 			AgentID: correlation.Agent.ID,
@@ -575,6 +570,7 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 	result := s.terminate(ctx, terminationTarget, s.cfg.Usage.GracePeriod.Duration)
 	data := eventData(session, terminationCorrelation)
 	data["result"] = result
+	s.notifyUser("Curb stopped agent", msg)
 	return s.append(ledger.Event{
 		Type:    "usage_termination_completed",
 		AgentID: correlation.Agent.ID,
@@ -582,6 +578,15 @@ func (s *Service) evaluate(ctx context.Context, snap *platform.Snapshot, session
 		Message: msg,
 		Data:    data,
 	})
+}
+
+func (s *Service) notifyUser(title string, message string) {
+	if !s.cfg.Alerts.LocalNotifications {
+		return
+	}
+	if err := s.notify(title, message); err != nil {
+		_ = s.append(ledger.Event{Type: "notification_failed", Mode: string(s.cfg.Mode), Message: err.Error()})
+	}
 }
 
 func (s *Service) append(event ledger.Event) error {

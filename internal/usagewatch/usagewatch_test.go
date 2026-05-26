@@ -242,6 +242,7 @@ func TestBestSessionForMatchSelectsHighestScoringCorrelation(t *testing.T) {
 func TestAlertModeWarnsAndWouldTerminateWithoutKilling(t *testing.T) {
 	dir := t.TempDir()
 	cfg := usageConfig(dir, config.ModeAlert)
+	cfg.Alerts.LocalNotifications = true
 	l, err := ledger.Open(cfg.Ledger.Path)
 	if err != nil {
 		t.Fatal(err)
@@ -253,6 +254,11 @@ func TestAlertModeWarnsAndWouldTerminateWithoutKilling(t *testing.T) {
 		return []usage.Event{{Provider: "codex", SessionID: "s1", CWD: "/repo", Timestamp: now, Total: 2_000}}, nil, nil
 	}
 	svc.capture = func(context.Context) (*platform.Snapshot, error) { return snapshot(now, "/repo"), nil }
+	var notifications []string
+	svc.notify = func(title, message string) error {
+		notifications = append(notifications, title)
+		return nil
+	}
 	killed := false
 	svc.terminate = func(context.Context, platform.TerminationTarget, time.Duration) platform.TerminationResult {
 		killed = true
@@ -270,6 +276,8 @@ func TestAlertModeWarnsAndWouldTerminateWithoutKilling(t *testing.T) {
 	}
 	requireLedgerEvent(t, events, "usage_warning")
 	requireLedgerEvent(t, events, "usage_would_terminate")
+	requireNotification(t, notifications, "Curb usage warning")
+	requireNotification(t, notifications, "Curb would stop agent")
 }
 
 func TestStaleHighUsageDoesNotWarnWithoutWindowActivity(t *testing.T) {
@@ -330,6 +338,7 @@ func TestSyntheticEventDoesNotMakeStaleUsageRecent(t *testing.T) {
 func TestEnforcementTerminatesAfterUsageGrace(t *testing.T) {
 	dir := t.TempDir()
 	cfg := usageConfig(dir, config.ModeEnforcement)
+	cfg.Alerts.LocalNotifications = true
 	cfg.Usage.GracePeriod.Duration = time.Nanosecond
 	l, err := ledger.Open(cfg.Ledger.Path)
 	if err != nil {
@@ -344,6 +353,11 @@ func TestEnforcementTerminatesAfterUsageGrace(t *testing.T) {
 	}
 	svc.capture = func(context.Context) (*platform.Snapshot, error) {
 		return snapshot(processStart, "/repo"), nil
+	}
+	var notifications []string
+	svc.notify = func(title, message string) error {
+		notifications = append(notifications, title)
+		return nil
 	}
 	killedPID := int32(0)
 	svc.terminate = func(_ context.Context, target platform.TerminationTarget, _ time.Duration) platform.TerminationResult {
@@ -366,6 +380,9 @@ func TestEnforcementTerminatesAfterUsageGrace(t *testing.T) {
 	}
 	requireLedgerEvent(t, events, "usage_grace_started")
 	requireLedgerEvent(t, events, "usage_termination_completed")
+	requireNotification(t, notifications, "Curb usage warning")
+	requireNotification(t, notifications, "Curb usage grace period")
+	requireNotification(t, notifications, "Curb stopped agent")
 }
 
 func TestReconfigurePreservesGraceAndTargets(t *testing.T) {
@@ -413,6 +430,7 @@ func TestReconfigurePreservesGraceAndTargets(t *testing.T) {
 func TestSessionAckSuppressesWarningAndTerminationUntilExpiry(t *testing.T) {
 	dir := t.TempDir()
 	cfg := usageConfig(dir, config.ModeEnforcement)
+	cfg.Alerts.LocalNotifications = true
 	cfg.Usage.GracePeriod.Duration = time.Nanosecond
 	l, err := ledger.Open(cfg.Ledger.Path)
 	if err != nil {
@@ -466,6 +484,7 @@ func TestSessionAckSuppressesWarningAndTerminationUntilExpiry(t *testing.T) {
 func TestEnforcementRejectsPIDReuseBeforeTermination(t *testing.T) {
 	dir := t.TempDir()
 	cfg := usageConfig(dir, config.ModeEnforcement)
+	cfg.Alerts.LocalNotifications = true
 	cfg.Usage.GracePeriod.Duration = time.Nanosecond
 	l, err := ledger.Open(cfg.Ledger.Path)
 	if err != nil {
@@ -484,6 +503,11 @@ func TestEnforcementRejectsPIDReuseBeforeTermination(t *testing.T) {
 			return snapshot(originalStart, "/repo"), nil
 		}
 		return snapshot(reusedStart, "/repo"), nil
+	}
+	var notifications []string
+	svc.notify = func(title, message string) error {
+		notifications = append(notifications, title)
+		return nil
 	}
 	killed := false
 	svc.terminate = func(context.Context, platform.TerminationTarget, time.Duration) platform.TerminationResult {
@@ -505,6 +529,7 @@ func TestEnforcementRejectsPIDReuseBeforeTermination(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireLedgerEvent(t, events, "usage_termination_failed")
+	requireNotification(t, notifications, "Curb stop failed")
 }
 
 type matchFixture struct {
@@ -584,4 +609,14 @@ func hasLedgerEvent(events []ledger.Event, eventType string) bool {
 		}
 	}
 	return false
+}
+
+func requireNotification(t *testing.T, notifications []string, title string) {
+	t.Helper()
+	for _, notification := range notifications {
+		if notification == title {
+			return
+		}
+	}
+	t.Fatalf("missing notification %q in %#v", title, notifications)
 }
