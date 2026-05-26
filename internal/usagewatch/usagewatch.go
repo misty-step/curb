@@ -69,6 +69,7 @@ type SessionDecision struct {
 
 type SessionClassification struct {
 	State          string
+	AgentState     string
 	ProcessState   string
 	UsageState     string
 	ActionState    string
@@ -319,6 +320,19 @@ func Correlate(session Session, matches []watchdog.Match) Correlation {
 	return best
 }
 
+func BestSessionForMatch(match watchdog.Match, sessions []Session) (Session, bool) {
+	var best Session
+	bestCorrelation := Correlation{}
+	for _, session := range sessions {
+		correlation := Correlate(session, []watchdog.Match{match})
+		if correlation.Matched && correlation.Score > bestCorrelation.Score {
+			bestCorrelation = correlation
+			best = session
+		}
+	}
+	return best, bestCorrelation.Matched
+}
+
 func EvaluateSessionDecision(session Session, cfg *config.Config, correlation Correlation, now time.Time) SessionDecision {
 	policy := EvaluateSessionPolicy(session, cfg.Usage, now)
 	decision := SessionDecision{
@@ -363,6 +377,7 @@ func ClassifySession(decision SessionDecision, correlation Correlation, mode con
 	classification.ActionState = sessionActionState(classification, mode, correlation, acknowledgedUntil != nil)
 	classification.CanAcknowledge = acknowledgedUntil == nil && ackExtension > 0 && (classification.UsageState == "warn" || classification.UsageState == "stop")
 	classification.RiskRank = sessionRiskRank(classification)
+	classification.AgentState = sessionAgentState(classification)
 	return classification
 }
 
@@ -427,6 +442,17 @@ func sessionRiskRank(classification SessionClassification) int {
 		return 4
 	default:
 		return 5
+	}
+}
+
+func sessionAgentState(classification SessionClassification) string {
+	switch classification.State {
+	case "stop", "warn", "acknowledged", "idle-high", "watch-only", "uncorrelated":
+		return classification.State
+	case "active":
+		return "spending"
+	default:
+		return "idle"
 	}
 }
 

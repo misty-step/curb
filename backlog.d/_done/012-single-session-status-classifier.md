@@ -2,7 +2,7 @@
 id: 012-single-session-status-classifier
 title: Centralize session status and action classification
 priority: P0
-status: ready
+status: done
 lifecycle_stage: Policy/Eval
 acceptance:
     - One classifier returns process, usage, action, risk rank, acknowledgement, actionability, and explanation fields for a session.
@@ -72,3 +72,19 @@ Curb computes “what state is this session in, and what can the operator safely
 
 Ousterhout review identified status/action classification as the missing deep
 module behind recent provider/runtime-owner bugs.
+
+## What Was Built
+
+Completed on 2026-05-26. `internal/usagewatch.ClassifySession` now returns the
+session state, agent-facing state, process state, usage state, action state,
+risk rank, acknowledgement, actionability, and explanation. `internal/service`
+projects `SessionView` and correlated `AgentView` from that classifier instead
+of a service-local state ladder. `curb usage` also evaluates rows through
+`EvaluateSessionDecision` and `ClassifySession`, and process-to-session
+selection is centralized in `usagewatch.BestSessionForMatch`.
+
+Evidence:
+
+- `scripts/validate.sh`
+- `go test -race ./...`
+- `scripts/build-ui.sh --check`

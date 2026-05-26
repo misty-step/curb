@@ -77,6 +77,7 @@ export interface SessionView {
   id?: string;
   provider: string;
   state: string;
+  agent_state?: string;
   process_state: string;
   usage_state?: string;
   action_state: string;

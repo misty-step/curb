@@ -110,55 +110,55 @@ func TestClassifySessionOwnsProcessUsageAndActionAxes(t *testing.T) {
 			decision:    SessionDecision{State: "active", UsageState: "active", Explanation: "latest turn within limits"},
 			correlation: correlated,
 			mode:        config.ModeAlert,
-			want:        SessionClassification{State: "active", ProcessState: "running", UsageState: "spending", ActionState: "none", RiskRank: 1, Explanation: "latest turn within limits"},
+			want:        SessionClassification{State: "active", AgentState: "spending", ProcessState: "running", UsageState: "spending", ActionState: "none", RiskRank: 1, Explanation: "latest turn within limits"},
 		},
 		{
 			name:        "idle correlated session",
 			decision:    SessionDecision{State: "idle", Explanation: "no recent usage"},
 			correlation: correlated,
 			mode:        config.ModeAlert,
-			want:        SessionClassification{State: "idle", ProcessState: "running", UsageState: "quiet", ActionState: "none", RiskRank: 4, Explanation: "no recent usage"},
+			want:        SessionClassification{State: "idle", AgentState: "idle", ProcessState: "running", UsageState: "quiet", ActionState: "none", RiskRank: 4, Explanation: "no recent usage"},
 		},
 		{
 			name:        "idle high correlated session",
 			decision:    SessionDecision{State: "idle-high", UsageState: "idle-high", Explanation: "historical usage is high, but not active"},
 			correlation: correlated,
 			mode:        config.ModeAlert,
-			want:        SessionClassification{State: "idle-high", ProcessState: "running", UsageState: "quiet-high", ActionState: "none", RiskRank: 3, Explanation: "historical usage is high, but not active"},
+			want:        SessionClassification{State: "idle-high", AgentState: "idle-high", ProcessState: "running", UsageState: "quiet-high", ActionState: "none", RiskRank: 3, Explanation: "historical usage is high, but not active"},
 		},
 		{
 			name:        "warn needs acknowledgement",
 			decision:    SessionDecision{State: "warn", UsageState: "warn", Explanation: "latest turn over warning threshold"},
 			correlation: correlated,
 			mode:        config.ModeAlert,
-			want:        SessionClassification{State: "warn", ProcessState: "running", UsageState: "warn", ActionState: "acknowledge", CanAcknowledge: true, RiskRank: 1, Explanation: "latest turn over warning threshold"},
+			want:        SessionClassification{State: "warn", AgentState: "warn", ProcessState: "running", UsageState: "warn", ActionState: "acknowledge", CanAcknowledge: true, RiskRank: 1, Explanation: "latest turn over warning threshold"},
 		},
 		{
 			name:        "alert mode would stop correlated stop",
 			decision:    SessionDecision{State: "stop", UsageState: "stop", Explanation: "latest turn over stop threshold"},
 			correlation: correlated,
 			mode:        config.ModeAlert,
-			want:        SessionClassification{State: "stop", ProcessState: "running", UsageState: "stop", ActionState: "would-stop", CanAcknowledge: true, RiskRank: 1, Explanation: "latest turn over stop threshold"},
+			want:        SessionClassification{State: "stop", AgentState: "stop", ProcessState: "running", UsageState: "stop", ActionState: "would-stop", CanAcknowledge: true, RiskRank: 1, Explanation: "latest turn over stop threshold"},
 		},
 		{
 			name:        "enforcement stop is actionable",
 			decision:    SessionDecision{State: "stop", UsageState: "stop", Actionable: true, Explanation: "latest turn over stop threshold"},
 			correlation: correlated,
 			mode:        config.ModeEnforcement,
-			want:        SessionClassification{State: "stop", ProcessState: "running", UsageState: "stop", ActionState: "stop-pending", Actionable: true, CanAcknowledge: true, RiskRank: 0, Explanation: "latest turn over stop threshold"},
+			want:        SessionClassification{State: "stop", AgentState: "stop", ProcessState: "running", UsageState: "stop", ActionState: "stop-pending", Actionable: true, CanAcknowledge: true, RiskRank: 0, Explanation: "latest turn over stop threshold"},
 		},
 		{
 			name:     "uncorrelated usage is not live",
 			decision: SessionDecision{State: "uncorrelated", UsageState: "stop", Explanation: "usage crossed threshold, but no live process matched; Curb will not stop anything"},
 			mode:     config.ModeEnforcement,
-			want:     SessionClassification{State: "uncorrelated", ProcessState: "unknown", UsageState: "stop", ActionState: "blocked", CanAcknowledge: true, RiskRank: 1, Explanation: "usage crossed threshold, but no live process matched; Curb will not stop anything"},
+			want:     SessionClassification{State: "uncorrelated", AgentState: "uncorrelated", ProcessState: "unknown", UsageState: "stop", ActionState: "blocked", CanAcknowledge: true, RiskRank: 1, Explanation: "usage crossed threshold, but no live process matched; Curb will not stop anything"},
 		},
 		{
 			name:        "watch only match blocks stop",
 			decision:    SessionDecision{State: "watch-only", UsageState: "stop", Explanation: "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"},
 			correlation: Correlation{Matched: true},
 			mode:        config.ModeEnforcement,
-			want:        SessionClassification{State: "watch-only", ProcessState: "watch-only", UsageState: "stop", ActionState: "blocked", CanAcknowledge: true, RiskRank: 1, Explanation: "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"},
+			want:        SessionClassification{State: "watch-only", AgentState: "watch-only", ProcessState: "watch-only", UsageState: "stop", ActionState: "blocked", CanAcknowledge: true, RiskRank: 1, Explanation: "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"},
 		},
 		{
 			name:        "acknowledged stop suppresses action",
@@ -166,7 +166,7 @@ func TestClassifySessionOwnsProcessUsageAndActionAxes(t *testing.T) {
 			correlation: correlated,
 			mode:        config.ModeAlert,
 			ackUntil:    &ackUntil,
-			want:        SessionClassification{State: "acknowledged", ProcessState: "running", UsageState: "stop", ActionState: "acknowledged", RiskRank: 2, Explanation: "usage crossed threshold, but this session is acknowledged until 2026-05-19T20:30:00Z"},
+			want:        SessionClassification{State: "acknowledged", AgentState: "acknowledged", ProcessState: "running", UsageState: "stop", ActionState: "acknowledged", RiskRank: 2, Explanation: "usage crossed threshold, but this session is acknowledged until 2026-05-19T20:30:00Z"},
 		},
 	}
 
@@ -222,6 +222,20 @@ func TestCorrelateRequiresPathSegmentBoundaryForPrefixes(t *testing.T) {
 	correlation := Correlate(session, matches)
 	if !correlation.Matched || correlation.Reason != "provider+cwd-prefix" {
 		t.Fatalf("did not match child path: %#v", correlation)
+	}
+}
+
+func TestBestSessionForMatchSelectsHighestScoringCorrelation(t *testing.T) {
+	match := matchFixtures{{family: "codex", cwd: "/repo/worktree", pid: 9}}.matches()[0]
+	sessions := []Session{
+		{Provider: "codex", SessionID: "parent", CWD: "/repo"},
+		{Provider: "codex", SessionID: "exact", CWD: "/repo/worktree"},
+		{Provider: "claude", SessionID: "wrong-provider", CWD: "/repo/worktree"},
+	}
+
+	got, ok := BestSessionForMatch(match, sessions)
+	if !ok || got.SessionID != "exact" {
+		t.Fatalf("best session = %#v ok=%v", got, ok)
 	}
 }
 

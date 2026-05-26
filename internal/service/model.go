@@ -77,6 +77,7 @@ type SessionView struct {
 	ProcessState      string     `json:"process_state"`
 	UsageState        string     `json:"usage_state,omitempty"`
 	ActionState       string     `json:"action_state"`
+	AgentState        string     `json:"agent_state,omitempty"`
 	Actionable        bool       `json:"actionable"`
 	CanAcknowledge    bool       `json:"can_acknowledge"`
 	Project           string     `json:"project,omitempty"`
@@ -156,7 +157,7 @@ func BuildSnapshot(cfg *config.Config, snap *platform.Snapshot, events []usage.E
 
 	agentViews := make([]AgentView, 0, len(matches))
 	for _, match := range matches {
-		session, found := findSessionForMatch(match, sessions)
+		session, found := usagewatch.BestSessionForMatch(match, sessions)
 		var sessionView SessionView
 		if found {
 			sessionView = buildSessionView(cfg, session, correlations[session.Key], turnsBySession[session.Key], now)
@@ -264,6 +265,7 @@ func buildSessionView(cfg *config.Config, session usagewatch.Session, correlatio
 		ID:                session.SessionID,
 		Provider:          session.Provider,
 		State:             classification.State,
+		AgentState:        classification.AgentState,
 		ProcessState:      classification.ProcessState,
 		UsageState:        classification.UsageState,
 		ActionState:       classification.ActionState,
@@ -321,22 +323,13 @@ func buildAgentView(match watchdog.Match, session SessionView, found bool, now t
 			state = "watch-only"
 			explanation = session.Explanation
 		} else {
-			switch session.State {
-			case "stop", "warn":
+			state = session.AgentState
+			if state == "" {
 				state = session.State
-				actionable = session.Actionable
-				explanation = session.Explanation
-			case "active":
-				state = "spending"
-				explanation = "correlated session has usage in current window"
-			case "acknowledged":
-				state = "acknowledged"
-				explanation = session.Explanation
-			case "idle-high":
-				state = "idle-high"
-				explanation = session.Explanation
-			default:
-				state = "idle"
+			}
+			actionable = session.Actionable
+			explanation = session.Explanation
+			if state == "idle" {
 				explanation = "process is running; correlated session is not currently spending"
 			}
 		}
@@ -432,19 +425,6 @@ func flattenTurns(turnsBySession map[string][]TurnView) []TurnView {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
 	return out
-}
-
-func findSessionForMatch(match watchdog.Match, sessions []usagewatch.Session) (usagewatch.Session, bool) {
-	correlation := usagewatch.Correlation{}
-	var best usagewatch.Session
-	for _, session := range sessions {
-		current := usagewatch.Correlate(session, []watchdog.Match{match})
-		if current.Matched && current.Score > correlation.Score {
-			correlation = current
-			best = session
-		}
-	}
-	return best, correlation.Matched
 }
 
 func projectName(cwd string) string {
