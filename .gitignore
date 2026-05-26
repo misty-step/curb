@@ -1,0 +1,12 @@
+.curb/
+.antigravitycli/
+.spellbook/
+curb
+curb.exe
+*.test
+*.out
+node_modules/
+dist/
+!internal/web/dist/
+!internal/web/dist/**
+artifacts/qa/
