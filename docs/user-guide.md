@@ -88,10 +88,14 @@ For custom thresholds:
 ```sh
 curb config set --mode enforcement --warn-after 2m --kill-after 4m --grace 30s --scan 5s
 curb config set --warn-turn-tokens 1000000 --kill-turn-tokens 3000000 --usage-window 15m
+curb config set --ledger-forward-url https://example.invalid/curb/events
+curb config set --ledger-forward-url off
 ```
 
-`curb config` shows the active config path, action, scan interval, policy, and
-configured agents. In an interactive terminal it prompts for the common setup.
+`curb config` shows the active config path, action, scan interval, policy,
+configured agents, and whether the ledger is local-only or forwarding events.
+The local API also exposes the durable endpoint `machine_id` for dashboards and
+export receivers. In an interactive terminal it prompts for the common setup.
 
 ## Local UI API
 
@@ -253,3 +257,8 @@ Alert and visibility modes emit `usage_would_terminate` instead of killing.
 Curb does not record prompts, responses, screenshots, keystrokes, or file
 contents. Usage readers extract only metadata such as timestamp, provider,
 session id, model, working directory, and token counters.
+
+The local ledger is the source of audit truth. If `ledger.forward_url` is set,
+Curb POSTs the same metadata-only ledger event to that HTTP(S) endpoint after
+the local write succeeds. Forwarding failures are ignored by policy and cannot
+trigger or block process termination.

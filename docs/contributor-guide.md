@@ -1,6 +1,7 @@
 # Curb Contributor Guide
 
-Curb is intentionally shaped around a deep portable core and thin platform adapters.
+Curb is intentionally shaped as one deep local endpoint agent with thin clients
+and thin OS adapters.
 
 ## Architecture
 
@@ -12,15 +13,18 @@ Curb is intentionally shaped around a deep portable core and thin platform adapt
 - `internal/service`: daemon orchestration, config updates, snapshot cache, usagewatch loop ownership, ledger reads, and stable UI/API read models.
 - `internal/watchdog`: run lifecycle, matching, warnings, ack handling, policy evaluation, and enforcement orchestration.
 - `internal/platform`: real OS process capture, notification, and termination adapters.
-- `internal/ledger`: append-only NDJSON ledger with hash chaining.
+- `internal/ledger`: append-only NDJSON ledger with hash chaining and generic append hooks.
 
-The strategic boundary is simple: usage facts and provider-file ingestion state
+The strategic boundary is simple: one machine has one service authority.
+Usage facts and provider-file ingestion state
 live in `usage`; provider parse state is operational cache under the service
 state directory, not audit history; usage policy lives in `usagewatch`; daemon orchestration, config persistence, UI
 actionability, session-ack commands, usagewatch loop ownership, and snapshot
 caching live in `service`; `api` only serializes and routes through the service
 interface; raw ledger structs stay inside the audit-log and service boundary;
 legacy process-run policy lives in `watchdog`; OS facts and OS actions live in
+`platform`. Optional ledger export is service-owned and must not move HTTP,
+credential, retry, or remote-policy behavior into `ledger`, `usagewatch`, or
 `platform`. Provider log parsing should not leak into process enforcement code.
 Termination crosses from policy code into OS actions only through
 `platform.TerminationTarget`, which is produced by revalidating process identity
@@ -87,6 +91,8 @@ UI lint, and UI tests).
 - Keep enforcement conservative. Visibility and alert modes must never terminate processes.
 - Keep privacy defaults hard. Prompt or response content capture is rejected by config validation.
 - Keep usage readers metadata-only. Tests should prove token extraction without requiring prompt or response content.
+- Keep remote systems advisory. They may receive metadata-only events, but
+  policy evaluation and enforcement authority stay on the endpoint.
 - Prefer stable app identity over process names when available.
 - Treat PID plus process start time as the identity for termination safety.
   Platform capture should keep a process when PID and start time are available,

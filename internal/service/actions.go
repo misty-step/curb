@@ -91,7 +91,7 @@ func (s *Service) AcknowledgeSession(ctx context.Context, sessionKey string, req
 	if err != nil {
 		return AckView{}, err
 	}
-	if err := appendSessionAck(cfg.Ledger.Path, ack, extend); err != nil {
+	if err := s.appendSessionAck(cfg, ack, extend); err != nil {
 		rollbackErr := rollbackSessionAck(cfg.Service.StateDir, sessionKey, previous, hadPrevious)
 		if rollbackErr != nil {
 			return AckView{}, fmt.Errorf("%w; rollback failed: %v", err, rollbackErr)
@@ -169,13 +169,13 @@ func (s *Service) StopSession(ctx context.Context, sessionKey string, request St
 		Message: request.Reason,
 		Data:    manualStopEventData(session, correlation, target),
 	}
-	if err := appendLedgerEvent(cfg.Ledger.Path, started); err != nil {
+	if err := s.appendLedgerEvent(cfg, started); err != nil {
 		return StopView{}, err
 	}
 	result := s.terminate(ctx, target, cfg.Usage.GracePeriod.Duration)
 	data := manualStopEventData(session, correlation, target)
 	data["result"] = result
-	if err := appendLedgerEvent(cfg.Ledger.Path, ledger.Event{
+	if err := s.appendLedgerEvent(cfg, ledger.Event{
 		Type:    "manual_stop_completed",
 		AgentID: correlation.Agent.ID,
 		Mode:    string(cfg.Mode),
@@ -290,8 +290,8 @@ func (s *Service) canonicalSessionKey(ctx context.Context, key string) (string, 
 	return "", ErrSessionNotFound
 }
 
-func appendSessionAck(ledgerPath string, ack usagewatch.SessionAck, extend time.Duration) error {
-	return appendLedgerEvent(ledgerPath, ledger.Event{
+func (s *Service) appendSessionAck(cfg *config.Config, ack usagewatch.SessionAck, extend time.Duration) error {
+	return s.appendLedgerEvent(cfg, ledger.Event{
 		Type:    "session_ack_received",
 		Message: ack.Reason,
 		Data: map[string]any{
@@ -302,8 +302,8 @@ func appendSessionAck(ledgerPath string, ack usagewatch.SessionAck, extend time.
 	})
 }
 
-func appendLedgerEvent(ledgerPath string, event ledger.Event) error {
-	log, err := ledger.Open(ledgerPath)
+func (s *Service) appendLedgerEvent(cfg *config.Config, event ledger.Event) error {
+	log, err := s.openLedger(cfg)
 	if err != nil {
 		return err
 	}

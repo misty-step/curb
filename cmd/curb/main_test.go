@@ -149,10 +149,13 @@ func TestConfigSetPreservesCustomAgentList(t *testing.T) {
 	configPath := writeTestConfig(t, dir)
 
 	out, err := captureStdout(func() error {
-		return cmdConfigSet([]string{"--config", configPath, "--usage", "true", "--warn-turn-tokens", "10", "--kill-turn-tokens", "20"})
+		return cmdConfigSet([]string{"--config", configPath, "--usage", "true", "--warn-turn-tokens", "10", "--kill-turn-tokens", "20", "--ledger-forward-url", "https://example.invalid/curb/events"})
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(out, "export: forwarding ledger events to https://example.invalid/curb/events") {
+		t.Fatalf("config output did not show ledger export: %q", out)
 	}
 	if strings.Contains(out, "codex-desktop-worker") || strings.Contains(out, "claude-code") {
 		t.Fatalf("config set added default agents to custom config output: %q", out)
@@ -166,6 +169,9 @@ func TestConfigSetPreservesCustomAgentList(t *testing.T) {
 	}
 	if cfg.Usage.WarnTurnTokens != 10 || cfg.Usage.KillTurnTokens != 20 {
 		t.Fatalf("usage policy was not updated: %#v", cfg.Usage)
+	}
+	if cfg.Ledger.ForwardURL != "https://example.invalid/curb/events" {
+		t.Fatalf("ledger forward url = %q", cfg.Ledger.ForwardURL)
 	}
 }
 

@@ -26,6 +26,7 @@ type Service struct {
 	terminate  TerminateFunc
 	cache      *SnapshotCache
 	reader     *usage.Reader
+	machineID  string
 
 	mu      sync.RWMutex
 	cfg     *config.Config
@@ -45,6 +46,10 @@ func New(configPath string, capture CaptureFunc) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	machineID, err := ensureMachineID(cfg.Service.StateDir)
+	if err != nil {
+		return nil, err
+	}
 	s := &Service{
 		configPath: configPath,
 		capture:    capture,
@@ -52,6 +57,7 @@ func New(configPath string, capture CaptureFunc) (*Service, error) {
 		notifyCaps: platform.NotificationCapabilityStatus,
 		terminate:  platform.TerminateTree,
 		reader:     usage.NewReaderWithState("", cfg.Service.StateDir),
+		machineID:  machineID,
 		cfg:        cfg,
 	}
 	s.cache = NewSnapshotCache(s.buildSnapshot)
@@ -194,7 +200,7 @@ func (s *Service) recentLedgerEvents(limit int) ([]ledger.Event, error) {
 }
 
 func (s *Service) Config(context.Context) (ConfigView, error) {
-	return NewConfigView(s.configPath, s.currentConfig()), nil
+	return NewConfigView(s.configPath, s.currentConfig(), s.machineID), nil
 }
 
 func (s *Service) UpdateConfig(ctx context.Context, update ConfigUpdate) (ConfigView, error) {
@@ -222,7 +228,7 @@ func (s *Service) UpdateConfig(ctx context.Context, update ConfigUpdate) (Config
 	}
 	s.cfg = next
 	s.usage = usageService
-	view := NewConfigView(s.configPath, next)
+	view := NewConfigView(s.configPath, next, s.machineID)
 	s.mu.Unlock()
 	_ = s.Refresh(ctx)
 	return view, nil
@@ -269,7 +275,7 @@ func (s *Service) buildUsageWatch(cfg *config.Config) (*usagewatch.Service, *led
 	if !cfg.Usage.IsEnabled() {
 		return nil, nil, nil
 	}
-	log, err := ledger.Open(cfg.Ledger.Path)
+	log, err := s.openLedger(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -280,4 +286,11 @@ func (s *Service) buildUsageWatch(cfg *config.Config) (*usagewatch.Service, *led
 	usageService.SetReader(usagewatch.EventReader(s.reader.EventsSince))
 	usageService.OnEvent(s.onEvent)
 	return usageService, log, nil
+}
+
+func (s *Service) openLedger(cfg *config.Config) (*ledger.Ledger, error) {
+	return ledger.OpenWithOptions(cfg.Ledger.Path, ledger.Options{
+		Metadata:    map[string]any{"machine_id": s.machineID},
+		AfterAppend: ledgerForwardHook(cfg.Ledger.ForwardURL),
+	})
 }

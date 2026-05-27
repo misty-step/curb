@@ -145,6 +145,7 @@ export interface ConfigAgentView {
 
 export interface ConfigView {
   path?: string;
+  machine_id?: string;
   mode: string;
   usage_enabled: boolean;
   warn_turn_tokens: number;
@@ -156,10 +157,11 @@ export interface ConfigView {
   process_kill_seconds: number;
   ack_extension_seconds: number;
   local_notifications: boolean;
+  ledger_forward_url?: string;
   agents: ConfigAgentView[];
 }
 
-export type ConfigUpdate = Partial<Omit<ConfigView, "path" | "agents">>;
+export type ConfigUpdate = Partial<Omit<ConfigView, "path" | "machine_id" | "ledger_forward_url" | "agents">>;
 
 export interface NotificationView {
   enabled: boolean;

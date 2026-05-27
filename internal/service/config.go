@@ -9,6 +9,7 @@ import (
 
 type ConfigView struct {
 	Path                string            `json:"path,omitempty"`
+	MachineID           string            `json:"machine_id,omitempty"`
 	Mode                string            `json:"mode"`
 	UsageEnabled        bool              `json:"usage_enabled"`
 	WarnTurnTokens      int64             `json:"warn_turn_tokens"`
@@ -20,6 +21,7 @@ type ConfigView struct {
 	ProcessKillSeconds  int64             `json:"process_kill_seconds"`
 	AckExtensionSeconds int64             `json:"ack_extension_seconds"`
 	LocalNotifications  bool              `json:"local_notifications"`
+	LedgerForwardURL    string            `json:"ledger_forward_url,omitempty"`
 	Agents              []ConfigAgentView `json:"agents"`
 }
 
@@ -45,7 +47,7 @@ type ConfigUpdate struct {
 	LocalNotifications *bool   `json:"local_notifications,omitempty"`
 }
 
-func NewConfigView(path string, cfg *config.Config) ConfigView {
+func NewConfigView(path string, cfg *config.Config, machineID ...string) ConfigView {
 	agents := make([]ConfigAgentView, 0, len(cfg.Agents))
 	for _, agent := range cfg.Agents {
 		kind := agent.Kind
@@ -64,8 +66,13 @@ func NewConfigView(path string, cfg *config.Config) ConfigView {
 			Description: agentConfigDescription(agent),
 		})
 	}
+	endpointID := ""
+	if len(machineID) > 0 {
+		endpointID = machineID[0]
+	}
 	return ConfigView{
 		Path:                path,
+		MachineID:           endpointID,
 		Mode:                string(cfg.Mode),
 		UsageEnabled:        cfg.Usage.IsEnabled(),
 		WarnTurnTokens:      cfg.Usage.WarnTurnTokens,
@@ -77,6 +84,7 @@ func NewConfigView(path string, cfg *config.Config) ConfigView {
 		ProcessKillSeconds:  int64(cfg.Defaults.KillAfter.Duration / time.Second),
 		AckExtensionSeconds: int64(cfg.Defaults.AckExtension.Duration / time.Second),
 		LocalNotifications:  cfg.Alerts.LocalNotifications,
+		LedgerForwardURL:    cfg.Ledger.ForwardURL,
 		Agents:              agents,
 	}
 }

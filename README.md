@@ -1,7 +1,9 @@
 # Curb
 
-Curb is a local agent visibility and watchdog tool for AI-assisted engineering
-work.
+Curb is a local endpoint agent for AI-assisted engineering work. One Go service
+on the machine owns usage ingestion, process correlation, notifications,
+policy, enforcement, and the audit ledger; the CLI and embedded UI are thin
+clients of that local service.
 
 The design target is simple: create local visibility into agent activity first,
 including token usage and model usage where agent logs expose it, then layer
@@ -66,3 +68,8 @@ The generated default config watches agent worker processes such as Codex
 Desktop workers, Codex CLI, Claude Code, and Anti-Gravity's `agy` CLI. Desktop
 applications such as Codex Desktop and Claude Desktop are not enforcement
 targets; Curb will not terminate the app root.
+
+Curb creates a durable local `machine_id` in the configured state directory and
+adds it to service-owned ledger events. The ledger is local by default. Optional
+HTTP(S) forwarding can export the same metadata-only ledger events, but remote
+systems do not make kill decisions.

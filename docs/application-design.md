@@ -19,10 +19,10 @@ evidence. Token turns are the primary risk primitive.
 
 ## Product Shape
 
-Curb is one deep Go daemon with thin clients:
+Curb is one deep local endpoint agent with thin clients:
 
-- `curbd`: long-running local service and only authority for state, policy, and
-  enforcement.
+- `curb daemon`: long-running local service and only authority for state,
+  policy, and enforcement.
 - embedded web app: first application surface, served by the Go binary.
 - CLI: compact local control and script surface over the same service.
 - future native shell: Tauri window/tray/installer around the same local API.
@@ -58,6 +58,8 @@ flowchart LR
     Policy["policy engine"]
     Store["snapshot/read model cache"]
     Ledger["append-only ledger"]
+    Identity["durable machine_id"]
+    Export["optional event export"]
     Config["validated config"]
     Notify["notification adapter"]
     Enforcement["termination adapter"]
@@ -80,6 +82,8 @@ flowchart LR
   Correlation --> Policy
   Policy --> Store
   Policy --> Ledger
+  Identity --> Ledger
+  Ledger --> Export
   Policy --> Notify
   Policy --> Enforcement
   Store --> API
@@ -104,6 +108,8 @@ The daemon owns every stateful, privileged, or safety-critical concern:
 - acknowledgement and grace state;
 - process termination;
 - append-only ledger writes;
+- durable local machine identity;
+- optional metadata-only ledger export;
 - config validation, persistence, and managed-policy merging;
 - service-owned UI/API read models.
 
@@ -153,6 +159,7 @@ The service boundary hides:
 
 - raw provider log formats;
 - raw ledger event structs;
+- ledger export transport details;
 - matcher internals;
 - grace-period maps;
 - provider token quirks;

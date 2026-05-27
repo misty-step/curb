@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -131,6 +132,7 @@ type AlertConfig struct {
 type LedgerConfig struct {
 	Path                 string `yaml:"path"`
 	IncludePromptContent bool   `yaml:"include_prompt_content"`
+	ForwardURL           string `yaml:"forward_url"`
 }
 
 func Load(path string) (*Config, error) {
@@ -297,6 +299,11 @@ func (c Config) Validate() error {
 	if c.Ledger.IncludePromptContent {
 		return errors.New("ledger.include_prompt_content is not supported by launch implementation")
 	}
+	if c.Ledger.ForwardURL != "" {
+		if err := validateForwardURL(c.Ledger.ForwardURL); err != nil {
+			return err
+		}
+	}
 	if c.Usage.IsEnabled() {
 		if c.Usage.WarnTurnTokens >= c.Usage.KillTurnTokens {
 			return errors.New("usage.warn_turn_tokens must be less than usage.kill_turn_tokens")
@@ -350,6 +357,20 @@ func (c Config) Validate() error {
 		if policy.WarnAfter.Duration >= policy.KillAfter.Duration {
 			return fmt.Errorf("agent %q warn_after must be less than kill_after", agent.ID)
 		}
+	}
+	return nil
+}
+
+func validateForwardURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("ledger.forward_url: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("ledger.forward_url must use http or https")
+	}
+	if parsed.Host == "" {
+		return errors.New("ledger.forward_url must include a host")
 	}
 	return nil
 }

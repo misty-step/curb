@@ -103,3 +103,4 @@ alerts:
 ledger:
   path: .curb/runs.ndjson
   include_prompt_content: false
+  forward_url: ""

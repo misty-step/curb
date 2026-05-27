@@ -233,6 +233,7 @@ export const demoSnapshot: Snapshot = {
 
 export const demoConfig: ConfigView = {
   path: "/Users/phaedrus/Library/Application Support/curb/config.yaml",
+  machine_id: "machine_demo",
   mode: "alert",
   usage_enabled: true,
   warn_turn_tokens: 1_000_000,
@@ -244,6 +245,7 @@ export const demoConfig: ConfigView = {
   process_kill_seconds: 7200,
   ack_extension_seconds: 1800,
   local_notifications: true,
+  ledger_forward_url: "",
   agents: [
     {
       id: "codex-desktop-worker",

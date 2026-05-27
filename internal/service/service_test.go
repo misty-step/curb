@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +84,110 @@ func TestServiceUpdateConfigPersistsAndRefreshesSnapshotPolicy(t *testing.T) {
 	}
 	if snapshot.Overview.Mode != "enforcement" {
 		t.Fatalf("snapshot mode = %q", snapshot.Overview.Mode)
+	}
+}
+
+func TestServiceCreatesDurableMachineIdentity(t *testing.T) {
+	path := writeServiceTestConfig(t)
+	first := newTestService(t, path)
+	firstView, err := first.Config(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstView.MachineID == "" {
+		t.Fatal("machine id is empty")
+	}
+
+	second := newTestService(t, path)
+	secondView, err := second.Config(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondView.MachineID != firstView.MachineID {
+		t.Fatalf("machine id changed: first=%q second=%q", firstView.MachineID, secondView.MachineID)
+	}
+}
+
+func TestServiceLedgerEventsCarryMachineIdentity(t *testing.T) {
+	now := time.Now().UTC()
+	writeCodexUsageFixtureWithTotal(t, "endpoint-session", "/tmp/curb-endpoint", now, 1500)
+	path := writeServiceTestConfig(t)
+	cfg := configMustLoad(t, path)
+	cfg.Alerts.LocalNotifications = false
+	cfg.Usage.WarnTurnTokens = 1000
+	cfg.Usage.KillTurnTokens = 3000
+	cfg.Ledger.Path = filepath.Join(cfg.Service.StateDir, "endpoint.ndjson")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newTestService(t, path)
+	if err := svc.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ledger.Read(cfg.Ledger.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected ledger events")
+	}
+	if svc.machineID == "" {
+		t.Fatal("service machine id is empty")
+	}
+	for _, event := range events {
+		if event.Data["machine_id"] != svc.machineID {
+			t.Fatalf("event missing machine id: %#v", event)
+		}
+	}
+}
+
+func TestServiceForwardsLedgerEventsWithoutChangingLocalWrite(t *testing.T) {
+	now := time.Now().UTC()
+	writeCodexUsageFixtureWithTotal(t, "forward-session", "/tmp/curb-forward", now, 1500)
+	path := writeServiceTestConfig(t)
+	cfg := configMustLoad(t, path)
+	cfg.Alerts.LocalNotifications = false
+	cfg.Usage.WarnTurnTokens = 1000
+	cfg.Usage.KillTurnTokens = 3000
+	cfg.Ledger.Path = filepath.Join(cfg.Service.StateDir, "forward.ndjson")
+	received := make(chan ledger.Event, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var event ledger.Event
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+			t.Errorf("decode forwarded event: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		received <- event
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	cfg.Ledger.ForwardURL = server.URL
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newTestService(t, path)
+	if err := svc.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	localEvents, err := ledger.Read(cfg.Ledger.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(localEvents) == 0 {
+		t.Fatal("expected local ledger event")
+	}
+	select {
+	case event := <-received:
+		if event.Type != "usage_warning" || event.Data["machine_id"] != svc.machineID {
+			t.Fatalf("forwarded event = %#v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for forwarded event")
 	}
 }
 

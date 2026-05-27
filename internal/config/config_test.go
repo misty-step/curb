@@ -47,6 +47,30 @@ ledger:
 	}
 }
 
+func TestRejectsInvalidLedgerForwardURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "curb.yaml")
+	err := os.WriteFile(path, []byte(`
+version: 1
+mode: visibility
+defaults:
+  warn_after: 1m
+  kill_after: 2m
+agents:
+  - id: test
+    label: Test
+    match:
+      process_names: [sleep]
+ledger:
+  forward_url: "file:///tmp/curb.ndjson"
+`), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected forward_url rejection")
+	}
+}
+
 func TestRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "curb.yaml")
 	err := os.WriteFile(path, []byte(`

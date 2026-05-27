@@ -102,23 +102,29 @@ Behavior:
 
 ### Components
 
-- `curb-core`: config loading, policy evaluation, run state machine, duration
-  parsing, and shared event types.
-- `curb-usage`: provider-specific metadata readers and provider-neutral usage
-  events for tokens, model, session, turn/request, cwd, and timestamp.
-- `curb-platform`: shared adapter interfaces for process discovery, app
-  discovery, service installation, notifications, and termination.
-- `curb-macos`: macOS process discovery, `NSWorkspace` app discovery,
-  launchd integration, local notification adapter, and termination adapter.
-- `curb-windows`: Windows process discovery, service integration, toast/event
-  notification adapter, and job-object or process-tree termination adapter.
-- `curb-linux`: Linux process discovery, systemd integration, desktop
-  notification adapter, and process-group or cgroup termination adapter.
-- `curb-ledger`: append-only NDJSON event journal, rotation, and optional hash
-  chaining.
-- `curb-alerts`: local notifications, webhook, and Slack adapters.
-- `curb-cli`: status, run inspection, config validation, acknowledgement, and
-  manual stop commands.
+Curb ships as one local endpoint agent. There is no required central control
+plane, gateway, or cloud-side enforcement authority in the launch product.
+Remote systems may receive metadata-only events, but the endpoint owns policy,
+correlation, warnings, and termination.
+
+- `cmd/curb`: CLI commands and user-facing command composition.
+- `internal/api`: token-gated loopback HTTP adapter for UI and CLI clients.
+- `internal/config`: strict YAML loading, defaults, validation, and policy
+  merging.
+- `internal/service`: daemon orchestration, durable machine identity, config
+  persistence, snapshot cache, UI/API read models, usagewatch ownership,
+  session actions, and optional metadata-only ledger export.
+- `internal/usage`: provider-specific metadata readers and provider-neutral
+  usage events for tokens, model, session, turn/request, cwd, and timestamp.
+- `internal/usagewatch`: usage policy evaluation, session/process correlation,
+  acknowledgement, warning, grace, and usage-based enforcement.
+- `internal/watchdog`: legacy process-run matching and duration policy.
+- `internal/platform`: macOS, Windows, and Linux process discovery,
+  notification, and termination adapters behind one Go package boundary.
+- `internal/ledger`: append-only NDJSON event journal with hash chaining.
+
+Future native shells, tray apps, service installers, or managed-device wrappers
+must remain clients or deployment packaging around the same local service.
 
 ### Usage Model
 

@@ -100,6 +100,7 @@ func cmdConfigSet(args []string) error {
 	killTurnTokens := fs.Int64("kill-turn-tokens", 0, "kill when a session reaches this many tokens in a turn")
 	usageWindow := fs.String("usage-window", "", "usage rolling window")
 	usageScan := fs.String("usage-scan", "", "usage scan interval")
+	ledgerForwardURL := fs.String("ledger-forward-url", "", "forward ledger events to this HTTP(S) endpoint")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -168,6 +169,13 @@ func cmdConfigSet(args []string) error {
 		}
 		cfg.Usage.ScanInterval.Duration = d
 	}
+	if *ledgerForwardURL != "" {
+		if *ledgerForwardURL == "off" || *ledgerForwardURL == "none" {
+			cfg.Ledger.ForwardURL = ""
+		} else {
+			cfg.Ledger.ForwardURL = *ledgerForwardURL
+		}
+	}
 	applyPolicyToAgents(cfg)
 	if err := saveConfig(*configPath, cfg); err != nil {
 		return err
@@ -204,6 +212,11 @@ func printConfigSummary(path string, cfg *config.Config) {
 		fmt.Printf("  scan: every %s; grace %s\n", shortDuration(cfg.Usage.ScanInterval.Duration), shortDuration(cfg.Usage.GracePeriod.Duration))
 	} else {
 		fmt.Println("  disabled")
+	}
+	if cfg.Ledger.ForwardURL != "" {
+		fmt.Printf("  export: forwarding ledger events to %s\n", cfg.Ledger.ForwardURL)
+	} else {
+		fmt.Println("  export: local ledger only")
 	}
 	fmt.Println()
 	fmt.Println("watched agents")
@@ -552,6 +565,7 @@ alerts:
 ledger:
   path: %s
   include_prompt_content: false
+  forward_url: ""
 `, mode, stateDir, ledgerPath)
 }
 
