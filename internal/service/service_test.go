@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -690,6 +691,78 @@ func TestServiceScanRunsUsagePolicy(t *testing.T) {
 	}
 }
 
+func TestServiceScanUsesOneProcessSnapshotForDashboardAndPolicy(t *testing.T) {
+	now := time.Now().UTC()
+	cwd := "/tmp/curb-service-one-snapshot"
+	writeCodexUsageFixtureWithTotal(t, "one-snapshot-session", cwd, now, 5000)
+	path := writeServiceTestConfig(t)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Mode = config.ModeAlert
+	cfg.Alerts.LocalNotifications = false
+	cfg.Agents = []config.Agent{{
+		ID:     "codex-synthetic-sleep",
+		Label:  "Codex Synthetic Sleep",
+		Family: "codex",
+		Kind:   config.AgentKindProcess,
+		Match:  config.Match{ProcessNames: []string{"sleep"}, CommandRegex: []string{"sleep"}},
+	}}
+	cfg.Usage.WarnTurnTokens = 1000
+	cfg.Usage.KillTurnTokens = 1500
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	captures := 0
+	svc, err := New(path, func(context.Context) (*platform.Snapshot, error) {
+		captures++
+		if captures > 1 {
+			t.Fatalf("Service.Scan captured process snapshot more than once")
+		}
+		return &platform.Snapshot{
+			At:       time.Now().UTC(),
+			Platform: "test",
+			Processes: map[int32]platform.Process{
+				42: {
+					PID:       42,
+					Name:      "sleep",
+					Exe:       "/bin/sleep",
+					Cmdline:   "sleep 600",
+					CWD:       cwd,
+					Create:    now.Add(-time.Minute),
+					StartedOK: true,
+				},
+			},
+			Children: map[int32][]int32{},
+		}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if captures != 1 {
+		t.Fatalf("captures = %d, want 1", captures)
+	}
+	snapshot, err := svc.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].ActionState != "would-stop" {
+		t.Fatalf("snapshot sessions = %#v", snapshot.Sessions)
+	}
+	events, err := svc.Events(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eventViewsContain(events, "would_stop") {
+		t.Fatalf("events = %#v, want would_stop", events)
+	}
+}
+
 func TestServicePolicyEventsMatchDirectUsageWatch(t *testing.T) {
 	now := time.Now().UTC()
 	writeCodexUsageFixtureWithTotal(t, "parity-session", "/tmp/curb-service-parity", now, 1500)
@@ -731,6 +804,84 @@ func TestServicePolicyEventsMatchDirectUsageWatch(t *testing.T) {
 	}
 	if got, want := eventTypes(serviceEvents), eventTypes(directEvents); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("service events = %v, direct events = %v", got, want)
+	}
+}
+
+func TestServiceRunEmitsUsagePolicyEventsForDashboardStopCandidate(t *testing.T) {
+	now := time.Now().UTC()
+	cwd := "/tmp/curb-service-run-stop"
+	writeCodexUsageFixtureWithTotal(t, "run-stop-session", cwd, now, 5000)
+	path := writeServiceTestConfig(t)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Mode = config.ModeAlert
+	cfg.Alerts.LocalNotifications = false
+	cfg.Agents = []config.Agent{{
+		ID:     "codex-synthetic-sleep",
+		Label:  "Codex Synthetic Sleep",
+		Family: "codex",
+		Kind:   config.AgentKindProcess,
+		Match:  config.Match{ProcessNames: []string{"sleep"}, CommandRegex: []string{"sleep"}},
+	}}
+	cfg.Usage.WarnTurnTokens = 1000
+	cfg.Usage.KillTurnTokens = 1500
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(path, func(context.Context) (*platform.Snapshot, error) {
+		return &platform.Snapshot{
+			At:       time.Now().UTC(),
+			Platform: "test",
+			Processes: map[int32]platform.Process{
+				42: {
+					PID:       42,
+					Name:      "sleep",
+					Exe:       "/bin/sleep",
+					Cmdline:   "sleep 600",
+					CWD:       cwd,
+					Username:  "tester",
+					Create:    now.Add(-time.Minute),
+					StartedOK: true,
+				},
+			},
+			Children: map[int32][]int32{},
+		}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []ledger.Event
+	eventCh := make(chan ledger.Event, 4)
+	var eventMu sync.Mutex
+	svc.OnEvent(func(event ledger.Event) {
+		eventMu.Lock()
+		events = append(events, event)
+		eventMu.Unlock()
+		eventCh <- event
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for i := 0; i < 2; i++ {
+			<-eventCh
+		}
+		cancel()
+	}()
+	if err := svc.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eventMu.Lock()
+	defer eventMu.Unlock()
+	if !ledgerContains(events, "usage_warning") || !ledgerContains(events, "usage_would_terminate") {
+		t.Fatalf("events = %v, want usage_warning and usage_would_terminate", eventTypes(events))
+	}
+	ledgerEvents, err := ledger.Read(cfg.Ledger.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ledgerContains(ledgerEvents, "usage_warning") || !ledgerContains(ledgerEvents, "usage_would_terminate") {
+		t.Fatalf("ledger events = %v, want usage_warning and usage_would_terminate", eventTypes(ledgerEvents))
 	}
 }
 
@@ -1315,6 +1466,15 @@ func configMustLoad(t *testing.T, path string) *config.Config {
 func ledgerContains(events []ledger.Event, typ string) bool {
 	for _, event := range events {
 		if event.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func eventViewsContain(events []EventView, kind string) bool {
+	for _, event := range events {
+		if event.Kind == kind {
 			return true
 		}
 	}

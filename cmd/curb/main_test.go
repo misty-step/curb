@@ -144,6 +144,31 @@ func TestAggressivePresetKeepsOnlyProcessAgents(t *testing.T) {
 	}
 }
 
+func TestConfigSetPreservesCustomAgentList(t *testing.T) {
+	dir := t.TempDir()
+	configPath := writeTestConfig(t, dir)
+
+	out, err := captureStdout(func() error {
+		return cmdConfigSet([]string{"--config", configPath, "--usage", "true", "--warn-turn-tokens", "10", "--kill-turn-tokens", "20"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "codex-desktop-worker") || strings.Contains(out, "claude-code") {
+		t.Fatalf("config set added default agents to custom config output: %q", out)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents) != 1 || cfg.Agents[0].ID != "sleep" {
+		t.Fatalf("agents were not preserved: %#v", cfg.Agents)
+	}
+	if cfg.Usage.WarnTurnTokens != 10 || cfg.Usage.KillTurnTokens != 20 {
+		t.Fatalf("usage policy was not updated: %#v", cfg.Usage)
+	}
+}
+
 func TestCLIScanJSONUsesRealProcessTable(t *testing.T) {
 	dir := t.TempDir()
 	configPath := writeTestConfig(t, dir)

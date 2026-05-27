@@ -159,6 +159,14 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) Scan(ctx context.Context) error {
+	snap, err := s.capture(ctx)
+	if err != nil {
+		return err
+	}
+	return s.ScanSnapshot(ctx, snap)
+}
+
+func (s *Service) ScanSnapshot(ctx context.Context, snap *platform.Snapshot) error {
 	now := s.now()
 	events, _, err := s.reader(now.Add(-s.cfg.Usage.Lookback.Duration))
 	if err != nil {
@@ -168,9 +176,13 @@ func (s *Service) Scan(ctx context.Context) error {
 	if len(sessions) == 0 {
 		return nil
 	}
-	snap, err := s.capture(ctx)
-	if err != nil {
-		return err
+	if snap == nil {
+		snap = &platform.Snapshot{
+			At:        now,
+			Platform:  "unknown",
+			Processes: map[int32]platform.Process{},
+			Children:  map[int32][]int32{},
+		}
 	}
 	matches := processMatches(s.cfg, s.ledger, snap)
 	for _, session := range sessions {

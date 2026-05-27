@@ -42,6 +42,17 @@ func (c *SnapshotCache) Refresh(ctx context.Context) error {
 	return nil
 }
 
+func (c *SnapshotCache) Store(snapshot Snapshot) {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snapshot = annotateOverviewDelta(c.snapshot, snapshot, c.ready)
+	c.snapshot = snapshot
+	c.ready = true
+	c.lastErr = nil
+}
+
 func (c *SnapshotCache) Current(context.Context) (Snapshot, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

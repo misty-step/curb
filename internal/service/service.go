@@ -97,17 +97,17 @@ func (s *Service) OnEvent(fn func(ledger.Event)) {
 }
 
 func (s *Service) Scan(ctx context.Context) error {
-	if err := s.Refresh(ctx); err != nil {
+	cfg := s.currentConfig()
+	snapshot, raw, err := s.buildSnapshotSince(ctx, time.Now().Add(-cfg.Usage.Lookback.Duration))
+	if err != nil {
 		return err
 	}
-	return s.ScanPolicy(ctx)
+	s.cache.Store(snapshot)
+	return s.ScanPolicySnapshot(ctx, raw)
 }
 
 func (s *Service) Rescan(ctx context.Context) (Snapshot, error) {
 	if err := s.Scan(ctx); err != nil {
-		return Snapshot{}, err
-	}
-	if err := s.Refresh(ctx); err != nil {
 		return Snapshot{}, err
 	}
 	return s.Snapshot(ctx)
@@ -125,6 +125,18 @@ func (s *Service) ScanPolicy(ctx context.Context) error {
 	return usageService.Scan(ctx)
 }
 
+func (s *Service) ScanPolicySnapshot(ctx context.Context, snap *platform.Snapshot) error {
+	s.mu.RLock()
+	usageService := s.usage
+	s.mu.RUnlock()
+	if usageService == nil {
+		return nil
+	}
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	return usageService.ScanSnapshot(ctx, snap)
+}
+
 func (s *Service) Refresh(ctx context.Context) error {
 	return s.cache.Refresh(ctx)
 }
@@ -134,7 +146,8 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func (s *Service) SnapshotSince(ctx context.Context, since time.Time) (Snapshot, error) {
-	return s.buildSnapshotSince(ctx, since)
+	snapshot, _, err := s.buildSnapshotSince(ctx, since)
+	return snapshot, err
 }
 
 func (s *Service) SessionTurns(_ context.Context, key string, query TurnQuery) ([]TurnView, error) {
@@ -221,14 +234,15 @@ func (s *Service) StateDir() string {
 
 func (s *Service) buildSnapshot(ctx context.Context) (Snapshot, error) {
 	cfg := s.currentConfig()
-	return s.buildSnapshotSince(ctx, time.Now().Add(-cfg.Usage.Lookback.Duration))
+	snapshot, _, err := s.buildSnapshotSince(ctx, time.Now().Add(-cfg.Usage.Lookback.Duration))
+	return snapshot, err
 }
 
-func (s *Service) buildSnapshotSince(ctx context.Context, since time.Time) (Snapshot, error) {
+func (s *Service) buildSnapshotSince(ctx context.Context, since time.Time) (Snapshot, *platform.Snapshot, error) {
 	cfg := s.currentConfig()
 	events, sources, err := s.reader.EventsSince(since)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, nil, err
 	}
 	now := time.Now().UTC()
 	snap, captureErr := s.capture(ctx)
@@ -242,7 +256,7 @@ func (s *Service) buildSnapshotSince(ctx context.Context, since time.Time) (Snap
 	}
 	out := BuildSnapshot(cfg, snap, events, sources, now)
 	out.Overview.Capabilities = s.platformCapabilities(cfg, snap, captureErr, newNotificationView(cfg.Alerts.LocalNotifications, s.notificationCapability()), out.Agents)
-	return out, nil
+	return out, snap, nil
 }
 
 func (s *Service) currentConfig() *config.Config {

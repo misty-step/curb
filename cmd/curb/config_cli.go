@@ -168,7 +168,6 @@ func cmdConfigSet(args []string) error {
 		}
 		cfg.Usage.ScanInterval.Duration = d
 	}
-	keepProcessAgents(cfg)
 	applyPolicyToAgents(cfg)
 	if err := saveConfig(*configPath, cfg); err != nil {
 		return err
