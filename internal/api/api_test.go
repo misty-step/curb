@@ -974,7 +974,7 @@ func testServer(t *testing.T) *Server {
 		},
 		config: func() service.ConfigView {
 			cfg := testConfig()
-			return service.NewConfigView("/tmp/curb.yaml", &cfg)
+			return service.NewConfigView("/tmp/curb.yaml", &cfg, "machine_test")
 		}(),
 	})
 	if err != nil {
@@ -993,10 +993,10 @@ func testServerWithConfig(t *testing.T, cfg *config.Config) *Server {
 				return service.ConfigView{}, err
 			}
 			*cfg = next
-			return service.NewConfigView("/tmp/curb.yaml", cfg), nil
+			return service.NewConfigView("/tmp/curb.yaml", cfg, "machine_test"), nil
 		},
 		configFunc: func(context.Context) (service.ConfigView, error) {
-			return service.NewConfigView("/tmp/curb.yaml", cfg), nil
+			return service.NewConfigView("/tmp/curb.yaml", cfg, "machine_test"), nil
 		},
 	})
 	if err != nil {

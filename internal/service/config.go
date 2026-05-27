@@ -47,7 +47,7 @@ type ConfigUpdate struct {
 	LocalNotifications *bool   `json:"local_notifications,omitempty"`
 }
 
-func NewConfigView(path string, cfg *config.Config, machineID ...string) ConfigView {
+func NewConfigView(path string, cfg *config.Config, machineID string) ConfigView {
 	agents := make([]ConfigAgentView, 0, len(cfg.Agents))
 	for _, agent := range cfg.Agents {
 		kind := agent.Kind
@@ -66,13 +66,9 @@ func NewConfigView(path string, cfg *config.Config, machineID ...string) ConfigV
 			Description: agentConfigDescription(agent),
 		})
 	}
-	endpointID := ""
-	if len(machineID) > 0 {
-		endpointID = machineID[0]
-	}
 	return ConfigView{
 		Path:                path,
-		MachineID:           endpointID,
+		MachineID:           machineID,
 		Mode:                string(cfg.Mode),
 		UsageEnabled:        cfg.Usage.IsEnabled(),
 		WarnTurnTokens:      cfg.Usage.WarnTurnTokens,

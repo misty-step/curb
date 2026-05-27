@@ -241,7 +241,9 @@ renderer, or app-dispatched subprocesses from becoming independent runs.
 ## Enforcement
 
 Set `mode: enforcement` only after visibility and alert behavior are understood.
-Usage enforcement terminates only after:
+Usage enforcement compares `usage.warn_turn_tokens` and
+`usage.kill_turn_tokens` to the latest token-usage turn for the session, not
+the session's cumulative lifetime total. It terminates only after:
 
 1. a session has recent token activity over the configured latest-turn limit,
 2. Curb correlates that usage session to a live agent process by provider and working directory,

@@ -53,8 +53,6 @@ home_dir="$run_dir/home"
 work_dir="$run_dir/work"
 state_dir="$run_dir/state"
 worker_exe="$run_dir/curb-demo-worker"
-mkdir -p "$run_dir" "$home_dir/.codex/archived_sessions" "$work_dir" "$state_dir"
-ln -sfn "$run_dir" "$ARTIFACT_ROOT/latest"
 
 workers=()
 watchers=()
@@ -210,6 +208,9 @@ dry-run: only target process would be a synthetic sleep worker launched from $wo
 EOF
   exit 0
 fi
+
+mkdir -p "$run_dir" "$home_dir/.codex/archived_sessions" "$work_dir" "$state_dir"
+ln -sfn "$run_dir" "$ARTIFACT_ROOT/latest"
 
 run_cmd "$run_dir/00-build.txt" go build -o "$curb_bin" "$ROOT/cmd/curb"
 ln -sf /bin/sleep "$worker_exe"

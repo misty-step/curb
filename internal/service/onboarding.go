@@ -34,7 +34,7 @@ type OnboardingStepView struct {
 
 func (s *Service) Onboarding(ctx context.Context) (OnboardingView, error) {
 	cfg := s.currentConfig()
-	configView := NewConfigView(s.configPath, cfg)
+	configView := NewConfigView(s.configPath, cfg, s.machineID)
 	notifications, err := s.NotificationHealth(ctx)
 	if err != nil {
 		return OnboardingView{}, err
