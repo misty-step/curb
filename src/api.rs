@@ -1,0 +1,959 @@
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use serde_json::{Value, json};
+use thiserror::Error;
+use url::Url;
+
+use crate::config::parse_duration_for_cli;
+use crate::platform::Platform;
+use crate::runtime::{Runtime, RuntimeError, TurnQuery};
+use crate::service::{
+    AckRequest, AckView, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
+};
+
+pub const TOKEN_COOKIE: &str = "curb_token";
+
+pub trait Backend {
+    fn snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError>;
+    fn rescan(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError>;
+    fn session(&self, key: &str, now: DateTime<Utc>) -> Result<SessionView, ApiError>;
+    fn turns(
+        &self,
+        key: &str,
+        query: TurnQuery,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<TurnView>, ApiError>;
+    fn acknowledge_session(
+        &self,
+        key: &str,
+        request: AckRequest,
+        now: DateTime<Utc>,
+    ) -> Result<AckView, ApiError>;
+    fn stop_session(
+        &self,
+        key: &str,
+        request: StopRequest,
+        now: DateTime<Utc>,
+    ) -> Result<StopView, ApiError>;
+}
+
+impl<P: Platform> Backend for Runtime<P> {
+    fn snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+        self.snapshot(now).map_err(ApiError::from)
+    }
+
+    fn rescan(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+        self.rescan(now).map_err(ApiError::from)
+    }
+
+    fn session(&self, key: &str, now: DateTime<Utc>) -> Result<SessionView, ApiError> {
+        self.session(key, now).map_err(ApiError::from)
+    }
+
+    fn turns(
+        &self,
+        key: &str,
+        query: TurnQuery,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<TurnView>, ApiError> {
+        self.turns(key, query, now).map_err(ApiError::from)
+    }
+
+    fn acknowledge_session(
+        &self,
+        key: &str,
+        request: AckRequest,
+        now: DateTime<Utc>,
+    ) -> Result<AckView, ApiError> {
+        self.acknowledge_session(key, request, now)
+            .map_err(ApiError::from)
+    }
+
+    fn stop_session(
+        &self,
+        key: &str,
+        request: StopRequest,
+        now: DateTime<Utc>,
+    ) -> Result<StopView, ApiError> {
+        self.stop_session(key, request, now).map_err(ApiError::from)
+    }
+}
+
+pub struct Server<B: Backend> {
+    token: String,
+    backend: B,
+}
+
+impl<B: Backend> Server<B> {
+    pub fn new(token: impl Into<String>, backend: B) -> Result<Self, ApiError> {
+        let token = token.into();
+        if token.trim().is_empty() {
+            return Err(ApiError::Config("api token is required".to_string()));
+        }
+        Ok(Self { token, backend })
+    }
+
+    pub fn handle(&self, request: Request, now: DateTime<Utc>) -> Response {
+        if !request.path.starts_with("/v1/") {
+            return Response::empty(404);
+        }
+        let mut cors_headers = cors_headers(&request);
+        if request.method == "OPTIONS" {
+            return Response::empty(204).with_headers(cors_headers);
+        }
+        if !self.authorized(&request) {
+            return error_response(401, "unauthorized").with_headers(cors_headers);
+        }
+        if self.uses_cookie_auth(&request)
+            && unsafe_method(&request.method)
+            && !same_origin(&request)
+        {
+            return error_response(403, "forbidden").with_headers(cors_headers);
+        }
+        let mut response = self.route(request, now);
+        response.headers.append(&mut cors_headers);
+        response
+    }
+
+    fn route(&self, request: Request, now: DateTime<Utc>) -> Response {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/v1/health") => json_response(
+                200,
+                json!({
+                    "ok": true,
+                    "app": "curb",
+                    "api_version": 1,
+                }),
+            ),
+            ("GET", "/v1/snapshot") => self
+                .backend
+                .snapshot(now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            ("GET", "/v1/overview") => self
+                .backend
+                .snapshot(now)
+                .map(|snapshot| json_ok(snapshot.overview))
+                .unwrap_or_else(api_error_response),
+            ("GET", "/v1/agents") => self
+                .backend
+                .snapshot(now)
+                .map(|snapshot| json_ok(snapshot.agents))
+                .unwrap_or_else(api_error_response),
+            ("GET", "/v1/sessions") => self
+                .backend
+                .snapshot(now)
+                .map(|snapshot| json_ok(snapshot.sessions))
+                .unwrap_or_else(api_error_response),
+            ("POST", "/v1/service/rescan") => self
+                .backend
+                .rescan(now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/service/rescan") => error_response(405, "method not allowed"),
+            _ if request.path.starts_with("/v1/sessions/") => self.handle_session(request, now),
+            ("GET", "/v1/events") | ("GET", "/v1/alerts") => json_response(200, json!([])),
+            ("GET", "/v1/config")
+            | ("PUT", "/v1/config")
+            | ("GET", "/v1/notifications/health")
+            | ("POST", "/v1/notifications/test")
+            | ("GET", "/v1/onboarding")
+            | ("POST", "/v1/onboarding/complete") => {
+                error_response(501, "endpoint not implemented by rust api")
+            }
+            ("GET", _) => error_response(404, "not found"),
+            _ => error_response(405, "method not allowed"),
+        }
+    }
+
+    fn handle_session(&self, request: Request, now: DateTime<Utc>) -> Response {
+        let (key, action) = match session_route(&request.path) {
+            Ok(Some(route)) => route,
+            Ok(None) => return error_response(404, "not found"),
+            Err(()) => return error_response(400, "invalid session key"),
+        };
+        match (request.method.as_str(), action.as_deref()) {
+            ("GET", None) => self
+                .backend
+                .session(&key, now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            ("GET", Some("turns")) => self
+                .backend
+                .turns(&key, turn_query(&request, now), now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            ("POST", Some("ack")) => decode_ack(&request)
+                .and_then(|ack| self.backend.acknowledge_session(&key, ack, now))
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            ("POST", Some("stop")) => decode_stop(&request)
+                .and_then(|stop| self.backend.stop_session(&key, stop, now))
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, Some("ack" | "stop")) => error_response(405, "method not allowed"),
+            (_, Some("turns")) => error_response(405, "method not allowed"),
+            _ => error_response(404, "not found"),
+        }
+    }
+
+    fn authorized(&self, request: &Request) -> bool {
+        constant_time_eq(
+            bearer_token(request.header_value("authorization")),
+            &self.token,
+        ) || constant_time_eq(
+            request.header_value("x-curb-token").unwrap_or_default(),
+            &self.token,
+        ) || request
+            .cookie_value(TOKEN_COOKIE)
+            .is_some_and(|token| constant_time_eq(&token, &self.token))
+    }
+
+    fn uses_cookie_auth(&self, request: &Request) -> bool {
+        !constant_time_eq(
+            bearer_token(request.header_value("authorization")),
+            &self.token,
+        ) && !constant_time_eq(
+            request.header_value("x-curb-token").unwrap_or_default(),
+            &self.token,
+        ) && request
+            .cookie_value(TOKEN_COOKIE)
+            .is_some_and(|token| constant_time_eq(&token, &self.token))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    pub query: String,
+    pub headers: HeaderMap,
+    pub body: Vec<u8>,
+    pub scheme: String,
+    pub host: String,
+}
+
+impl Request {
+    pub fn new(method: impl Into<String>, target: impl Into<String>) -> Self {
+        let target = target.into();
+        let (path, query) = split_target(&target);
+        Self {
+            method: method.into().to_ascii_uppercase(),
+            path,
+            query,
+            headers: HeaderMap::default(),
+            body: Vec::new(),
+            scheme: "http".to_string(),
+            host: "127.0.0.1:8765".to_string(),
+        }
+    }
+
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.insert(name, value);
+        self
+    }
+
+    pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
+        self.body = body.into();
+        self
+    }
+
+    pub fn origin(mut self, origin: impl Into<String>) -> Self {
+        self.headers.insert("origin", origin);
+        self
+    }
+
+    pub fn cookie(mut self, cookie: impl Into<String>) -> Self {
+        self.headers.insert("cookie", cookie);
+        self
+    }
+
+    pub fn endpoint(mut self, scheme: impl Into<String>, host: impl Into<String>) -> Self {
+        self.scheme = scheme.into();
+        self.host = host.into();
+        self
+    }
+
+    fn header_value(&self, name: &str) -> Option<&str> {
+        self.headers.get(name)
+    }
+
+    fn cookie_value(&self, name: &str) -> Option<String> {
+        self.header_value("cookie").and_then(|raw| {
+            raw.split(';').find_map(|part| {
+                let (key, value) = part.trim().split_once('=')?;
+                (key == name).then(|| value.to_string())
+            })
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Response {
+    pub status: u16,
+    pub headers: HeaderMap,
+    pub body: Vec<u8>,
+}
+
+impl Response {
+    fn empty(status: u16) -> Self {
+        Self {
+            status,
+            headers: HeaderMap::default(),
+            body: Vec::new(),
+        }
+    }
+
+    fn with_headers(mut self, mut headers: HeaderMap) -> Self {
+        self.headers.append(&mut headers);
+        self
+    }
+
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(&self.body).to_string()
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct HeaderMap(BTreeMap<String, String>);
+
+impl HeaderMap {
+    pub fn insert(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.0
+            .insert(name.into().to_ascii_lowercase(), value.into());
+    }
+
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0.get(&name.to_ascii_lowercase()).map(String::as_str)
+    }
+
+    fn append(&mut self, other: &mut HeaderMap) {
+        self.0.append(&mut other.0);
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ApiError {
+    #[error("api config: {0}")]
+    Config(String),
+    #[error("session not found")]
+    SessionNotFound,
+    #[error("invalid acknowledgement: {0}")]
+    InvalidAck(String),
+    #[error("invalid stop request: {0}")]
+    InvalidStop(String),
+    #[error("session cannot be stopped safely: {0}")]
+    StopConflict(String),
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl From<RuntimeError> for ApiError {
+    fn from(error: RuntimeError) -> Self {
+        match error {
+            RuntimeError::Service(ServiceError::SessionNotFound) => Self::SessionNotFound,
+            RuntimeError::Service(ServiceError::InvalidAck(message)) => Self::InvalidAck(message),
+            RuntimeError::Service(ServiceError::InvalidStop(message)) => Self::InvalidStop(message),
+            RuntimeError::Service(ServiceError::StopConflict(message)) => {
+                Self::StopConflict(message)
+            }
+            other => Self::Internal(other.to_string()),
+        }
+    }
+}
+
+fn decode_ack(request: &Request) -> Result<AckRequest, ApiError> {
+    serde_json::from_slice(&request.body).map_err(|error| ApiError::InvalidAck(error.to_string()))
+}
+
+fn decode_stop(request: &Request) -> Result<StopRequest, ApiError> {
+    serde_json::from_slice(&request.body).map_err(|error| ApiError::InvalidStop(error.to_string()))
+}
+
+fn json_ok(value: impl Serialize) -> Response {
+    json_response(
+        200,
+        serde_json::to_value(value).expect("serialize api response"),
+    )
+}
+
+fn json_response(status: u16, value: Value) -> Response {
+    let mut headers = HeaderMap::default();
+    headers.insert("content-type", "application/json");
+    Response {
+        status,
+        headers,
+        body: serde_json::to_vec(&value).expect("serialize json"),
+    }
+}
+
+fn error_response(status: u16, message: &str) -> Response {
+    json_response(status, json!({ "error": message }))
+}
+
+fn api_error_response(error: ApiError) -> Response {
+    match error {
+        ApiError::SessionNotFound => error_response(404, "session not found"),
+        ApiError::InvalidAck(message) => error_response(400, &message),
+        ApiError::InvalidStop(message) => error_response(400, &message),
+        ApiError::StopConflict(message) => error_response(409, &message),
+        ApiError::Config(message) => error_response(500, &message),
+        ApiError::Internal(message) => error_response(500, &message),
+    }
+}
+
+fn cors_headers(request: &Request) -> HeaderMap {
+    let mut headers = HeaderMap::default();
+    let Some(origin) = request.header_value("origin") else {
+        return headers;
+    };
+    if !local_origin(origin) {
+        return headers;
+    }
+    headers.insert("access-control-allow-origin", origin);
+    headers.insert("vary", "Origin");
+    headers.insert(
+        "access-control-allow-headers",
+        "Authorization, Content-Type, X-Curb-Token",
+    );
+    headers.insert("access-control-allow-methods", "GET, POST, PUT, OPTIONS");
+    headers
+}
+
+fn local_origin(origin: &str) -> bool {
+    let Ok(parsed) = Url::parse(origin) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https" | "tauri") {
+        return false;
+    }
+    parsed.host_str().is_some_and(|host| {
+        host == "localhost"
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    })
+}
+
+fn same_origin(request: &Request) -> bool {
+    let Some(origin) = request.header_value("origin") else {
+        return false;
+    };
+    let Ok(parsed) = Url::parse(origin) else {
+        return false;
+    };
+    parsed.scheme().eq_ignore_ascii_case(&request.scheme)
+        && parsed
+            .host_str()
+            .zip(parsed.port_or_known_default())
+            .map(|(host, port)| format!("{host}:{port}"))
+            .is_some_and(|origin_host| origin_host.eq_ignore_ascii_case(&request.host))
+}
+
+fn unsafe_method(method: &str) -> bool {
+    !matches!(method, "GET" | "HEAD" | "OPTIONS")
+}
+
+fn bearer_token(value: Option<&str>) -> &str {
+    value
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .unwrap_or_default()
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.bytes()
+        .zip(right.bytes())
+        .fold(0u8, |diff, (left, right)| diff | (left ^ right))
+        == 0
+}
+
+fn split_target(target: &str) -> (String, String) {
+    let target = if let Ok(url) = Url::parse(target) {
+        let mut out = url.path().to_string();
+        if out.is_empty() {
+            out = "/".to_string();
+        }
+        return (out, url.query().unwrap_or_default().to_string());
+    } else {
+        target.to_string()
+    };
+    match target.split_once('?') {
+        Some((path, query)) => (path.to_string(), query.to_string()),
+        None => (target, String::new()),
+    }
+}
+
+fn session_route(path: &str) -> Result<Option<(String, Option<String>)>, ()> {
+    let Some(rest) = path.strip_prefix("/v1/sessions/") else {
+        return Ok(None);
+    };
+    let rest = rest.trim_matches('/');
+    if rest.is_empty() {
+        return Ok(None);
+    }
+    let parts = rest.split('/').collect::<Vec<_>>();
+    if parts.len() > 2 {
+        return Ok(None);
+    }
+    let key = percent_decode(parts[0]).ok_or(())?;
+    let action = parts.get(1).map(|part| (*part).to_string());
+    Ok(Some((key, action)))
+}
+
+fn percent_decode(raw: &str) -> Option<String> {
+    let mut out = Vec::new();
+    let mut bytes = raw.as_bytes().iter().copied();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let high = bytes.next()?;
+            let low = bytes.next()?;
+            let value = (hex_value(high)? << 4) | hex_value(low)?;
+            out.push(value);
+        } else {
+            out.push(byte);
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn turn_query(request: &Request, now: DateTime<Utc>) -> TurnQuery {
+    TurnQuery {
+        since: query_param(&request.query, "since").and_then(|value| since_param(&value, now)),
+        limit: query_param(&request.query, "limit")
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .map(|value| value.min(1000))
+            .unwrap_or(200),
+    }
+}
+
+fn query_param(query: &str, name: &str) -> Option<String> {
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.into_owned())
+}
+
+fn since_param(raw: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    if let Ok(duration) = parse_duration_for_cli(raw) {
+        return chrono::Duration::from_std(duration)
+            .ok()
+            .map(|duration| now - duration);
+    }
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|time| time.with_timezone(&Utc))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use chrono::TimeZone;
+
+    use super::*;
+    use crate::service::{AgentView, Overview};
+
+    #[test]
+    fn requires_auth_for_api_routes_and_allows_local_preflight() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let unauthorized = server.handle(Request::new("GET", "/v1/overview"), now);
+        assert_eq!(unauthorized.status, 401);
+
+        let preflight = server.handle(
+            Request::new("OPTIONS", "/v1/overview").origin("http://127.0.0.1:5173"),
+            now,
+        );
+        assert_eq!(preflight.status, 204);
+        assert_eq!(
+            preflight.headers.get("access-control-allow-origin"),
+            Some("http://127.0.0.1:5173")
+        );
+    }
+
+    #[test]
+    fn supports_bearer_header_token_and_cookie_auth() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        assert_eq!(
+            server
+                .handle(
+                    Request::new("GET", "/v1/health").header("Authorization", "Bearer test-token"),
+                    now,
+                )
+                .status,
+            200
+        );
+        assert_eq!(
+            server
+                .handle(
+                    Request::new("GET", "/v1/health").header("X-Curb-Token", "test-token"),
+                    now,
+                )
+                .status,
+            200
+        );
+        assert_eq!(
+            server
+                .handle(
+                    Request::new("GET", "/v1/health").cookie("curb_token=test-token"),
+                    now,
+                )
+                .status,
+            200
+        );
+    }
+
+    #[test]
+    fn cookie_auth_requires_same_origin_for_unsafe_methods() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let missing_origin = server.handle(
+            Request::new("POST", "/v1/service/rescan").cookie("curb_token=test-token"),
+            now,
+        );
+        assert_eq!(missing_origin.status, 403);
+
+        let cross_origin = server.handle(
+            Request::new("POST", "/v1/service/rescan")
+                .cookie("curb_token=test-token")
+                .origin("http://evil.example"),
+            now,
+        );
+        assert_eq!(cross_origin.status, 403);
+
+        let same_origin = server.handle(
+            Request::new("POST", "/v1/service/rescan")
+                .cookie("curb_token=test-token")
+                .origin("http://127.0.0.1:8765")
+                .endpoint("http", "127.0.0.1:8765"),
+            now,
+        );
+        assert_eq!(same_origin.status, 200);
+    }
+
+    #[test]
+    fn returns_snapshot_slices() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let overview = server.handle(authed("GET", "/v1/overview"), now);
+        assert_eq!(overview.status, 200);
+        assert!(overview.text().contains("\"status\":\"WATCH\""));
+
+        let agents = server.handle(authed("GET", "/v1/agents"), now);
+        assert_eq!(agents.status, 200);
+        assert!(agents.text().contains("codex-worker"));
+
+        let sessions = server.handle(authed("GET", "/v1/sessions"), now);
+        assert_eq!(sessions.status, 200);
+        assert!(sessions.text().contains("codex:session/one"));
+    }
+
+    #[test]
+    fn decodes_session_key_and_filters_turns() {
+        let backend = FakeBackend::default();
+        let server = Server::new("test-token", backend).unwrap();
+        let now = fixed_now();
+
+        let session = server.handle(authed("GET", "/v1/sessions/codex:session%2Fone"), now);
+        assert_eq!(session.status, 200);
+        assert!(session.text().contains("\"id\":\"session/one\""));
+
+        let turns = server.handle(
+            authed(
+                "GET",
+                "/v1/sessions/codex:session%2Fone/turns?limit=1&since=24h",
+            ),
+            now,
+        );
+        assert_eq!(turns.status, 200);
+        assert!(turns.text().contains("\"total_tokens\":789"));
+    }
+
+    #[test]
+    fn rescan_requires_post_and_auth() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        assert_eq!(
+            server
+                .handle(authed("GET", "/v1/service/rescan"), now)
+                .status,
+            405
+        );
+        assert_eq!(
+            server
+                .handle(Request::new("POST", "/v1/service/rescan"), now)
+                .status,
+            401
+        );
+        assert_eq!(
+            server
+                .handle(authed("POST", "/v1/service/rescan"), now)
+                .status,
+            200
+        );
+    }
+
+    #[test]
+    fn maps_ack_and_stop_routes_and_errors() {
+        let backend = FakeBackend::default();
+        backend.next_error.replace(Some(ApiError::SessionNotFound));
+        let server = Server::new("test-token", backend).unwrap();
+        let now = fixed_now();
+        let missing = server.handle(
+            authed("POST", "/v1/sessions/missing/ack").body(r#"{"extend_seconds":60}"#),
+            now,
+        );
+        assert_eq!(missing.status, 404);
+
+        server
+            .backend
+            .next_error
+            .replace(Some(ApiError::StopConflict("busy".to_string())));
+        let conflict = server.handle(
+            authed("POST", "/v1/sessions/codex:session%2Fone/stop").body(stop_body()),
+            now,
+        );
+        assert_eq!(conflict.status, 409);
+
+        let ok = server.handle(
+            authed("POST", "/v1/sessions/codex:session%2Fone/ack")
+                .body(r#"{"extend_seconds":60,"reason":"still supervising"}"#),
+            now,
+        );
+        assert_eq!(ok.status, 200);
+        assert!(ok.text().contains("still supervising"));
+    }
+
+    #[test]
+    fn invalid_encoded_session_key_returns_bad_request_shape() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let response = server.handle(authed("GET", "/v1/sessions/bad%XX"), now);
+
+        assert_eq!(response.status, 400);
+        assert!(response.text().contains("invalid session key"));
+    }
+
+    #[test]
+    fn malformed_ack_and_stop_payloads_are_bad_requests() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let ack = server.handle(
+            authed("POST", "/v1/sessions/codex:session%2Fone/ack").body("{"),
+            now,
+        );
+        assert_eq!(ack.status, 400);
+
+        let stop = server.handle(
+            authed("POST", "/v1/sessions/codex:session%2Fone/stop").body("{"),
+            now,
+        );
+        assert_eq!(stop.status, 400);
+    }
+
+    fn authed(method: &str, target: &str) -> Request {
+        Request::new(method, target).header("Authorization", "Bearer test-token")
+    }
+
+    fn fixed_now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap()
+    }
+
+    fn stop_body() -> &'static str {
+        r#"{"confirm":true,"scope":"tree","expected":{"pid":4242,"started_at":"2026-05-28T15:59:00Z","owner":"phaedrus","executable":"/usr/local/bin/codex"}}"#
+    }
+
+    #[derive(Default)]
+    struct FakeBackend {
+        next_error: RefCell<Option<ApiError>>,
+    }
+
+    impl FakeBackend {
+        fn maybe_error(&self) -> Result<(), ApiError> {
+            match self.next_error.borrow_mut().take() {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
+        }
+    }
+
+    impl Backend for FakeBackend {
+        fn snapshot(&self, _now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+            self.maybe_error()?;
+            Ok(snapshot())
+        }
+
+        fn rescan(&self, _now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+            self.maybe_error()?;
+            Ok(snapshot())
+        }
+
+        fn session(&self, key: &str, _now: DateTime<Utc>) -> Result<SessionView, ApiError> {
+            self.maybe_error()?;
+            snapshot()
+                .sessions
+                .into_iter()
+                .find(|session| session.key == key || session.id == key)
+                .ok_or(ApiError::SessionNotFound)
+        }
+
+        fn turns(
+            &self,
+            _key: &str,
+            _query: TurnQuery,
+            _now: DateTime<Utc>,
+        ) -> Result<Vec<TurnView>, ApiError> {
+            self.maybe_error()?;
+            Ok(vec![TurnView {
+                id: None,
+                request_id: None,
+                session_key: "codex:session/one".to_string(),
+                session_id: Some("session/one".to_string()),
+                provider: "codex".to_string(),
+                at: Some(fixed_now()),
+                model: None,
+                input_tokens: 789,
+                cached_input_tokens: 0,
+                output_tokens: 0,
+                cache_creation_input_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: 789,
+                cumulative_tokens: 789,
+                source: "test".to_string(),
+            }])
+        }
+
+        fn acknowledge_session(
+            &self,
+            key: &str,
+            request: AckRequest,
+            _now: DateTime<Utc>,
+        ) -> Result<AckView, ApiError> {
+            self.maybe_error()?;
+            Ok(AckView {
+                session_key: key.to_string(),
+                extend_seconds: request.extend_seconds,
+                until: fixed_now(),
+                reason: request.reason,
+            })
+        }
+
+        fn stop_session(
+            &self,
+            key: &str,
+            _request: StopRequest,
+            _now: DateTime<Utc>,
+        ) -> Result<StopView, ApiError> {
+            self.maybe_error()?;
+            Ok(StopView {
+                session_key: key.to_string(),
+                agent_id: "codex-worker".to_string(),
+                pid: 4242,
+                started_at: fixed_now(),
+                owner: "phaedrus".to_string(),
+                executable: Some("/usr/local/bin/codex".into()),
+                bundle_id: None,
+                team_id: None,
+                scope: "tree".to_string(),
+                scope_pids: vec![4242],
+                result: "terminated".to_string(),
+            })
+        }
+    }
+
+    fn snapshot() -> Snapshot {
+        Snapshot {
+            overview: Overview {
+                mode: "alert".to_string(),
+                status: "WATCH".to_string(),
+                message: "active usage is over a warning threshold".to_string(),
+                active_agents: 1,
+                active_sessions: 1,
+                warning_sessions: 1,
+                stop_sessions: 0,
+                idle_high_sessions: 0,
+                window_tokens: 789,
+                lookback_tokens: 1000,
+                last_scan: fixed_now(),
+                sources: Vec::new(),
+            },
+            agents: vec![AgentView {
+                id: "codex-worker".to_string(),
+                provider: "codex".to_string(),
+                label: "Codex Worker".to_string(),
+                state: "warn".to_string(),
+                process_state: "running".to_string(),
+                usage_state: "warn".to_string(),
+                action_state: "acknowledge".to_string(),
+                actionable: false,
+                pid: 4242,
+                process_started_at: Some(fixed_now()),
+                cwd: Some("/repo".into()),
+                matched_by: vec!["process_name".to_string()],
+                confidence: 90,
+                latest_session_id: Some("session/one".to_string()),
+                latest_turn_tokens: 789,
+                window_tokens: 789,
+                explanation: "latest turn crossed the warning threshold".to_string(),
+            }],
+            sessions: vec![SessionView {
+                key: "codex:session/one".to_string(),
+                id: "session/one".to_string(),
+                provider: "codex".to_string(),
+                state: "warn".to_string(),
+                process_state: "running".to_string(),
+                usage_state: "warn".to_string(),
+                action_state: "acknowledge".to_string(),
+                actionable: false,
+                can_acknowledge: true,
+                acknowledged: false,
+                acknowledged_until: None,
+                cwd: Some("/repo".into()),
+                models: vec!["model".to_string()],
+                last_seen_at: fixed_now(),
+                last_usage_at: Some(fixed_now()),
+                calls: 1,
+                latest_turn_tokens: 789,
+                window_tokens: 789,
+                total_tokens: 1000,
+                correlated_agent_id: Some("codex-worker".to_string()),
+                correlated_pid: Some(4242),
+                correlated_process_started_at: Some(fixed_now()),
+                correlated_owner: Some("phaedrus".to_string()),
+                correlated_executable: Some("/usr/local/bin/codex".into()),
+                correlated_bundle_id: None,
+                correlated_team_id: None,
+                correlation_reason: Some("provider+cwd".to_string()),
+                correlation_score: 125,
+                confidence: 90,
+                matched_by: vec!["process_name".to_string()],
+                risk_rank: 1,
+                explanation: "latest turn crossed the warning threshold".to_string(),
+            }],
+            turns: Vec::new(),
+        }
+    }
+}

@@ -152,7 +152,8 @@ pub struct TurnView {
     pub source: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AckRequest {
     pub extend_seconds: i64,
     pub reason: String,
@@ -174,7 +175,8 @@ pub struct SessionAck {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct StopRequest {
     pub confirm: bool,
     pub scope: String,
