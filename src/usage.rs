@@ -1,10 +1,13 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -19,6 +22,13 @@ pub enum UsageError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error("usage state {path}: {source}")]
+    State {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    #[error("usage scan: {0}")]
+    Scan(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -48,22 +58,32 @@ pub struct Event {
 }
 
 impl Event {
-    fn dedup_key(&self) -> Option<String> {
+    fn dedup_key(&self) -> String {
         match self.provider.as_str() {
-            "codex" if self.cumulative_tokens != 0 || self.total_tokens != 0 => Some(format!(
+            "codex" if self.cumulative_tokens != 0 || self.total_tokens != 0 => format!(
                 "codex:{}:{}:{}",
                 self.session_id.as_deref().unwrap_or_default(),
                 self.cumulative_tokens,
                 self.total_tokens
-            )),
-            "claude" => self.request_id.as_ref().map(|request_id| {
+            ),
+            "claude" if self.request_id.is_some() => {
+                let request_id = self.request_id.as_deref().unwrap_or_default();
                 format!(
                     "claude:{}:{}",
                     self.session_id.as_deref().unwrap_or_default(),
                     request_id
                 )
-            }),
-            _ => None,
+            }
+            _ => format!(
+                "{}:{}:{}:{}:{}",
+                self.provider,
+                self.session_id.as_deref().unwrap_or_default(),
+                self.request_id.as_deref().unwrap_or_default(),
+                self.timestamp
+                    .map(|timestamp| timestamp.to_rfc3339())
+                    .unwrap_or_default(),
+                self.source_path.display()
+            ),
         }
     }
 }
@@ -102,6 +122,14 @@ pub struct Report {
     pub sessions: Vec<SessionSummary>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Scan {
+    pub events: Vec<Event>,
+    pub sources: Vec<SourceReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 impl Report {
     pub fn source_line(&self) -> String {
         self.sources
@@ -115,22 +143,106 @@ impl Report {
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct Reader {
     home: PathBuf,
+    state_dir: Option<PathBuf>,
+    state: Mutex<ReaderState>,
 }
 
 impl Reader {
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        Self { home: home.into() }
+        Self {
+            home: home.into(),
+            state_dir: None,
+            state: Mutex::new(ReaderState::default()),
+        }
+    }
+
+    pub fn with_state(home: impl Into<PathBuf>, state_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            home: home.into(),
+            state_dir: Some(state_dir.into()),
+            state: Mutex::new(ReaderState::default()),
+        }
+    }
+
+    pub fn set_state_dir(&mut self, state_dir: impl Into<PathBuf>) {
+        self.state_dir = Some(state_dir.into());
+        self.state = Mutex::new(ReaderState::default());
     }
 
     pub fn report_since(&self, since: Option<DateTime<Utc>>) -> Result<Report, UsageError> {
-        let (events, sources) = self.events_since(since)?;
+        let scan = self.scan_since(since)?;
+        if let Some(error) = scan.error {
+            return Err(UsageError::Scan(error));
+        }
         Ok(Report {
             generated_at: Utc::now(),
-            sources,
-            sessions: summarize(&events),
+            sources: scan.sources,
+            sessions: summarize(&scan.events),
+        })
+    }
+
+    pub fn scan_since(&self, since: Option<DateTime<Utc>>) -> Result<Scan, UsageError> {
+        let mut state = self.state.lock().expect("usage reader mutex poisoned");
+        state.load(self.state_dir.as_deref())?;
+        let codex_root = self.home.join(".codex").join("archived_sessions");
+        let claude_root = self.home.join(".claude").join("projects");
+        let mut errors = Vec::new();
+        let (mut events, codex_report) = match codex_archived_sessions_since_cached(
+            &mut state,
+            self.state_dir.as_deref(),
+            &codex_root,
+            since,
+        ) {
+            Ok((events, report)) => (events, report),
+            Err(error) => {
+                let error = error.to_string();
+                errors.push(error.clone());
+                (
+                    Vec::new(),
+                    SourceReport {
+                        provider: "codex".to_string(),
+                        files: 0,
+                        events: 0,
+                        error: Some(error),
+                    },
+                )
+            }
+        };
+        let (claude, claude_report) = match claude_projects_since_cached(
+            &mut state,
+            self.state_dir.as_deref(),
+            &claude_root,
+            since,
+        ) {
+            Ok((events, report)) => (events, report),
+            Err(error) => {
+                let error = error.to_string();
+                errors.push(error.clone());
+                (
+                    Vec::new(),
+                    SourceReport {
+                        provider: "claude".to_string(),
+                        files: 0,
+                        events: 0,
+                        error: Some(error),
+                    },
+                )
+            }
+        };
+        events.extend(claude);
+        let mut events = dedupe(events);
+        events.retain(|event| event_is_since(event, since));
+        sort_events(&mut events);
+        Ok(Scan {
+            events,
+            sources: vec![codex_report, claude_report],
+            error: if errors.is_empty() {
+                None
+            } else {
+                Some(errors.join("; "))
+            },
         })
     }
 
@@ -138,15 +250,118 @@ impl Reader {
         &self,
         since: Option<DateTime<Utc>>,
     ) -> Result<(Vec<Event>, Vec<SourceReport>), UsageError> {
-        let codex_root = self.home.join(".codex").join("archived_sessions");
-        let claude_root = self.home.join(".claude").join("projects");
-        let (mut codex, codex_report) = codex_archived_sessions_since(&codex_root, since)?;
-        let (claude, claude_report) = claude_projects_since(&claude_root, since)?;
-        codex.extend(claude);
-        let mut events = dedupe(codex);
-        events.retain(|event| event_is_since(event, since));
-        sort_events(&mut events);
-        Ok((events, vec![codex_report, claude_report]))
+        let scan = self.scan_since(since)?;
+        if let Some(error) = scan.error {
+            Err(UsageError::Scan(error))
+        } else {
+            Ok((scan.events, scan.sources))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct ReaderState {
+    #[serde(skip)]
+    loaded: bool,
+    #[serde(default)]
+    files: HashMap<PathBuf, CachedFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CachedFile {
+    size: u64,
+    modified: DateTime<Utc>,
+    prefix_hash: String,
+    events: Vec<Event>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codex_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codex_cwd: Option<PathBuf>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedReaderState {
+    version: u8,
+    files: HashMap<PathBuf, CachedFile>,
+}
+
+const PERSISTED_READER_STATE_VERSION: u8 = 1;
+
+impl ReaderState {
+    fn load(&mut self, state_dir: Option<&Path>) -> Result<(), UsageError> {
+        if self.loaded {
+            return Ok(());
+        }
+        self.loaded = true;
+        let Some(state_dir) = state_dir else {
+            return Ok(());
+        };
+        let path = state_dir.join("usage-cache.json");
+        let content = match fs::read(&path) {
+            Ok(content) => content,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(source) => return Err(UsageError::Io { path, source }),
+        };
+        let persisted: PersistedReaderState =
+            serde_json::from_slice(&content).map_err(|source| UsageError::State {
+                path: path.clone(),
+                source,
+            })?;
+        if persisted.version == PERSISTED_READER_STATE_VERSION {
+            self.files = persisted.files;
+        }
+        Ok(())
+    }
+
+    fn save(&self, state_dir: Option<&Path>) -> Result<(), UsageError> {
+        let Some(state_dir) = state_dir else {
+            return Ok(());
+        };
+        fs::create_dir_all(state_dir).map_err(|source| UsageError::Io {
+            path: state_dir.to_path_buf(),
+            source,
+        })?;
+        let path = state_dir.join("usage-cache.json");
+        let persisted = PersistedReaderState {
+            version: PERSISTED_READER_STATE_VERSION,
+            files: self.files.clone(),
+        };
+        let content =
+            serde_json::to_vec_pretty(&persisted).map_err(|source| UsageError::State {
+                path: path.clone(),
+                source,
+            })?;
+        let tmp = state_dir.join(format!(".usage-cache-{}.tmp", std::process::id()));
+        {
+            let mut file = File::create(&tmp).map_err(|source| UsageError::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+            file.write_all(&content).map_err(|source| UsageError::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(fs::Permissions::from_mode(0o600))
+                    .map_err(|source| UsageError::Io {
+                        path: tmp.clone(),
+                        source,
+                    })?;
+            }
+        }
+        fs::rename(&tmp, &path).map_err(|source| UsageError::Io { path, source })?;
+        Ok(())
+    }
+}
+
+impl UsageError {
+    fn is_not_found(&self) -> bool {
+        matches!(
+            self,
+            UsageError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound
+        )
     }
 }
 
@@ -159,7 +374,36 @@ pub fn codex_archived_sessions_since(
     paths.retain(|path| modified_since(path, since).unwrap_or(true));
     let mut events = Vec::new();
     for path in &paths {
-        events.extend(parse_codex_file(path, 0, None, None)?);
+        events.extend(parse_codex_file(path, 0, None, None)?.events);
+    }
+    let mut events = dedupe(events);
+    events.retain(|event| event_is_since(event, since));
+    sort_events(&mut events);
+    let report = SourceReport {
+        provider: "codex".to_string(),
+        files: paths.len(),
+        events: events.len(),
+        error: None,
+    };
+    Ok((events, report))
+}
+
+fn codex_archived_sessions_since_cached(
+    state: &mut ReaderState,
+    state_dir: Option<&Path>,
+    root: &Path,
+    since: Option<DateTime<Utc>>,
+) -> Result<(Vec<Event>, SourceReport), UsageError> {
+    let mut paths = jsonl_files_one_level(root)?;
+    paths.retain(|path| modified_since(path, since).unwrap_or(true));
+    prune_missing(state, state_dir, root, &paths)?;
+    let mut events = Vec::new();
+    for path in &paths {
+        match read_codex_cached(state, state_dir, path) {
+            Ok(file_events) => events.extend(file_events),
+            Err(error) if error.is_not_found() => continue,
+            Err(error) => return Err(error),
+        }
     }
     let mut events = dedupe(events);
     events.retain(|event| event_is_since(event, since));
@@ -194,6 +438,172 @@ pub fn claude_projects_since(
         error: None,
     };
     Ok((events, report))
+}
+
+fn claude_projects_since_cached(
+    state: &mut ReaderState,
+    state_dir: Option<&Path>,
+    root: &Path,
+    since: Option<DateTime<Utc>>,
+) -> Result<(Vec<Event>, SourceReport), UsageError> {
+    let mut paths = jsonl_files_recursive(root)?;
+    paths.retain(|path| modified_since(path, since).unwrap_or(true));
+    prune_missing(state, state_dir, root, &paths)?;
+    let mut events = Vec::new();
+    for path in &paths {
+        match read_claude_cached(state, state_dir, path) {
+            Ok(file_events) => events.extend(file_events),
+            Err(error) if error.is_not_found() => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let mut events = dedupe(events);
+    events.retain(|event| event_is_since(event, since));
+    sort_events(&mut events);
+    let report = SourceReport {
+        provider: "claude".to_string(),
+        files: paths.len(),
+        events: events.len(),
+        error: None,
+    };
+    Ok((events, report))
+}
+
+fn read_codex_cached(
+    state: &mut ReaderState,
+    state_dir: Option<&Path>,
+    path: &Path,
+) -> Result<Vec<Event>, UsageError> {
+    read_cached(state, state_dir, path, |start, cached| {
+        let seed_session = cached.and_then(|file| file.codex_session_id.clone());
+        let seed_cwd = cached.and_then(|file| file.codex_cwd.clone());
+        let parsed = parse_codex_file(path, start, seed_session, seed_cwd)?;
+        let mut combined = cached.map(|file| file.events.clone()).unwrap_or_default();
+        combined.extend(parsed.events);
+        let combined = dedupe(combined);
+        Ok(CachedRead {
+            events: combined,
+            codex_session_id: parsed.session_id,
+            codex_cwd: parsed.cwd,
+        })
+    })
+}
+
+fn read_claude_cached(
+    state: &mut ReaderState,
+    state_dir: Option<&Path>,
+    path: &Path,
+) -> Result<Vec<Event>, UsageError> {
+    read_cached(state, state_dir, path, |start, cached| {
+        let mut combined = cached.map(|file| file.events.clone()).unwrap_or_default();
+        combined.extend(parse_claude_file(path, start)?);
+        Ok(CachedRead {
+            events: dedupe(combined),
+            codex_session_id: None,
+            codex_cwd: None,
+        })
+    })
+}
+
+struct CachedRead {
+    events: Vec<Event>,
+    codex_session_id: Option<String>,
+    codex_cwd: Option<PathBuf>,
+}
+
+struct CodexParse {
+    events: Vec<Event>,
+    session_id: Option<String>,
+    cwd: Option<PathBuf>,
+}
+
+fn read_cached(
+    state: &mut ReaderState,
+    state_dir: Option<&Path>,
+    path: &Path,
+    read: impl FnOnce(u64, Option<&CachedFile>) -> Result<CachedRead, UsageError>,
+) -> Result<Vec<Event>, UsageError> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(source) => {
+            state.files.remove(path);
+            let _ = state.save(state_dir);
+            return Err(UsageError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let modified = system_time_to_utc(metadata.modified().map_err(|source| UsageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?);
+    let size = metadata.len();
+    if let Some(cached) = state.files.get(path)
+        && cached.size == size
+        && cached.modified == modified
+    {
+        return Ok(cached.events.clone());
+    }
+
+    let cached = state.files.get(path).cloned();
+    let mut start = 0;
+    if let Some(cached_file) = &cached
+        && cached_file.size > 0
+        && size > cached_file.size
+        && file_prefix_hash(path, cached_file.size)? == cached_file.prefix_hash
+    {
+        start = cached_file.size;
+    }
+
+    let next = match read(start, cached.as_ref()) {
+        Ok(next) => next,
+        Err(error) => {
+            state.files.remove(path);
+            let _ = state.save(state_dir);
+            return Err(error);
+        }
+    };
+    let prefix_hash = match file_prefix_hash(path, size) {
+        Ok(hash) => hash,
+        Err(error) => {
+            state.files.remove(path);
+            let _ = state.save(state_dir);
+            return Err(error);
+        }
+    };
+    let cached_file = CachedFile {
+        size,
+        modified,
+        prefix_hash,
+        events: next.events.clone(),
+        codex_session_id: next.codex_session_id,
+        codex_cwd: next.codex_cwd,
+    };
+    state.files.insert(path.to_path_buf(), cached_file);
+    state.save(state_dir)?;
+    Ok(next.events)
+}
+
+fn prune_missing(
+    state: &mut ReaderState,
+    state_dir: Option<&Path>,
+    root: &Path,
+    paths: &[PathBuf],
+) -> Result<(), UsageError> {
+    let current = paths.iter().collect::<HashSet<_>>();
+    let before = state.files.len();
+    state
+        .files
+        .retain(|path, _| !path_within(path, root) || current.contains(path));
+    if state.files.len() != before {
+        state.save(state_dir)?;
+    }
+    Ok(())
+}
+
+fn path_within(path: &Path, root: &Path) -> bool {
+    path.strip_prefix(root).is_ok()
 }
 
 pub fn summarize(events: &[Event]) -> Vec<SessionSummary> {
@@ -250,7 +660,7 @@ fn parse_codex_file(
     offset: u64,
     mut session_id: Option<String>,
     mut cwd: Option<PathBuf>,
-) -> Result<Vec<Event>, UsageError> {
+) -> Result<CodexParse, UsageError> {
     if session_id.is_none() {
         session_id = path
             .file_stem()
@@ -320,7 +730,11 @@ fn parse_codex_file(
             model_context_window: info.model_context_window,
         });
     }
-    Ok(out)
+    Ok(CodexParse {
+        events: out,
+        session_id,
+        cwd,
+    })
 }
 
 fn parse_claude_file(path: &Path, offset: u64) -> Result<Vec<Event>, UsageError> {
@@ -378,9 +792,7 @@ fn dedupe(events: Vec<Event>) -> Vec<Event> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for event in events {
-        if let Some(key) = event.dedup_key()
-            && !seen.insert(key)
-        {
+        if !seen.insert(event.dedup_key()) {
             continue;
         }
         out.push(event);
@@ -412,6 +824,35 @@ fn modified_since(path: &Path, since: Option<DateTime<Utc>>) -> Result<bool, Usa
         source,
     })?;
     Ok(DateTime::<Utc>::from(modified) >= since)
+}
+
+fn system_time_to_utc(time: SystemTime) -> DateTime<Utc> {
+    DateTime::<Utc>::from(time)
+}
+
+fn file_prefix_hash(path: &Path, bytes: u64) -> Result<String, UsageError> {
+    let mut file = File::open(path).map_err(|source| UsageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut remaining = bytes;
+    let mut buffer = [0u8; 8192];
+    let mut hasher = Sha256::new();
+    while remaining > 0 {
+        let read_len = remaining.min(buffer.len() as u64) as usize;
+        let read = file
+            .read(&mut buffer[..read_len])
+            .map_err(|source| UsageError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        remaining -= read as u64;
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn jsonl_files_one_level(root: &Path) -> Result<Vec<PathBuf>, UsageError> {
@@ -710,6 +1151,171 @@ mod tests {
         assert!(events.iter().any(|event| event.total_tokens == 211));
     }
 
+    #[test]
+    fn reader_caches_returned_events_without_caller_mutation() {
+        let home = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        fs::write(
+            codex.join("rollout.jsonl"),
+            codex_fixture("session_codex", "/repo", "2026-05-19T16:00:00Z", 107, 107),
+        )
+        .unwrap();
+        let reader = Reader::new(home.path());
+
+        let (mut events, _) = reader.events_since(None).unwrap();
+        events[0].session_id = Some("mutated".to_string());
+        let (events, _) = reader.events_since(None).unwrap();
+
+        assert_eq!(events[0].session_id.as_deref(), Some("session_codex"));
+    }
+
+    #[test]
+    fn reader_prunes_deleted_provider_files() {
+        let home = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        let path = codex.join("rollout.jsonl");
+        fs::write(
+            &path,
+            codex_fixture("session_codex", "/repo", "2026-05-19T16:00:00Z", 107, 107),
+        )
+        .unwrap();
+        let reader = Reader::new(home.path());
+        assert_eq!(reader.events_since(None).unwrap().0.len(), 1);
+
+        fs::remove_file(&path).unwrap();
+        let (events, reports) = reader.events_since(None).unwrap();
+
+        assert!(events.is_empty());
+        assert_eq!(reports[0].files, 0);
+        assert_eq!(reports[0].events, 0);
+    }
+
+    #[test]
+    fn reader_persists_cache_and_reads_appended_bytes_after_restart() {
+        let home = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        let path = codex.join("rollout.jsonl");
+        fs::write(
+            &path,
+            codex_fixture("session_codex", "/repo", "2026-05-19T16:00:00Z", 107, 107),
+        )
+        .unwrap();
+        let reader = Reader::with_state(home.path(), state.path());
+        assert_eq!(reader.events_since(None).unwrap().0.len(), 1);
+
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(codex_token_row("2026-05-19T16:02:00Z", 211, 318).as_bytes())
+            .unwrap();
+        let restarted = Reader::with_state(home.path(), state.path());
+        let (events, _) = restarted.events_since(None).unwrap();
+
+        assert!(has_event(&events, 107, "2026-05-19T16:00:00Z"));
+        assert!(has_event(&events, 211, "2026-05-19T16:02:00Z"));
+        assert!(state.path().join("usage-cache.json").exists());
+    }
+
+    #[test]
+    fn reader_rejects_same_path_replacement_as_append() {
+        let home = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        let path = codex.join("rollout.jsonl");
+        let initial = codex_fixture("session_codex", "/repo", "2026-05-19T16:00:00Z", 107, 107);
+        fs::write(&path, &initial).unwrap();
+        let reader = Reader::with_state(home.path(), state.path());
+        assert_eq!(reader.events_since(None).unwrap().0.len(), 1);
+
+        let replaced = strings_of_length("not-json", initial.len())
+            + &codex_token_row("2026-05-19T16:02:00Z", 211, 318);
+        fs::write(&path, replaced).unwrap();
+        let restarted = Reader::with_state(home.path(), state.path());
+
+        assert!(restarted.events_since(None).is_err());
+    }
+
+    #[test]
+    fn reader_rejects_same_path_replacement_after_unchanged_prefix() {
+        let home = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        let path = codex.join("rollout.jsonl");
+        let prefix = strings_of_length(" ", 4096);
+        let initial = prefix.clone()
+            + &codex_fixture("session_codex", "/repo", "2026-05-19T16:00:00Z", 107, 107);
+        fs::write(&path, &initial).unwrap();
+        let reader = Reader::with_state(home.path(), state.path());
+        assert_eq!(reader.events_since(None).unwrap().0.len(), 1);
+
+        let replaced = prefix
+            + &strings_of_length("not-json", initial.len() - 4096)
+            + &codex_token_row("2026-05-19T16:02:00Z", 211, 318);
+        fs::write(&path, replaced).unwrap();
+        let restarted = Reader::with_state(home.path(), state.path());
+
+        assert!(restarted.events_since(None).is_err());
+    }
+
+    #[test]
+    fn reader_scan_reports_provider_errors_without_losing_other_provider() {
+        let home = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        fs::write(codex.join("bad.jsonl"), r#"{"bad""#).unwrap();
+        let claude = home.path().join(".claude").join("projects").join("-repo");
+        fs::create_dir_all(&claude).unwrap();
+        fs::write(
+            claude.join("session.jsonl"),
+            r#"{"timestamp":"2026-05-19T20:00:00Z","requestId":"req_1","sessionId":"session_claude","uuid":"turn_1","cwd":"/repo","message":{"id":"msg_1","model":"claude-opus-4-7","usage":{"input_tokens":1,"cache_creation_input_tokens":30,"cache_read_input_tokens":40,"output_tokens":5}}}
+"#,
+        )
+        .unwrap();
+
+        let scan = Reader::new(home.path()).scan_since(None).unwrap();
+
+        assert!(scan.error.is_some());
+        assert_eq!(scan.sources[0].provider, "codex");
+        assert!(scan.sources[0].error.is_some());
+        assert_eq!(scan.sources[1].provider, "claude");
+        assert_eq!(scan.sources[1].events, 1);
+        assert_eq!(scan.events.len(), 1);
+    }
+
+    #[test]
+    fn reader_hydrates_persisted_dedup_keys() {
+        let home = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let codex = home.path().join(".codex").join("archived_sessions");
+        fs::create_dir_all(&codex).unwrap();
+        let path = codex.join("rollout.jsonl");
+        fs::write(
+            &path,
+            codex_fixture("session_codex", "/repo", "2026-05-19T16:00:00Z", 107, 107),
+        )
+        .unwrap();
+        let reader = Reader::with_state(home.path(), state.path());
+        assert_eq!(reader.events_since(None).unwrap().0.len(), 1);
+
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(codex_token_row("2026-05-19T16:01:00Z", 107, 107).as_bytes())
+            .unwrap();
+        let restarted = Reader::with_state(home.path(), state.path());
+        let (events, _) = restarted.events_since(None).unwrap();
+
+        assert_eq!(events.len(), 1);
+    }
+
     fn codex_fixture(session_id: &str, cwd: &str, at: &str, total: i64, cumulative: i64) -> String {
         format!(
             r#"{{"timestamp":"{at}","type":"session_meta","payload":{{"id":"{session_id}","cwd":"{cwd}"}}}}
@@ -723,5 +1329,19 @@ mod tests {
             r#"{{"timestamp":"{at}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":100,"cached_input_tokens":20,"output_tokens":5,"reasoning_output_tokens":2,"total_tokens":{total}}},"total_token_usage":{{"total_tokens":{cumulative}}},"model_context_window":258400}}}}}}
 "#
         )
+    }
+
+    fn has_event(events: &[Event], total: i64, at: &str) -> bool {
+        events.iter().any(|event| {
+            event.total_tokens == total
+                && event.timestamp
+                    == DateTime::parse_from_rfc3339(at)
+                        .ok()
+                        .map(|time| time.with_timezone(&Utc))
+        })
+    }
+
+    fn strings_of_length(pattern: &str, len: usize) -> String {
+        pattern.chars().cycle().take(len).collect()
     }
 }

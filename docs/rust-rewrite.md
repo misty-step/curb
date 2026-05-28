@@ -22,9 +22,11 @@ The rewrite keeps deep modules and narrow interfaces:
   sensitive-field redaction, hash chaining, append hooks.
 - `src/platform.rs`: process identity, process-tree scope, and sealed
   `TerminationTarget` construction.
-- future `src/usage.rs`: provider metadata readers and durable parse cache.
-- future `src/service.rs`: daemon orchestration, read models, correlation,
-  policy, acknowledgement, grace, and actions.
+- `src/usage.rs`: provider metadata readers, durable parse cache, append-only
+  tail reads, replacement detection, per-provider scan errors, and session
+  summaries.
+- `src/service.rs`: usage-derived snapshot/read-model vocabulary. Process
+  correlation, acknowledgement, grace, and actions are still to port.
 - future `src/api.rs`: loopback HTTP adapter only.
 - future `src/web.rs`: embedded UI assets only.
 
@@ -45,11 +47,12 @@ The rewrite keeps deep modules and narrow interfaces:
 
 1. Port config, ledger, and platform identity primitives with unit tests.
 2. Port provider usage readers for Codex and Claude using existing log fixtures.
-3. Port service read models and session/process correlation.
-4. Serve the existing React UI from the Rust daemon.
-5. Port warnings, acknowledgement, notification, and usage enforcement.
-6. Port the safe synthetic demo to use the Rust binary.
-7. Remove Go only after Rust passes the behavior oracle and the product demo.
+3. Port durable usage cache semantics from the Go oracle.
+4. Port service read models and session/process correlation.
+5. Serve the existing React UI from the Rust daemon.
+6. Port warnings, acknowledgement, notification, and usage enforcement.
+7. Port the safe synthetic demo to use the Rust binary.
+8. Remove Go only after Rust passes the behavior oracle and the product demo.
 
 ## Validation
 
