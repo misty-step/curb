@@ -69,6 +69,14 @@ impl Event {
         self.data = Some(data);
         self
     }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        let message = message.into();
+        if !message.is_empty() {
+            self.message = Some(message);
+        }
+        self
+    }
 }
 
 type AppendHook = Arc<dyn Fn(&Event, &[u8]) + Send + Sync>;

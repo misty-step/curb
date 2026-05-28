@@ -5,10 +5,12 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::config::{Agent, Config, Mode};
+use crate::ledger::{self, Ledger};
 use crate::platform::{self, Platform};
 use crate::usage::{Event, SourceReport};
 
@@ -32,6 +34,8 @@ pub enum ServiceError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error(transparent)]
+    Ledger(#[from] ledger::LedgerError),
     #[error(transparent)]
     Platform(#[from] platform::PlatformError),
 }
@@ -250,6 +254,7 @@ impl<'a, P: Platform> Service<'a, P> {
         if !default_extend.is_zero() && extend > default_extend {
             extend = default_extend;
         }
+        let previous_ack = read_session_ack(&self.cfg.service.state_dir, &session.key)?;
         let ack = write_session_ack(
             &self.cfg.service.state_dir,
             &session.key,
@@ -257,6 +262,10 @@ impl<'a, P: Platform> Service<'a, P> {
             &request.reason,
             now,
         )?;
+        if let Err(err) = self.append_session_ack_event(&ack, extend) {
+            rollback_session_ack(&self.cfg.service.state_dir, &session.key, previous_ack)?;
+            return Err(err);
+        }
         Ok(AckView {
             session_key: ack.session_key,
             extend_seconds: extend.as_secs() as i64,
@@ -331,7 +340,23 @@ impl<'a, P: Platform> Service<'a, P> {
         let target = snapshot.termination_target(process).ok_or_else(|| {
             ServiceError::StopConflict("process identity could not be revalidated".to_string())
         })?;
+        self.append_manual_stop_event(
+            "manual_stop_started",
+            &session,
+            &correlation,
+            &target,
+            None,
+            &request.reason,
+        )?;
         self.platform.terminate(&target)?;
+        self.append_manual_stop_event(
+            "manual_stop_completed",
+            &session,
+            &correlation,
+            &target,
+            Some("terminated"),
+            &request.reason,
+        )?;
         let root = target.root();
         Ok(StopView {
             session_key: session.key,
@@ -346,6 +371,56 @@ impl<'a, P: Platform> Service<'a, P> {
             scope_pids: target.scope().iter().map(|pid| pid.get()).collect(),
             result: "terminated".to_string(),
         })
+    }
+
+    fn append_session_ack_event(
+        &self,
+        ack: &SessionAck,
+        extend: std::time::Duration,
+    ) -> Result<(), ServiceError> {
+        let mut data = Map::new();
+        data.insert(
+            "session_key".to_string(),
+            Value::String(ack.session_key.clone()),
+        );
+        data.insert(
+            "extend_seconds".to_string(),
+            Value::Number(extend.as_secs().into()),
+        );
+        data.insert("until".to_string(), Value::String(ack.until.to_rfc3339()));
+        self.append_ledger_event(
+            ledger::Event::new("session_ack_received")
+                .with_data(data)
+                .with_message(ack.reason.clone()),
+        )
+    }
+
+    fn append_manual_stop_event(
+        &self,
+        event_type: &str,
+        session: &Session,
+        correlation: &Correlation,
+        target: &platform::TerminationTarget,
+        result: Option<&str>,
+        reason: &str,
+    ) -> Result<(), ServiceError> {
+        let mut event = ledger::Event::new(event_type).with_data(manual_stop_event_data(
+            session,
+            correlation,
+            target,
+            result,
+        ));
+        event.agent_id = correlation.agent.as_ref().map(|agent| agent.id.clone());
+        event.mode = Some(self.cfg.mode.to_string());
+        if !reason.is_empty() {
+            event.message = Some(reason.to_string());
+        }
+        self.append_ledger_event(event)
+    }
+
+    fn append_ledger_event(&self, event: ledger::Event) -> Result<(), ServiceError> {
+        Ledger::open(&self.cfg.ledger.path)?.append(event)?;
+        Ok(())
     }
 }
 
@@ -509,6 +584,29 @@ fn find_session(events: &[Event], key: &str) -> Option<Session> {
         .find(|session| session.key == key || session.id == key)
 }
 
+pub fn canonical_session_key(events: &[Event], key: &str) -> Option<String> {
+    find_session(events, key).map(|session| session.key)
+}
+
+pub fn session_turns(
+    events: &[Event],
+    key: &str,
+    since: Option<DateTime<Utc>>,
+    limit: usize,
+) -> Result<Vec<TurnView>, ServiceError> {
+    let session = find_session(events, key).ok_or(ServiceError::SessionNotFound)?;
+    let mut turns = session
+        .turns
+        .into_iter()
+        .filter(|turn| since.is_none_or(|since| turn.at.is_none_or(|at| at >= since)))
+        .collect::<Vec<_>>();
+    turns.sort_by(|left, right| right.at.cmp(&left.at));
+    if limit > 0 && turns.len() > limit {
+        turns.truncate(limit);
+    }
+    Ok(turns)
+}
+
 pub fn write_session_ack(
     state_dir: &Path,
     session_key: &str,
@@ -584,6 +682,42 @@ pub fn read_session_ack(
         .map_err(|source| ServiceError::Json { path, source })
 }
 
+pub fn delete_session_ack(state_dir: &Path, session_key: &str) -> Result<(), ServiceError> {
+    let path = session_ack_path(state_dir, session_key);
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(ServiceError::Io { path, source }),
+    }
+}
+
+fn rollback_session_ack(
+    state_dir: &Path,
+    session_key: &str,
+    previous: Option<SessionAck>,
+) -> Result<(), ServiceError> {
+    match previous {
+        Some(previous) => {
+            let extend = previous
+                .until
+                .signed_duration_since(previous.created_at)
+                .to_std()
+                .map_err(|_| {
+                    ServiceError::InvalidAck("previous ack duration is invalid".to_string())
+                })?;
+            write_session_ack(
+                state_dir,
+                session_key,
+                extend,
+                &previous.reason,
+                previous.created_at,
+            )?;
+            Ok(())
+        }
+        None => delete_session_ack(state_dir, session_key),
+    }
+}
+
 pub fn active_session_ack(
     state_dir: &Path,
     session_key: &str,
@@ -597,6 +731,68 @@ pub fn active_session_ack(
     } else {
         Ok(None)
     }
+}
+
+fn manual_stop_event_data(
+    session: &Session,
+    correlation: &Correlation,
+    target: &platform::TerminationTarget,
+    result: Option<&str>,
+) -> Map<String, Value> {
+    let root = target.root();
+    let mut data = Map::new();
+    data.insert(
+        "session_key".to_string(),
+        Value::String(session.key.clone()),
+    );
+    data.insert("session_id".to_string(), Value::String(session.id.clone()));
+    data.insert(
+        "provider".to_string(),
+        Value::String(session.provider.clone()),
+    );
+    if let Some(cwd) = &session.cwd {
+        data.insert("cwd".to_string(), Value::String(cwd.display().to_string()));
+    }
+    data.insert("turn_tokens".to_string(), json!(session.latest_turn_tokens));
+    if let Some(agent) = &correlation.agent {
+        data.insert("agent_id".to_string(), Value::String(agent.id.clone()));
+    }
+    data.insert("pid".to_string(), json!(root.pid.get()));
+    if let Some(started_at) = root.started_at {
+        data.insert(
+            "started_at".to_string(),
+            Value::String(started_at.to_rfc3339()),
+        );
+    }
+    if let Some(owner) = &root.username {
+        data.insert("owner".to_string(), Value::String(owner.clone()));
+    }
+    if let Some(executable) = &root.executable {
+        data.insert(
+            "executable".to_string(),
+            Value::String(executable.display().to_string()),
+        );
+    }
+    if let Some(bundle_id) = &root.bundle_id {
+        data.insert("bundle_id".to_string(), Value::String(bundle_id.clone()));
+    }
+    if let Some(team_id) = &root.team_id {
+        data.insert("team_id".to_string(), Value::String(team_id.clone()));
+    }
+    data.insert("scope".to_string(), Value::String("tree".to_string()));
+    data.insert(
+        "scope_pids".to_string(),
+        Value::Array(target.scope().iter().map(|pid| json!(pid.get())).collect()),
+    );
+    data.insert(
+        "correlation".to_string(),
+        Value::String(correlation.reason.clone()),
+    );
+    data.insert("correlation_score".to_string(), json!(correlation.score));
+    if let Some(result) = result {
+        data.insert("result".to_string(), Value::String(result.to_string()));
+    }
+    data
 }
 
 fn session_ack_path(state_dir: &Path, session_key: &str) -> PathBuf {
@@ -1319,6 +1515,7 @@ mod tests {
     fn acknowledge_session_persists_and_suppresses_actionability() {
         let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1361,6 +1558,7 @@ mod tests {
         let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1386,6 +1584,7 @@ mod tests {
         let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1411,6 +1610,7 @@ mod tests {
         let mut alert_cfg = Config::load("configs/curb.example.yaml").unwrap();
         alert_cfg.mode = crate::config::Mode::Alert;
         alert_cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        alert_cfg.ledger.path = alert_cfg.service.state_dir.join("runs.ndjson");
         alert_cfg.usage.warn_turn_tokens = 100;
         alert_cfg.usage.kill_turn_tokens = 200;
         let alert_platform = FakePlatform::new(platform::Snapshot::new([root.clone()]));

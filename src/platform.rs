@@ -129,7 +129,7 @@ impl TerminationTarget {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum PlatformError {
     #[error("process capture failed: {0}")]
     Capture(String),

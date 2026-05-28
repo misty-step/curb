@@ -7,5 +7,6 @@
 pub mod config;
 pub mod ledger;
 pub mod platform;
+pub mod runtime;
 pub mod service;
 pub mod usage;
