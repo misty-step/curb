@@ -402,6 +402,8 @@ fn write_private_file(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
 }
 
 fn set_dir_private(path: &Path) -> Result<(), ConfigError> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -416,6 +418,8 @@ fn set_dir_private(path: &Path) -> Result<(), ConfigError> {
 }
 
 fn set_file_private(path: &Path) -> Result<(), ConfigError> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -7,9 +7,8 @@ configuration, not repo-local harness projections.
 ## Repo Signals
 
 - Product: local AI-agent visibility and watchdog tool.
-- Backend: Rust is the primary implementation. Go remains an explicit legacy
-  behavior oracle until step 11 of `docs/rust-rewrite.md` is complete.
-- Frontend: React/Vite, embedded into the Rust binary from `internal/web/dist`.
+- Backend: Rust.
+- Frontend: React/Vite, embedded into the Rust binary from `web/dist`.
 - Primary docs: `README.md`, `SPEC.md`, `docs/contributor-guide.md`,
   `docs/user-guide.md`, `docs/application-design.md`.
 
@@ -34,7 +33,6 @@ Useful focused checks:
 - `cargo run -- validate-config configs/curb.example.yaml`
 - `cargo run -- watch --once --config configs/curb.example.yaml`
 - `bash demo/006/script/run-backlog-006-demo.sh --mode all`
-- `scripts/validate-go-oracle.sh`
 
 ## Invariants
 
@@ -54,13 +52,9 @@ Useful focused checks:
 
 - `src/main.rs` owns Rust CLI composition only.
 - `src/config.rs` owns strict YAML loading, defaults, validation, and policy
-  merging for the Rust rewrite.
-- `src/ledger.rs` owns append-only NDJSON ledger writes and reads for the Rust
-  rewrite.
+  merging.
+- `src/ledger.rs` owns append-only NDJSON ledger writes and reads.
 - `src/platform.rs` owns Rust process identity and termination-target safety.
-- `cmd/curb` and `internal/*` are legacy Go oracle code. Do not add new product
-  behavior there unless the matching Rust surface already exists and needs an
-  oracle correction.
 
 ## Test Idioms
 

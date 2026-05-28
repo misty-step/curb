@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let dist = manifest_dir.join("internal/web/dist");
+    let dist = manifest_dir.join("web/dist");
     println!("cargo:rerun-if-changed={}", dist.display());
     let mut assets = Vec::new();
     collect_assets(&dist, &dist, &mut assets);

@@ -5,12 +5,11 @@ Date: 2026-05-28
 
 ## Intent
 
-Rewrite Curb in Rust without flattening the design into adapters around the Go
-code. Rust is now the primary product path; the Go implementation remains
-available only as an explicit legacy oracle until it is safe to delete. The Rust
-implementation preserves the launch product: one local endpoint agent owns usage
-ingestion, process correlation, policy, notifications, enforcement, and the
-append-only ledger; CLI and UI surfaces are thin clients.
+Rewrite Curb in Rust without flattening the design into compatibility wrappers.
+Rust is now the only product implementation. It preserves the launch product:
+one local endpoint agent owns usage ingestion, process correlation, policy,
+notifications, enforcement, and the append-only ledger; CLI and UI surfaces are
+thin clients.
 
 ## Strategic Shape
 
@@ -58,11 +57,11 @@ The rewrite keeps deep modules and narrow interfaces:
 
 1. Port config, ledger, and platform identity primitives with unit tests.
 2. Port provider usage readers for Codex and Claude using existing log fixtures.
-3. Port durable usage cache semantics from the Go oracle.
+3. Port durable usage cache semantics.
 4. Port service read models and session/process correlation.
 5. Port acknowledgement and manual stop-session actions.
 6. Serve the existing React UI from the Rust daemon.
-   Status: Rust embeds `internal/web/dist`, serves the SPA from loopback, keeps
+   Status: Rust embeds `web/dist`, serves the SPA from loopback, keeps
    `/v1/*` protected, and exposes `curb app` as the browser launch path.
 7. Port first-run CLI ergonomics.
    Status: Rust now supports `init`, `install`, `config`, config path discovery
@@ -86,16 +85,15 @@ The rewrite keeps deep modules and narrow interfaces:
     binary, passes isolated `--home`/`--config` paths to every usage-scanning
     command, and verifies alert/enforcement outcomes through Rust ledger events.
 11. Remove Go after the Rust product surface, package artifacts, and live demo
-    no longer need the legacy oracle.
-    Status: the default gate and docs are Rust-primary. Go checks live behind
-    `scripts/validate-go-oracle.sh` while deletion remains unsafe.
+    no longer need migration comparison.
+    Status: complete. Go source, Go module files, and the legacy oracle script
+    have been removed; Rust validation is the repository gate.
 
 ## Validation
 
 `scripts/validate.sh` is Rust-primary. It checks the committed embedded UI
 assets, Rust formatting, clippy, Rust tests, the safe synthetic demo dry-run,
-and UI typecheck/lint/test. The legacy Go oracle is deliberate and separate:
-run `scripts/validate-go-oracle.sh` when comparing migration behavior.
+and UI typecheck/lint/test.
 
 Full completion requires the same safe demo guarantees: alert mode emits
 `usage_would_terminate` without stopping the synthetic worker, and enforcement

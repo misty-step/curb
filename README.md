@@ -78,16 +78,6 @@ scripts/validate.sh
 It checks the embedded UI assets, Rust formatting, clippy, Rust tests, the
 synthetic demo dry-run, and UI typecheck/lint/test.
 
-## Legacy Go Oracle
-
-The previous Go implementation remains in-tree only as an explicit behavior
-oracle while the Rust rewrite is finished. Run it deliberately when you need to
-compare behavior during migration:
-
-```sh
-scripts/validate-go-oracle.sh
-```
-
 `curb dashboard` shows live agent workers and recent usage in one terminal view.
 `curb app` serves the built dashboard and opens it in your browser. If a
 compatible service is already running on the configured loopback address, it

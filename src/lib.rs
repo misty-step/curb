@@ -1,6 +1,6 @@
 //! Core Curb modules.
 //!
-//! The Rust rewrite keeps the same strategic shape as the launch design:
+//! The Rust implementation keeps the same strategic shape as the launch design:
 //! deep modules own parsing, safety, policy, and persistence; clients compose
 //! those modules instead of reimplementing their internals.
 

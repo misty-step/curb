@@ -626,7 +626,7 @@ UI strategy:
 
 ## Implementation Sequence
 
-1. Stabilize `internal/service` as the single app contract.
+1. Stabilize `src/service.rs` as the single app contract.
    Keep state labels, explanations, actionability, onboarding, notification
    health, and deltas service-owned.
 

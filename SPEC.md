@@ -123,8 +123,6 @@ correlation, warnings, and termination.
 - `src/platform.rs`: macOS, Windows, and Linux process discovery,
   notification, and sealed termination-target construction.
 - `src/ledger.rs`: append-only NDJSON event journal with hash chaining.
-- `cmd/curb` and `internal/*`: legacy Go oracle code kept only until the Rust
-  product surface no longer needs migration comparison.
 
 Future native shells, tray apps, service installers, or managed-device wrappers
 must remain clients or deployment packaging around the same local service.

@@ -23,8 +23,6 @@ and thin OS adapters.
   enrichment, redaction, and append hooks.
 - `src/api.rs`: token-gated loopback HTTP adapter for UI and CLI clients.
 - `src/web.rs`: embedded dashboard assets only.
-- `cmd/curb` and `internal/*`: legacy Go oracle code. Keep it compiling until
-  deletion, but do not add new product behavior there.
 
 The strategic boundary is simple: one machine has one service authority.
 Usage facts and provider-file ingestion state
@@ -41,7 +39,7 @@ credential, retry, or remote-policy behavior into `ledger`, `usagewatch`, or
 Termination crosses from policy code into OS actions only through
 `platform.TerminationTarget`, which is produced by revalidating process identity
 against a fresh `platform.Snapshot`; production termination functions must not
-accept a bare root PID. Manual session stops live in `internal/service` as a
+accept a bare root PID. Manual session stops live in `src/service.rs` as a
 single `StopSession` use case. UI-supplied PID, start time, owner, and
 executable/app fields are confirmation evidence only; authority always comes
 from fresh usage ingestion, fresh process capture, service-owned correlation,
@@ -49,8 +47,8 @@ watch-only checks, and `TerminationTarget` construction.
 Notification health and notification tests are service-owned actions over the
 same injected notification boundary used by policy alerts; UI code must not
 probe platform notification capabilities directly.
-Platform capability reporting is also service-owned. `internal/platform` exposes
-OS facts and actions; `internal/service` composes those facts with config and
+Platform capability reporting is also service-owned. `src/platform.rs` exposes
+OS facts and actions; `src/service.rs` composes those facts with config and
 current snapshots into UI/API capability views. React must render those views
 instead of branching on OS names, mode strings, or raw process fields.
 Snapshot-to-snapshot UI deltas are computed in `service` at the snapshot cache
@@ -86,17 +84,15 @@ bash demo/006/script/run-backlog-006-demo.sh --mode all
 cd ui && npm run typecheck
 cd ui && npm run lint
 cd ui && npm test -- --run
-scripts/validate-go-oracle.sh
 ```
 
-`internal/web/dist` is the committed embed source for `curb app`. After
+`web/dist` is the committed embed source for `curb app`. After
 changing `ui/src`, run `scripts/build-ui.sh`; it builds `ui/dist` and copies
-the result into `internal/web/dist`. `scripts/build-ui.sh --check` performs a
+the result into `web/dist`. `scripts/build-ui.sh --check` performs a
 fresh temporary Vite build and fails if the embedded assets are stale.
 `scripts/validate.sh` runs the Rust-primary product gate (`build-ui --check`,
 Rust fmt, clippy, Rust tests, synthetic demo dry-run, UI typecheck, UI lint,
-and UI tests). `scripts/validate-go-oracle.sh` runs Go tests and vet only when
-you deliberately need the legacy oracle.
+and UI tests).
 
 ## Design Rules
 

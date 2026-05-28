@@ -71,5 +71,5 @@ npm run build
 ```
 
 `npm run build` writes `ui/dist` for local frontend checks. The Rust binary
-embeds `internal/web/dist`, so use `../scripts/build-ui.sh` before testing or
+embeds `web/dist`, so use `../scripts/build-ui.sh` before testing or
 shipping `curb app`.

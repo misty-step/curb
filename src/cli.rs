@@ -489,6 +489,8 @@ fn print_config_set_usage() {
 }
 
 fn set_private_dir(path: &Path) -> Result<()> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

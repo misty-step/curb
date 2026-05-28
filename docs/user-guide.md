@@ -201,9 +201,8 @@ until the acknowledgement expires. A session can be acknowledgeable even when
 it is not stoppable, for example in alert mode, when the matched process is
 watch-only, or when Curb cannot safely correlate usage to a live process.
 
-Legacy Go run ledgers used opaque run ids. Rust usage enforcement acknowledges
-usage sessions with keys such as `codex:session-id`; ledger run ids are event
-metadata, not the action handle.
+Usage enforcement acknowledges sessions with keys such as `codex:session-id`;
+ledger run ids are event metadata, not the action handle.
 
 In enforcement mode, a selected `stop-pending` session may also show a
 destructive Stop button. That button is not an arbitrary PID killer. The UI

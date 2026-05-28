@@ -816,6 +816,8 @@ fn since_param(raw: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
 }
 
 fn set_dir_private(path: &Path) -> Result<(), ApiError> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -826,6 +828,8 @@ fn set_dir_private(path: &Path) -> Result<(), ApiError> {
 }
 
 fn set_file_private(path: &Path) -> Result<(), ApiError> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -10,8 +10,8 @@
 node_modules/
 dist/
 target/
-!internal/web/dist/
-!internal/web/dist/**
+!web/dist/
+!web/dist/**
 artifacts/qa/
 ui/artifacts/
 demo/006/artifacts/*
