@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use curb::cli::{
-    config_command, dashboard_command, default_config_path, default_home_dir, init_config,
-    install_binary,
+    config_command, dashboard_command, default_config_path, default_home_dir, doctor_command,
+    init_config, install_binary,
 };
 
 #[derive(Debug, Parser)]
@@ -57,6 +57,15 @@ enum Command {
         /// Print JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Check local Curb configuration and platform capabilities.
+    Doctor {
+        /// Config file to use.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Send a real local notification as part of the check.
+        #[arg(long)]
+        test_notification: bool,
     },
     /// Validate a Curb YAML config.
     ValidateConfig {
@@ -160,6 +169,13 @@ fn run() -> Result<()> {
                 json,
             )?
         }
+        Some(Command::Doctor {
+            config,
+            test_notification,
+        }) => doctor_command(
+            config.unwrap_or_else(default_config_path),
+            test_notification,
+        )?,
         Some(Command::Usage {
             home,
             json,

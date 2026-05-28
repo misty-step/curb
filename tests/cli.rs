@@ -170,6 +170,32 @@ fn dashboard_json_prints_snapshot_read_model() {
 }
 
 #[test]
+fn doctor_checks_config_state_ledger_and_process_capture() {
+    let state = tempdir().expect("state");
+    let config_path = state.path().join("curb.yaml");
+    let cfg = curb::config::Config::local_default(
+        curb::config::Mode::Visibility,
+        state.path().join("state"),
+    );
+    cfg.save(&config_path).expect("save config");
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["doctor", "--config"])
+        .arg(&config_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config: ok"))
+        .stdout(predicate::str::contains("state_dir: ok"))
+        .stdout(predicate::str::contains("ledger: ok"))
+        .stdout(predicate::str::contains("process_snapshot: ok"))
+        .stdout(predicate::str::contains("notifications:"));
+
+    let events =
+        curb::ledger::read(state.path().join("state").join("runs.ndjson")).expect("ledger events");
+    assert!(events.iter().any(|event| event.event_type == "doctor"));
+}
+
+#[test]
 fn serve_rejects_non_loopback_address_before_binding() {
     let mut cmd = Command::cargo_bin("curb").expect("curb binary");
 

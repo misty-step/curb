@@ -8,7 +8,9 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
 use crate::config::{Config, Mode, Preset};
+use crate::ledger::{Event, Ledger};
 use crate::platform::SystemPlatform;
+use crate::platform::{NotificationCapability, PlatformError};
 use crate::runtime::Runtime;
 
 pub fn init_config(path: PathBuf, force: bool, mode: &str) -> Result<()> {
@@ -88,6 +90,83 @@ pub fn dashboard_command(
     Ok(())
 }
 
+pub trait DoctorPlatform {
+    fn capture_processes(&self) -> Result<usize, PlatformError>;
+    fn notification_capability(&self) -> NotificationCapability;
+    fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError>;
+    fn platform_name(&self) -> &'static str;
+}
+
+impl DoctorPlatform for SystemPlatform {
+    fn capture_processes(&self) -> Result<usize, PlatformError> {
+        Ok(<Self as crate::platform::Platform>::capture(self)?
+            .processes()
+            .count())
+    }
+
+    fn notification_capability(&self) -> NotificationCapability {
+        <Self as crate::platform::Platform>::notification_capability(self)
+    }
+
+    fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {
+        <Self as crate::platform::Platform>::notify(self, title, body)
+    }
+
+    fn platform_name(&self) -> &'static str {
+        std::env::consts::OS
+    }
+}
+
+pub fn doctor_command(config_path: PathBuf, test_notification: bool) -> Result<()> {
+    doctor_with_platform(config_path, test_notification, &SystemPlatform)
+}
+
+pub fn doctor_with_platform(
+    config_path: PathBuf,
+    test_notification: bool,
+    platform: &impl DoctorPlatform,
+) -> Result<()> {
+    let cfg = Config::load(&config_path)?;
+    println!("config: ok {}", config_path.display());
+    fs::create_dir_all(&cfg.service.state_dir)
+        .with_context(|| format!("create state dir {}", cfg.service.state_dir.display()))?;
+    set_private_dir(&cfg.service.state_dir)?;
+    println!("state_dir: ok {}", cfg.service.state_dir.display());
+
+    let ledger = Ledger::open(&cfg.ledger.path)?;
+    ledger.append(
+        Event::new("doctor")
+            .with_message("ledger write check")
+            .with_mode(cfg.mode.to_string()),
+    )?;
+    println!("ledger: ok {}", cfg.ledger.path.display());
+
+    let processes = platform.capture_processes()?;
+    println!(
+        "process_snapshot: ok processes={} platform={}",
+        processes,
+        platform.platform_name()
+    );
+
+    let capability = platform.notification_capability();
+    if !capability.supported {
+        println!("notifications: unavailable {}", capability.message);
+        return Ok(());
+    }
+    if test_notification {
+        match platform.notify("Curb doctor", "Notification check") {
+            Ok(()) => println!("notifications: ok"),
+            Err(error) => println!("notifications: unavailable {error}"),
+        }
+    } else {
+        println!(
+            "notifications: {} {}",
+            capability.status, capability.message
+        );
+    }
+    Ok(())
+}
+
 pub fn load_or_default_config(path: &Path) -> Result<Config> {
     if path.exists() {
         return Config::load(path).map_err(anyhow::Error::from);
@@ -95,6 +174,16 @@ pub fn load_or_default_config(path: &Path) -> Result<Config> {
     let cfg = Config::local_default(Mode::Visibility, state_dir_for_config(path));
     cfg.save(path)?;
     Ok(cfg)
+}
+
+fn set_private_dir(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("chmod {}", path.display()))?;
+    }
+    Ok(())
 }
 
 pub fn default_config_path() -> PathBuf {
@@ -240,4 +329,68 @@ fn default_install_prefix() -> PathBuf {
     default_home_dir()
         .map(|home| home.join(".local"))
         .unwrap_or_else(|| PathBuf::from(".local"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    struct FakeDoctorPlatform {
+        notifications: RefCell<Vec<(String, String)>>,
+        notify_error: Option<&'static str>,
+    }
+
+    impl DoctorPlatform for FakeDoctorPlatform {
+        fn capture_processes(&self) -> Result<usize, PlatformError> {
+            Ok(7)
+        }
+
+        fn notification_capability(&self) -> NotificationCapability {
+            NotificationCapability {
+                supported: true,
+                status: "available".to_string(),
+                message: "test notifications available".to_string(),
+            }
+        }
+
+        fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {
+            self.notifications
+                .borrow_mut()
+                .push((title.to_string(), body.to_string()));
+            if let Some(error) = self.notify_error {
+                Err(PlatformError::Notify(error.to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn platform_name(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[test]
+    fn doctor_writes_ledger_and_uses_injected_platform() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("curb.yaml");
+        let cfg = Config::local_default(Mode::Alert, dir.path().join("state"));
+        cfg.save(&config_path).unwrap();
+        let platform = FakeDoctorPlatform {
+            notifications: RefCell::new(Vec::new()),
+            notify_error: None,
+        };
+
+        doctor_with_platform(config_path, true, &platform).unwrap();
+
+        let events = crate::ledger::read(dir.path().join("state").join("runs.ndjson")).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "doctor");
+        assert_eq!(events[0].mode.as_deref(), Some("alert"));
+        assert_eq!(
+            platform.notifications.into_inner(),
+            vec![("Curb doctor".to_string(), "Notification check".to_string())]
+        );
+    }
 }

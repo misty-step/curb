@@ -77,6 +77,14 @@ impl Event {
         }
         self
     }
+
+    pub fn with_mode(mut self, mode: impl Into<String>) -> Self {
+        let mode = mode.into();
+        if !mode.is_empty() {
+            self.mode = Some(mode);
+        }
+        self
+    }
 }
 
 type AppendHook = Arc<dyn Fn(&Event, &[u8]) + Send + Sync>;

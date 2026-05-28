@@ -363,14 +363,3 @@ fn format_tokens(tokens: i64) -> String {
         tokens.to_string()
     }
 }
-
-trait EventMode {
-    fn with_mode(self, mode: String) -> Self;
-}
-
-impl EventMode for ledger::Event {
-    fn with_mode(mut self, mode: String) -> Self {
-        self.mode = Some(mode);
-        self
-    }
-}
