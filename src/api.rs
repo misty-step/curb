@@ -833,10 +833,14 @@ mod tests {
         let agents = server.handle(authed("GET", "/v1/agents"), now);
         assert_eq!(agents.status, 200);
         assert!(agents.text().contains("codex-worker"));
+        assert!(agents.text().contains("\"project\":\"repo\""));
+        assert!(agents.text().contains("\"running_for_seconds\":60"));
 
         let sessions = server.handle(authed("GET", "/v1/sessions"), now);
         assert_eq!(sessions.status, 200);
         assert!(sessions.text().contains("codex:session/one"));
+        assert!(sessions.text().contains("\"agent_state\":\"warn\""));
+        assert!(sessions.text().contains("\"project\":\"repo\""));
     }
 
     #[test]
@@ -1382,6 +1386,8 @@ mod tests {
                 actionable: false,
                 pid: 4242,
                 process_started_at: Some(fixed_now()),
+                running_for_seconds: Some(60),
+                project: Some("repo".to_string()),
                 cwd: Some("/repo".into()),
                 matched_by: vec!["process_name".to_string()],
                 confidence: 90,
@@ -1402,6 +1408,8 @@ mod tests {
                 can_acknowledge: true,
                 acknowledged: false,
                 acknowledged_until: None,
+                agent_state: Some("warn".to_string()),
+                project: Some("repo".to_string()),
                 cwd: Some("/repo".into()),
                 models: vec!["model".to_string()],
                 last_seen_at: fixed_now(),

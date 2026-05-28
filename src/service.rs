@@ -94,6 +94,10 @@ pub struct SessionView {
     pub acknowledged: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acknowledged_until: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     pub cwd: Option<PathBuf>,
     pub models: Vec<String>,
     pub last_seen_at: DateTime<Utc>,
@@ -138,6 +142,10 @@ pub struct AgentView {
     pub pid: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_started_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running_for_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
     pub matched_by: Vec<String>,
@@ -1825,6 +1833,7 @@ fn build_session_view(
         explanation = "usage crossed threshold, but this session is acknowledged";
     }
     let process_state = session_process_state(state, usage_state, correlation);
+    let agent_state = session_agent_state(state);
     SessionView {
         key: session.key.clone(),
         id: session.id.clone(),
@@ -1837,6 +1846,8 @@ fn build_session_view(
         can_acknowledge: ack_until.is_none() && matches!(usage_state, "warn" | "stop"),
         acknowledged: ack_until.is_some(),
         acknowledged_until: ack_until,
+        agent_state: Some(agent_state.to_string()),
+        project: session.cwd.as_ref().and_then(|cwd| project_name(cwd)),
         cwd: session.cwd.clone(),
         models: session.models.iter().cloned().collect(),
         last_seen_at: session.last.unwrap_or(window_start),
@@ -2090,7 +2101,7 @@ fn best_session_for_match<'a>(
 fn build_agent_view(
     matched: &ProcessMatch,
     session: Option<&SessionView>,
-    _now: DateTime<Utc>,
+    now: DateTime<Utc>,
 ) -> AgentView {
     let mut state = if matched.agent.termination_allowed() {
         "running"
@@ -2146,6 +2157,12 @@ fn build_agent_view(
         actionable,
         pid: matched.process.pid.get(),
         process_started_at: matched.process.started_at,
+        running_for_seconds: running_for_seconds(matched.process.started_at, now),
+        project: matched
+            .process
+            .cwd
+            .as_ref()
+            .and_then(|cwd| project_name(cwd)),
         cwd: matched.process.cwd.clone(),
         matched_by: matched.evidence.clone(),
         confidence: matched.confidence,
@@ -2154,6 +2171,31 @@ fn build_agent_view(
         window_tokens,
         explanation: explanation.to_string(),
     }
+}
+
+fn session_agent_state(state: &str) -> &str {
+    match state {
+        "active" => "spending",
+        "idle-high" | "quiet" => "idle",
+        other => other,
+    }
+}
+
+fn running_for_seconds(started_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Option<i64> {
+    let started_at = started_at?;
+    Some(now.signed_duration_since(started_at).num_seconds().max(0))
+}
+
+fn project_name(path: &Path) -> Option<String> {
+    let raw = path.display().to_string();
+    let trimmed = raw.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed
+        .rsplit(['/', '\\'])
+        .find(|part| !part.is_empty())
+        .map(ToString::to_string)
 }
 
 fn sort_session_views(sessions: &mut [SessionView]) {
@@ -2179,6 +2221,7 @@ fn sort_agent_views(agents: &mut [AgentView]) {
     agents.sort_by(|left, right| {
         priority(&left.state)
             .cmp(&priority(&right.state))
+            .then_with(|| left.project.cmp(&right.project))
             .then_with(|| left.id.cmp(&right.id))
     });
 }
@@ -2323,6 +2366,10 @@ mod tests {
         assert!(snapshot.sessions[0].actionable);
         assert_eq!(snapshot.sessions[0].process_state, "running");
         assert_eq!(snapshot.sessions[0].correlated_pid, Some(100));
+        assert_eq!(snapshot.sessions[0].agent_state.as_deref(), Some("stop"));
+        assert_eq!(snapshot.sessions[0].project.as_deref(), Some("repo"));
+        assert_eq!(snapshot.agents[0].project.as_deref(), Some("repo"));
+        assert_eq!(snapshot.agents[0].running_for_seconds, Some(600));
     }
 
     #[test]
@@ -2763,6 +2810,37 @@ mod tests {
         assert_eq!(snapshot.overview.idle_high_sessions, 1);
         assert_eq!(snapshot.sessions[0].usage_state, "quiet-high");
         assert_eq!(snapshot.sessions[0].action_state, "none");
+    }
+
+    #[test]
+    fn project_name_handles_unix_and_windows_paths() {
+        assert_eq!(
+            project_name(Path::new("/Users/me/repo")).as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            project_name(Path::new(r"C:\Users\me\repo\")).as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            project_name(Path::new(r"C:\Users\me/repo")).as_deref(),
+            Some("repo")
+        );
+        assert_eq!(project_name(Path::new("/")).as_deref(), None);
+    }
+
+    #[test]
+    fn running_for_seconds_clamps_future_and_omits_missing_start() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        assert_eq!(
+            running_for_seconds(Some(now - chrono::Duration::seconds(42)), now),
+            Some(42)
+        );
+        assert_eq!(
+            running_for_seconds(Some(now + chrono::Duration::seconds(42)), now),
+            Some(0)
+        );
+        assert_eq!(running_for_seconds(None, now), None);
     }
 
     fn event(provider: &str, session: &str, at: DateTime<Utc>, total: i64) -> Event {
