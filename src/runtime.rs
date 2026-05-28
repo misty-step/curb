@@ -12,6 +12,7 @@ use crate::service::{
     OnboardingView, Service, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
+use crate::usagewatch::{UsageWatch, UsageWatchError};
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
@@ -20,7 +21,11 @@ pub enum RuntimeError {
     #[error(transparent)]
     Usage(#[from] UsageError),
     #[error(transparent)]
+    UsageWatch(#[from] UsageWatchError),
+    #[error(transparent)]
     Service(#[from] ServiceError),
+    #[error(transparent)]
+    Platform(#[from] PlatformError),
     #[error(transparent)]
     Ledger(#[from] crate::ledger::LedgerError),
     #[error("config path is unavailable")]
@@ -46,6 +51,7 @@ pub struct Runtime<P: Platform> {
     platform: P,
     cache: Mutex<Option<Snapshot>>,
     notification: Mutex<Option<NotificationView>>,
+    usagewatch: Mutex<UsageWatch>,
 }
 
 impl<P: Platform> Runtime<P> {
@@ -58,6 +64,7 @@ impl<P: Platform> Runtime<P> {
             platform,
             cache: Mutex::new(None),
             notification: Mutex::new(None),
+            usagewatch: Mutex::new(UsageWatch::default()),
         }
     }
 
@@ -69,6 +76,7 @@ impl<P: Platform> Runtime<P> {
             platform,
             cache: Mutex::new(None),
             notification: Mutex::new(None),
+            usagewatch: Mutex::new(UsageWatch::default()),
         }
     }
 
@@ -126,6 +134,17 @@ impl<P: Platform> Runtime<P> {
         let snapshot = service::annotate_overview_delta(cache.as_ref(), self.build_snapshot(now)?);
         *cache = Some(snapshot.clone());
         Ok(snapshot)
+    }
+
+    pub fn usage_scan(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
+        let scan = self.reader.scan_since(Some(self.lookback_start(now)))?;
+        let processes = self.platform.capture()?;
+        let cfg = self.config();
+        self.usagewatch
+            .lock()
+            .expect("usage watcher mutex poisoned")
+            .scan(&cfg, &scan.events, &processes, &self.platform, now)?;
+        self.rescan(now)
     }
 
     pub fn snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
@@ -890,6 +909,148 @@ mod tests {
         assert_eq!(alerts[1].category, "would_stop");
     }
 
+    #[test]
+    fn usage_scan_in_alert_mode_warns_and_would_stop_without_terminating() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let runtime = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        );
+
+        runtime.usage_scan(now).unwrap();
+
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
+        assert_eq!(
+            event_types(&events),
+            ["usage_warning", "usage_would_terminate"]
+        );
+        assert!(runtime.platform.terminated.lock().unwrap().is_empty());
+        assert_eq!(
+            notification_titles(&runtime.platform),
+            ["Curb usage warning", "Curb would stop agent"]
+        );
+    }
+
+    #[test]
+    fn usage_scan_enforces_only_after_grace_and_revalidated_identity() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let mut cfg = test_config(home.path(), Mode::Enforcement);
+        cfg.usage.grace_period = HumanDuration::seconds(1);
+        let runtime = Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        );
+
+        runtime.usage_scan(now).unwrap();
+        assert!(runtime.platform.terminated.lock().unwrap().is_empty());
+        runtime
+            .usage_scan(now + chrono::Duration::seconds(2))
+            .unwrap();
+
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
+        assert_eq!(
+            event_types(&events),
+            [
+                "usage_warning",
+                "usage_grace_started",
+                "usage_termination_started",
+                "usage_termination_completed"
+            ]
+        );
+        assert_eq!(
+            *runtime.platform.terminated.lock().unwrap(),
+            vec![vec![100]]
+        );
+    }
+
+    #[test]
+    fn usage_scan_ack_suppresses_then_allows_warning_after_expiry() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let cfg = test_config(home.path(), Mode::Enforcement);
+        crate::service::write_session_ack(
+            &cfg.service.state_dir,
+            "codex:s1",
+            std::time::Duration::from_secs(60),
+            "still supervising",
+            now,
+        )
+        .unwrap();
+        let runtime = Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        );
+
+        runtime.usage_scan(now).unwrap();
+        assert!(
+            crate::ledger::read(runtime.config().ledger.path.clone())
+                .unwrap()
+                .is_empty()
+        );
+
+        runtime
+            .usage_scan(now + chrono::Duration::seconds(61))
+            .unwrap();
+
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
+        assert_eq!(
+            event_types(&events),
+            ["usage_warning", "usage_grace_started"]
+        );
+    }
+
+    #[test]
+    fn usage_scan_rejects_pid_reuse_before_automatic_termination() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let mut cfg = test_config(home.path(), Mode::Enforcement);
+        cfg.usage.grace_period = HumanDuration::seconds(1);
+        let original = process(now, 100, "codex", "/repo");
+        let mut reused = process(now, 100, "codex", "/repo");
+        reused.started_at = Some(now + chrono::Duration::seconds(1));
+        let runtime = Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::with_captures(vec![
+                Ok(platform::Snapshot::new([original.clone()])),
+                Ok(platform::Snapshot::new([original])),
+                Ok(platform::Snapshot::new([reused.clone()])),
+                Ok(platform::Snapshot::new([reused])),
+            ]),
+        );
+
+        runtime.usage_scan(now).unwrap();
+        runtime
+            .usage_scan(now + chrono::Duration::seconds(2))
+            .unwrap();
+
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
+        assert_eq!(
+            event_types(&events),
+            [
+                "usage_warning",
+                "usage_grace_started",
+                "usage_termination_failed"
+            ]
+        );
+        assert!(runtime.platform.terminated.lock().unwrap().is_empty());
+    }
+
     fn temp_home() -> TempDir {
         let home = tempfile::tempdir().unwrap();
         fs::create_dir_all(home.path().join(".codex/archived_sessions")).unwrap();
@@ -989,6 +1150,23 @@ mod tests {
         }
     }
 
+    fn event_types(events: &[crate::ledger::Event]) -> Vec<&str> {
+        events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect()
+    }
+
+    fn notification_titles(platform: &FakePlatform) -> Vec<String> {
+        platform
+            .notifications
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(title, _)| title.clone())
+            .collect()
+    }
+
     fn stop_request_for(process: &platform::Process) -> StopRequest {
         StopRequest {
             confirm: true,
@@ -1007,6 +1185,7 @@ mod tests {
 
     struct FakePlatform {
         capture: Result<platform::Snapshot, PlatformError>,
+        captures: Mutex<Vec<Result<platform::Snapshot, PlatformError>>>,
         capability: platform::NotificationCapability,
         notifications: Mutex<Vec<(String, String)>>,
         notify_error: Option<String>,
@@ -1017,6 +1196,22 @@ mod tests {
         fn new(capture: Result<platform::Snapshot, PlatformError>) -> Self {
             Self {
                 capture,
+                captures: Mutex::new(Vec::new()),
+                capability: platform::NotificationCapability {
+                    supported: true,
+                    status: "available".to_string(),
+                    message: "available".to_string(),
+                },
+                notifications: Mutex::new(Vec::new()),
+                notify_error: None,
+                terminated: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_captures(captures: Vec<Result<platform::Snapshot, PlatformError>>) -> Self {
+            Self {
+                capture: Ok(platform::Snapshot::default()),
+                captures: Mutex::new(captures.into_iter().rev().collect()),
                 capability: platform::NotificationCapability {
                     supported: true,
                     status: "available".to_string(),
@@ -1045,6 +1240,9 @@ mod tests {
 
     impl Platform for FakePlatform {
         fn capture(&self) -> Result<platform::Snapshot, PlatformError> {
+            if let Some(capture) = self.captures.lock().unwrap().pop() {
+                return capture;
+            }
             self.capture.clone()
         }
 

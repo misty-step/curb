@@ -47,6 +47,18 @@ enum Command {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+    /// Run the Rust usage watcher loop.
+    Watch {
+        /// Config file to use.
+        #[arg(long, default_value = "configs/curb.example.yaml")]
+        config: PathBuf,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Run one scan and exit.
+        #[arg(long)]
+        once: bool,
+    },
 }
 
 fn main() {
@@ -127,6 +139,39 @@ fn run() -> Result<()> {
             println!("  token: {}", token_path.display());
             println!("  auth: Authorization: Bearer $(cat token-file)");
             curb::http::serve_blocking(listener, &server).map_err(anyhow::Error::msg)?;
+        }
+        Some(Command::Watch { config, home, once }) => {
+            let cfg = curb::config::Config::load(&config)?;
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            let interval = cfg.usage.scan_interval.as_std();
+            let runtime =
+                curb::runtime::Runtime::new(cfg.clone(), home, curb::platform::SystemPlatform)
+                    .with_config_path(config);
+            println!("curb rust watcher");
+            println!("  mode: {}", cfg.mode);
+            println!(
+                "  usage: warn {} tokens/turn, stop {} tokens/turn, window {}s",
+                cfg.usage.warn_turn_tokens,
+                cfg.usage.kill_turn_tokens,
+                cfg.usage.window.as_std().as_secs()
+            );
+            println!("  ledger: {}", cfg.ledger.path.display());
+            loop {
+                let snapshot = runtime.usage_scan(Utc::now()).map_err(anyhow::Error::msg)?;
+                println!(
+                    "scan: status={} active={} warn={} stop={}",
+                    snapshot.overview.status,
+                    snapshot.overview.active_sessions,
+                    snapshot.overview.warning_sessions,
+                    snapshot.overview.stop_sessions
+                );
+                if once {
+                    break;
+                }
+                std::thread::sleep(interval);
+            }
         }
         None => {
             Cli::command().print_help()?;

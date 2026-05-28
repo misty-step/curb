@@ -1647,23 +1647,30 @@ impl<'a, P: Platform> Service<'a, P> {
 }
 
 #[derive(Clone, Debug)]
-struct Session {
-    key: String,
-    id: String,
-    provider: String,
-    cwd: Option<PathBuf>,
-    models: BTreeSet<String>,
-    last: Option<DateTime<Utc>>,
-    last_usage: Option<DateTime<Utc>>,
-    calls: usize,
-    latest_turn_tokens: i64,
-    window_tokens: i64,
-    total_tokens: i64,
+pub(crate) struct Session {
+    pub(crate) key: String,
+    pub(crate) id: String,
+    pub(crate) provider: String,
+    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) models: BTreeSet<String>,
+    pub(crate) last: Option<DateTime<Utc>>,
+    pub(crate) last_usage: Option<DateTime<Utc>>,
+    pub(crate) calls: usize,
+    pub(crate) latest_turn_tokens: i64,
+    pub(crate) window_tokens: i64,
+    pub(crate) total_tokens: i64,
     turns: Vec<TurnView>,
 }
 
+impl Session {
+    pub(crate) fn recent_usage(&self, window_start: DateTime<Utc>) -> bool {
+        self.last_usage
+            .is_some_and(|last_usage| last_usage >= window_start)
+    }
+}
+
 #[derive(Clone, Debug)]
-struct ProcessMatch {
+pub(crate) struct ProcessMatch {
     agent: Agent,
     process: platform::Process,
     confidence: i64,
@@ -1671,12 +1678,12 @@ struct ProcessMatch {
 }
 
 #[derive(Clone, Debug, Default)]
-struct Correlation {
-    matched: bool,
-    agent: Option<Agent>,
-    process: Option<platform::Process>,
-    score: i64,
-    reason: String,
+pub(crate) struct Correlation {
+    pub(crate) matched: bool,
+    pub(crate) agent: Option<Agent>,
+    pub(crate) process: Option<platform::Process>,
+    pub(crate) score: i64,
+    pub(crate) reason: String,
     confidence: i64,
     evidence: Vec<String>,
 }
@@ -1738,7 +1745,7 @@ pub fn build_snapshot_with_processes(
     }
 }
 
-fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> Vec<Session> {
+pub(crate) fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> Vec<Session> {
     let mut by_key: HashMap<String, Session> = HashMap::new();
     for event in events {
         let id = event.session_id.clone().unwrap_or_default();
@@ -2246,7 +2253,7 @@ fn build_overview(
     }
 }
 
-fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Vec<ProcessMatch> {
+pub(crate) fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Vec<ProcessMatch> {
     let mut matches = Vec::new();
     for process in snapshot.processes() {
         for agent in &cfg.agents {
@@ -2338,7 +2345,7 @@ fn regex_matches(pattern: &str, value: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn correlate(session: &Session, matches: &[ProcessMatch]) -> Correlation {
+pub(crate) fn correlate(session: &Session, matches: &[ProcessMatch]) -> Correlation {
     let Some(session_cwd) = clean_path(session.cwd.as_ref()) else {
         return Correlation::default();
     };
