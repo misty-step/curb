@@ -1,26 +1,26 @@
 # Curb UI
 
 This is the first desktop-app UI shell for Curb. It is a React/Vite dashboard
-that consumes the local `curb daemon` API and keeps all policy, process
-matching, token parsing, and enforcement logic in Go.
+that consumes the local `curb serve` API and keeps all policy, process
+matching, token parsing, and enforcement logic in Rust.
 
 ## Run
 
 Normal product launch:
 
 ```sh
-go build -o /tmp/curb ./cmd/curb
-/tmp/curb app --addr 127.0.0.1:8765
+cargo build --release --bin curb
+./target/release/curb app --addr 127.0.0.1:8765
 ```
 
-The Go binary serves the built dashboard and `/v1/*` API from the same loopback
-origin.
+The Rust binary serves the built dashboard and `/v1/*` API from the same
+loopback origin.
 
 For frontend development, start the daemon:
 
 ```sh
-go build -o /tmp/curb ./cmd/curb
-/tmp/curb daemon --addr 127.0.0.1:8765
+cargo build --release --bin curb
+./target/release/curb serve --addr 127.0.0.1:8765
 ```
 
 Then start Vite:
@@ -54,7 +54,7 @@ reviewable without process permissions or local agent logs.
 - The manual refresh button calls `POST /v1/service/rescan`; polling continues
   to read the cached snapshot.
 - Configuration is fetched from `/v1/config` and saved through `PUT /v1/config`.
-  The UI sends only a narrow policy DTO; Go validates and persists the YAML.
+  The UI sends only a narrow policy DTO; Rust validates and persists the YAML.
 - The selected session shows both an at-a-glance token timeline and a turn table
   with input, cached input, output, reasoning, and total token columns.
 - Alerts are fetched from `/v1/alerts`, a service-owned projection over ledger
@@ -70,6 +70,6 @@ npm run build
 ../scripts/build-ui.sh --check
 ```
 
-`npm run build` writes `ui/dist` for local frontend checks. The Go binary embeds
-`internal/web/dist`, so use `../scripts/build-ui.sh` before testing or shipping
-`curb app`.
+`npm run build` writes `ui/dist` for local frontend checks. The Rust binary
+embeds `internal/web/dist`, so use `../scripts/build-ui.sh` before testing or
+shipping `curb app`.

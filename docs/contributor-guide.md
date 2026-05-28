@@ -5,22 +5,34 @@ and thin OS adapters.
 
 ## Architecture
 
-- `cmd/curb`: CLI commands and user-facing command composition.
-- `internal/api`: token-gated localhost HTTP adapter for UI and CLI clients.
-- `internal/config`: strict YAML schema, defaults, validation, and policy merging.
-- `internal/usage`: metadata-only agent usage readers, provider-neutral token summaries, and shared durable parse cache for repeated scans.
-- `internal/usagewatch`: usage policy evaluation, process correlation, session acknowledgements, warnings, and usage-based enforcement.
-- `internal/service`: daemon orchestration, config updates, snapshot cache, usagewatch loop ownership, ledger reads, and stable UI/API read models.
-- `internal/watchdog`: run lifecycle, matching, warnings, ack handling, policy evaluation, and enforcement orchestration.
-- `internal/platform`: real OS process capture, notification, and termination adapters.
-- `internal/ledger`: append-only NDJSON ledger with hash chaining and generic append hooks.
+- `src/main.rs`: CLI command composition and local app launch.
+- `src/cli.rs`: first-run config, install, config presets, and compact terminal
+  commands.
+- `src/config.rs`: strict YAML schema, defaults, validation, and policy merging.
+- `src/usage.rs`: metadata-only agent usage readers, provider-neutral token
+  summaries, provider scan errors, and durable parse cache.
+- `src/usagewatch.rs`: usage policy evaluation, warnings, acknowledgements,
+  grace windows, notification state, and usage-based enforcement.
+- `src/service.rs`: stable UI/API read models, session/process correlation,
+  actionability, stop-session revalidation, and acknowledgement projection.
+- `src/runtime.rs`: daemon orchestration, config updates, snapshot cache,
+  notification health, scan ownership, and shared API state.
+- `src/platform.rs`: real OS process capture, notification, and sealed
+  termination-target construction.
+- `src/ledger.rs`: append-only NDJSON ledger with hash chaining, metadata
+  enrichment, redaction, and append hooks.
+- `src/api.rs`: token-gated loopback HTTP adapter for UI and CLI clients.
+- `src/web.rs`: embedded dashboard assets only.
+- `cmd/curb` and `internal/*`: legacy Go oracle code. Keep it compiling until
+  deletion, but do not add new product behavior there.
 
 The strategic boundary is simple: one machine has one service authority.
 Usage facts and provider-file ingestion state
 live in `usage`; provider parse state is operational cache under the service
-state directory, not audit history; usage policy lives in `usagewatch`; daemon orchestration, config persistence, UI
-actionability, session-ack commands, usagewatch loop ownership, and snapshot
-caching live in `service`; `api` only serializes and routes through the service
+state directory, not audit history; usage policy lives in `usagewatch`; daemon
+orchestration, config persistence, UI actionability, session-ack commands,
+usagewatch loop ownership, and snapshot caching live in `runtime` and
+`service`; `api` only serializes and routes through the service
 interface; raw ledger structs stay inside the audit-log and service boundary;
 legacy process-run policy lives in `watchdog`; OS facts and OS actions live in
 `platform`. Optional ledger export is service-owned and must not move HTTP,
@@ -61,29 +73,30 @@ The injected boundary functions are not mocks of the domain. They are substitute
 ## Commands
 
 ```sh
-gofmt -w cmd/curb internal/config internal/ledger internal/platform internal/service internal/usage internal/usagewatch internal/watchdog
 scripts/validate.sh
 scripts/build-ui.sh
 scripts/build-ui.sh --check
-go test ./...
-go vet ./...
-go test -race ./...
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo test -- --nocapture
+cargo build --release --bin curb
+bash demo/006/script/run-backlog-006-demo.sh --dry-run
+bash demo/006/script/run-backlog-006-demo.sh --mode all
 cd ui && npm run typecheck
 cd ui && npm run lint
 cd ui && npm test -- --run
-go test ./... -coverprofile=/tmp/curb.cover
-go tool cover -func=/tmp/curb.cover
-GOOS=linux GOARCH=amd64 go build -o /tmp/curb-linux ./cmd/curb
-GOOS=windows GOARCH=amd64 go build -o /tmp/curb-windows.exe ./cmd/curb
-go build -o /tmp/curb-darwin ./cmd/curb
+scripts/validate-go-oracle.sh
 ```
 
-`internal/web/dist` is the Go embed source for `curb app`. After changing
-`ui/src`, run `scripts/build-ui.sh`; it builds `ui/dist` and copies the result
-into `internal/web/dist`. `scripts/build-ui.sh --check` performs a fresh
-temporary Vite build and fails if the embedded assets are stale. `scripts/validate.sh`
-runs the product gate (`build-ui --check`, Go tests, Go vet, UI typecheck,
-UI lint, and UI tests).
+`internal/web/dist` is the committed embed source for `curb app`. After
+changing `ui/src`, run `scripts/build-ui.sh`; it builds `ui/dist` and copies
+the result into `internal/web/dist`. `scripts/build-ui.sh --check` performs a
+fresh temporary Vite build and fails if the embedded assets are stale.
+`scripts/validate.sh` runs the Rust-primary product gate (`build-ui --check`,
+Rust fmt, clippy, Rust tests, synthetic demo dry-run, UI typecheck, UI lint,
+and UI tests). `scripts/validate-go-oracle.sh` runs Go tests and vet only when
+you deliberately need the legacy oracle.
 
 ## Design Rules
 

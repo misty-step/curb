@@ -8,15 +8,16 @@ enforcement is explicitly configured.
 ## Install From Source
 
 ```sh
-go build -o curb ./cmd/curb
-./curb install
+cargo build --release --bin curb
+./target/release/curb install
 ```
 
-The same source cross-builds for Linux and Windows:
+The same Rust source builds on macOS, Linux, and Windows. Use the standard Rust
+target workflow for cross-builds when the target toolchain is installed:
 
 ```sh
-GOOS=linux GOARCH=amd64 go build -o curb-linux ./cmd/curb
-GOOS=windows GOARCH=amd64 go build -o curb-windows.exe ./cmd/curb
+cargo build --release --target x86_64-unknown-linux-gnu --bin curb
+cargo build --release --target x86_64-pc-windows-msvc --bin curb
 ```
 
 ## Start With The Normal Product Flow
@@ -24,13 +25,13 @@ GOOS=windows GOARCH=amd64 go build -o curb-windows.exe ./cmd/curb
 Build once:
 
 ```sh
-go build -o curb ./cmd/curb
+cargo build --release --bin curb
 ```
 
-Then run Curb:
+Then run the local app:
 
 ```sh
-curb
+curb app
 ```
 
 On first run, Curb creates a per-user config at the platform config location
@@ -43,10 +44,10 @@ Normal commands:
 curb config
 curb dashboard
 curb app
-curb daemon
+curb serve
 curb usage --since 24h
 curb tail
-curb
+curb watch
 curb runs
 ```
 
@@ -83,14 +84,9 @@ Use presets for the common flows:
 - `curb config aggressive` - enforcement, warn after 30 seconds and kill
   after 60 seconds. This is for deliberate local testing.
 
-For custom thresholds:
-
-```sh
-curb config set --mode enforcement --warn-after 2m --kill-after 4m --grace 30s --scan 5s
-curb config set --warn-turn-tokens 1000000 --kill-turn-tokens 3000000 --usage-window 15m
-curb config set --ledger-forward-url https://example.invalid/curb/events
-curb config set --ledger-forward-url off
-```
+Use the local app policy panel for custom thresholds. For automation or managed
+devices, edit the YAML config directly and run `curb validate-config` before
+starting the watcher.
 
 `curb config` shows the active config path, action, scan interval, policy,
 configured agents, and whether the ledger is local-only or forwarding events.
@@ -105,15 +101,15 @@ export receivers. In an interactive terminal it prompts for the common setup.
 curb app --addr 127.0.0.1:8765
 ```
 
-It starts the same daemon service as `curb daemon`, serves the embedded
+It starts the same local service as `curb serve`, serves the embedded
 dashboard, opens it in your browser, and authenticates the dashboard with a
 same-origin HttpOnly cookie. The normal app path does not ask you to paste an
 API token.
 
-`curb daemon` serves the same local API and dashboard without opening a browser:
+`curb serve` serves the same local API and dashboard without opening a browser:
 
 ```sh
-curb daemon --addr 127.0.0.1:8765
+curb serve --addr 127.0.0.1:8765
 ```
 
 The daemon runs usage policy scans, warning notifications, and enforcement from
@@ -155,7 +151,7 @@ use the advanced connection drawer to paste the daemon token from
 Curb treats usage as the primary enforcement signal. Runtime limits are still
 kept in config for legacy run ledgers, but the default watcher does not run a
 separate duration-based kill loop when usage monitoring is disabled. With
-`usage.enabled: false`, `curb watch`, `curb daemon`, and `curb app` all refresh
+`usage.enabled: false`, `curb watch`, `curb serve`, and `curb app` all refresh
 visibility only. Curb currently enforces the latest metadata-reported turn size
 and displays rolling-window activity for context.
 
@@ -170,9 +166,9 @@ processes instead of closing an entire desktop app.
 Use the example policy first:
 
 ```sh
-./curb validate-config configs/curb.example.yaml
-./curb scan --config configs/curb.example.yaml
-./curb watch --config configs/curb.example.yaml
+curb validate-config configs/curb.example.yaml
+curb watch --once --config configs/curb.example.yaml
+curb watch --config configs/curb.example.yaml
 ```
 
 Visibility mode never kills processes. It discovers configured agents and writes `.curb/runs.ndjson`.
@@ -180,12 +176,12 @@ Visibility mode never kills processes. It discovers configured agents and writes
 ## Common Commands
 
 ```sh
-curb help advanced
+curb --help
 curb status --config configs/curb.example.yaml
-curb scan --config configs/curb.example.yaml
+curb watch --once --config configs/curb.example.yaml
 curb runs --config configs/curb.example.yaml
 curb runs --json --config configs/curb.example.yaml
-curb ack <run-id> --config configs/curb.example.yaml --extend 30m --reason "still supervising"
+curb ack codex:session-id --config configs/curb.example.yaml --extend 30m --reason "still supervising"
 curb doctor --config configs/curb.example.yaml
 ```
 
@@ -196,9 +192,9 @@ until the acknowledgement expires. A session can be acknowledgeable even when
 it is not stoppable, for example in alert mode, when the matched process is
 watch-only, or when Curb cannot safely correlate usage to a live process.
 
-`curb ack <run-id>` is a legacy compatibility command for run-ledger workflows.
-It does not acknowledge usage sessions. Prefer the UI/API session
-acknowledgement path for token-spend warnings and stop-pending sessions.
+Legacy Go run ledgers used opaque run ids. Rust usage enforcement acknowledges
+usage sessions with keys such as `codex:session-id`; ledger run ids are event
+metadata, not the action handle.
 
 In enforcement mode, a selected `stop-pending` session may also show a
 destructive Stop button. That button is not an arbitrary PID killer. The UI

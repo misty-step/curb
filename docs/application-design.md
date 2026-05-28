@@ -21,9 +21,9 @@ evidence. Token turns are the primary risk primitive.
 
 Curb is one deep local endpoint agent with thin clients:
 
-- `curb daemon`: long-running local service and only authority for state,
+- `curb serve`: long-running local service and only authority for state,
   policy, and enforcement.
-- embedded web app: first application surface, served by the Go binary.
+- embedded web app: first application surface, served by the Rust binary.
 - CLI: compact local control and script surface over the same service.
 - future native shell: Tauri window/tray/installer around the same local API.
 
@@ -51,7 +51,7 @@ flowchart LR
     ConfigFile["User / managed config"]
   end
 
-  subgraph Daemon["curbd Go daemon"]
+  subgraph Daemon["curb Rust service"]
     Platform["platform adapters"]
     Usage["usage ingestion"]
     Correlation["session-process correlation"]
@@ -131,7 +131,7 @@ infer actionability, or decide whether a target is safe to terminate.
 
 ## Deep Module Boundary
 
-`internal/service` is the application boundary. HTTP, CLI, tray, and future
+`src/service.rs` is the application boundary. HTTP, CLI, tray, and future
 native shells speak to service-owned views and actions.
 
 Stable views:
@@ -516,7 +516,7 @@ HTTP retained as a fallback.
 
 ## Cross-Platform Design
 
-Platform differences live behind Go adapters. The UI sees platform capability
+Platform differences live behind Rust platform adapters. The UI sees platform capability
 states and explanations, not platform branches.
 
 The service-owned capability view has:

@@ -107,21 +107,24 @@ plane, gateway, or cloud-side enforcement authority in the launch product.
 Remote systems may receive metadata-only events, but the endpoint owns policy,
 correlation, warnings, and termination.
 
-- `cmd/curb`: CLI commands and user-facing command composition.
-- `internal/api`: token-gated loopback HTTP adapter for UI and CLI clients.
-- `internal/config`: strict YAML loading, defaults, validation, and policy
+- `src/main.rs`: CLI commands and user-facing command composition.
+- `src/api.rs`: token-gated loopback HTTP adapter for UI and CLI clients.
+- `src/config.rs`: strict YAML loading, defaults, validation, and policy
   merging.
-- `internal/service`: daemon orchestration, durable machine identity, config
+- `src/runtime.rs`: daemon orchestration, durable machine identity, config
   persistence, snapshot cache, UI/API read models, usagewatch ownership,
   session actions, and optional metadata-only ledger export.
-- `internal/usage`: provider-specific metadata readers and provider-neutral
+- `src/service.rs`: service-owned read models, session/process correlation,
+  actionability, acknowledgement projection, and stop-session revalidation.
+- `src/usage.rs`: provider-specific metadata readers and provider-neutral
   usage events for tokens, model, session, turn/request, cwd, and timestamp.
-- `internal/usagewatch`: usage policy evaluation, session/process correlation,
+- `src/usagewatch.rs`: usage policy evaluation, session/process correlation,
   acknowledgement, warning, grace, and usage-based enforcement.
-- `internal/watchdog`: legacy process-run matching and duration policy.
-- `internal/platform`: macOS, Windows, and Linux process discovery,
-  notification, and termination adapters behind one Go package boundary.
-- `internal/ledger`: append-only NDJSON event journal with hash chaining.
+- `src/platform.rs`: macOS, Windows, and Linux process discovery,
+  notification, and sealed termination-target construction.
+- `src/ledger.rs`: append-only NDJSON event journal with hash chaining.
+- `cmd/curb` and `internal/*`: legacy Go oracle code kept only until the Rust
+  product surface no longer needs migration comparison.
 
 Future native shells, tray apps, service installers, or managed-device wrappers
 must remain clients or deployment packaging around the same local service.

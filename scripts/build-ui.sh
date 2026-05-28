@@ -9,9 +9,9 @@ usage() {
   cat <<'EOF'
 usage: scripts/build-ui.sh [--check]
 
-Build the React dashboard and sync it into internal/web/dist for Go embedding.
+Build the React dashboard and sync it into the committed embedded asset tree.
 
-  --check   fail if internal/web/dist differs from ui/dist
+  --check   fail if internal/web/dist differs from a fresh UI build
 EOF
 }
 

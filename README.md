@@ -18,13 +18,23 @@ The implementation is active. The most useful entry points are:
 - [docs/local-agent-watchdog-spec.md](docs/local-agent-watchdog-spec.md) - watchdog product spec.
 - [SPEC.md](SPEC.md) - launch implementation specification.
 
-## Rust Rewrite
+## Rust Implementation
 
-The Rust rewrite is active on top of the existing Go behavior oracle. The
-ported modules are intentionally deep: strict config loading, append-only
-ledger handling, platform process identity/termination-target safety, usage
-metadata reading, read models, session actions, and automatic usage-policy
-watching.
+Rust is the primary Curb implementation. Its modules are intentionally deep:
+strict config loading, append-only ledger handling, platform process
+identity/termination-target safety, usage metadata reading, service read models,
+session actions, the loopback API, embedded dashboard serving, and automatic
+usage-policy watching.
+
+Build and run from source:
+
+```sh
+cargo build --release --bin curb
+./target/release/curb install
+curb app
+```
+
+Useful development commands:
 
 ```sh
 cargo test
@@ -42,57 +52,45 @@ cargo run -- serve
 cargo run -- app
 ```
 
-Rust gates are part of `scripts/validate.sh`:
+The normal product surface is intentionally small: configure Curb, then run the
+local app or watcher.
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+curb config
+curb app
+curb watch
+curb dashboard
+curb usage --since 24h
+curb tail
+curb status
+curb runs --state attention
+curb ack codex:session-id --extend 30m
 ```
 
-Until the Rust daemon reaches feature parity, the Go implementation remains the
-oracle for the full product surface. The Rust `serve` command runs the usage
-watcher in-process while serving the loopback API. The Rust `app` command serves
-the embedded dashboard on loopback and opens it in the browser. The Rust CLI
-also owns the first-run `init`, `install`, preset-based `config`, and terminal
-`dashboard`/`status`/`runs`/`ack`/`doctor` visibility and health-check flows.
-
-## Go Implementation
-
-Build and run:
+The default pre-merge gate is Rust-primary:
 
 ```sh
-go test ./...
-go build ./cmd/curb
-./curb install
-./curb init
-curb
+scripts/validate.sh
 ```
 
-Useful commands:
+It checks the embedded UI assets, Rust formatting, clippy, Rust tests, the
+synthetic demo dry-run, and UI typecheck/lint/test.
+
+## Legacy Go Oracle
+
+The previous Go implementation remains in-tree only as an explicit behavior
+oracle while the Rust rewrite is finished. Run it deliberately when you need to
+compare behavior during migration:
 
 ```sh
-./curb config
-./curb dashboard
-./curb app
-./curb daemon
-./curb usage --since 24h
-./curb tail
-./curb status
-./curb runs --state attention
-./curb ack codex:session-id --extend 30m
-./curb config aggressive
-./curb config reasonable
+scripts/validate-go-oracle.sh
 ```
-
-The normal product surface is intentionally small: configure Curb, then run
-Curb. Advanced inspection commands are available through `./curb help advanced`.
 
 `curb dashboard` shows live agent workers and recent usage in one terminal view.
 `curb app` serves the built dashboard and opens it in your browser. If a
-compatible daemon is already running on the configured loopback address, it
+compatible service is already running on the configured loopback address, it
 opens that dashboard instead of asking you to manage ports or paste tokens.
-`curb daemon` serves the localhost API and dashboard on loopback for advanced
+`curb serve` serves the localhost API and dashboard on loopback for advanced
 clients and service-style launches.
 `curb usage` reads local Codex and Claude metadata logs and summarizes sessions,
 models, and token usage without printing or storing prompt or response content.
@@ -103,8 +101,8 @@ models, and token usage without printing or storing prompt or response content.
 `codex:session-id`; legacy ledger run ids remain event metadata, not the action
 handle.
 
-The built UI is embedded in the Go binary. `curb app` is the normal launch path;
-`cd ui && npm run dev` is only needed while developing the frontend.
+The built UI is embedded in the Rust binary. `curb app` is the normal launch
+path; `cd ui && npm run dev` is only needed while developing the frontend.
 
 `curb watch` is usage-first when usage monitoring is enabled. It warns on recent
 token activity that crosses the configured latest-turn limit, and in enforcement
