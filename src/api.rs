@@ -229,6 +229,7 @@ impl<B: Backend> Backend for Arc<B> {
 pub struct Server<B: Backend> {
     token: String,
     backend: B,
+    ui: bool,
 }
 
 impl<B: Backend> Server<B> {
@@ -237,11 +238,28 @@ impl<B: Backend> Server<B> {
         if token.trim().is_empty() {
             return Err(ApiError::Config("api token is required".to_string()));
         }
-        Ok(Self { token, backend })
+        Ok(Self {
+            token,
+            backend,
+            ui: false,
+        })
+    }
+
+    pub fn serve_ui(&mut self) {
+        self.ui = true;
     }
 
     pub fn handle(&self, request: Request, now: DateTime<Utc>) -> Response {
         if !request.path.starts_with("/v1/") {
+            if self.ui
+                && let Some(mut response) = crate::web::handle(&request)
+            {
+                response.headers.insert(
+                    "set-cookie",
+                    token_cookie(&self.token, request.scheme == "https"),
+                );
+                return response;
+            }
             return Response::empty(404);
         }
         let mut cors_headers = cors_headers(&request);
@@ -404,6 +422,17 @@ impl<B: Backend> Server<B> {
             .cookie_value(TOKEN_COOKIE)
             .is_some_and(|token| constant_time_eq(&token, &self.token))
     }
+}
+
+fn token_cookie(token: &str, secure: bool) -> String {
+    let mut cookie = format!(
+        "{}={}; Path=/v1/; HttpOnly; SameSite=Strict",
+        TOKEN_COOKIE, token
+    );
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -848,6 +877,54 @@ mod tests {
             preflight.headers.get("access-control-allow-origin"),
             Some("http://127.0.0.1:5173")
         );
+    }
+
+    #[test]
+    fn non_api_routes_serve_embedded_ui_only_when_enabled() {
+        let mut server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let disabled = server.handle(Request::new("GET", "/"), fixed_now());
+        assert_eq!(disabled.status, 404);
+
+        server.serve_ui();
+        let index = server.handle(Request::new("GET", "/"), fixed_now());
+        assert_eq!(index.status, 200);
+        assert_eq!(
+            index.headers.get("content-type"),
+            Some("text/html; charset=utf-8")
+        );
+        assert!(index.text().contains("<div id=\"root\"></div>"));
+        assert_eq!(
+            index.headers.get("set-cookie"),
+            Some("curb_token=test-token; Path=/v1/; HttpOnly; SameSite=Strict")
+        );
+
+        let secure = server.handle(
+            Request::new("GET", "/").endpoint("https", "127.0.0.1:8765"),
+            fixed_now(),
+        );
+        assert_eq!(
+            secure.headers.get("set-cookie"),
+            Some("curb_token=test-token; Path=/v1/; HttpOnly; SameSite=Strict; Secure")
+        );
+
+        let spa = server.handle(Request::new("GET", "/sessions/codex:s1"), fixed_now());
+        assert_eq!(spa.status, 200);
+        assert!(spa.text().contains("<div id=\"root\"></div>"));
+
+        let blocked_method = server.handle(Request::new("POST", "/"), fixed_now());
+        assert_eq!(blocked_method.status, 404);
+    }
+
+    #[test]
+    fn api_routes_remain_protected_when_ui_is_enabled() {
+        let mut server = Server::new("test-token", FakeBackend::default()).unwrap();
+        server.serve_ui();
+
+        let health = server.handle(Request::new("GET", "/v1/health"), fixed_now());
+        assert_eq!(health.status, 401);
+
+        let authed = server.handle(authed("GET", "/v1/health"), fixed_now());
+        assert_eq!(authed.status, 200);
     }
 
     #[test]

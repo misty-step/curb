@@ -35,8 +35,8 @@ The rewrite keeps deep modules and narrow interfaces:
 - `src/runtime.rs`: local daemon orchestration: config updates, usage scans,
   snapshot cache, notification health, and shared runtime state for API and
   background watching.
-- `src/api.rs`: loopback HTTP adapter only.
-- future `src/web.rs`: embedded UI assets only.
+- `src/api.rs`: loopback API routes, auth, and UI cookie issuance.
+- `src/web.rs`: embedded UI assets only.
 
 ## Load-Bearing Type Invariants
 
@@ -59,11 +59,13 @@ The rewrite keeps deep modules and narrow interfaces:
 4. Port service read models and session/process correlation.
 5. Port acknowledgement and manual stop-session actions.
 6. Serve the existing React UI from the Rust daemon.
+   Status: Rust embeds `internal/web/dist`, serves the SPA from loopback, keeps
+   `/v1/*` protected, and exposes `curb app` as the browser launch path.
 7. Port warnings, notification delivery, grace policy, and automatic
    usage enforcement.
    Status: Rust now has automatic usage scan ticks and `curb serve` starts the
-   watcher in-process. Remaining daemon work includes graceful shutdown,
-   embedded UI parity, and full CLI ergonomics.
+   watcher in-process. Remaining daemon work includes graceful shutdown and
+   full CLI ergonomics.
 8. Port the safe synthetic demo to use the Rust binary.
 9. Remove Go only after Rust passes the behavior oracle and the product demo.
 

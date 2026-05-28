@@ -32,6 +32,7 @@ cargo run -- validate-config configs/curb.example.yaml
 cargo run -- usage --all
 cargo run -- watch --once
 cargo run -- serve
+cargo run -- app
 ```
 
 Rust gates are part of `scripts/validate.sh`:
@@ -43,9 +44,9 @@ cargo test
 ```
 
 Until the Rust daemon reaches feature parity, the Go implementation remains the
-oracle for the full product surface. The Rust `serve` command now runs the
-usage watcher in-process while serving the loopback API; embedded UI and CLI
-ergonomics are still being ported.
+oracle for the full product surface. The Rust `serve` command runs the usage
+watcher in-process while serving the loopback API. The Rust `app` command serves
+the embedded dashboard on loopback and opens it in the browser.
 
 ## Go Implementation
 

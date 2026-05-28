@@ -50,6 +50,16 @@ fn serve_rejects_non_loopback_address_before_binding() {
 }
 
 #[test]
+fn app_rejects_non_loopback_address_before_opening() {
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["app", "--addr", "0.0.0.0:0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("serve address must be loopback"));
+}
+
+#[test]
 fn watch_once_runs_a_single_usage_policy_scan() {
     let home = tempdir().expect("home");
     let state = tempdir().expect("state");

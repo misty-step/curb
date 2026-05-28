@@ -233,6 +233,27 @@ mod tests {
     }
 
     #[test]
+    fn handle_stream_serves_embedded_ui_when_enabled() {
+        let mut server = Server::new("test-token", FakeBackend::default()).unwrap();
+        server.serve_ui();
+        let raw = b"GET / HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n";
+
+        let request = read_request(&mut Cursor::new(raw), "http").unwrap();
+        let response = server.handle(request, fixed_now());
+
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.headers.get("content-type"),
+            Some("text/html; charset=utf-8")
+        );
+        assert_eq!(
+            response.headers.get("set-cookie"),
+            Some("curb_token=test-token; Path=/v1/; HttpOnly; SameSite=Strict")
+        );
+        assert!(response.text().contains("<div id=\"root\"></div>"));
+    }
+
+    #[test]
     fn loopback_host_helper_accepts_only_loopback_hosts() {
         assert!(is_loopback_host("127.0.0.1:8765"));
         assert!(is_loopback_host("[::1]:8765"));
