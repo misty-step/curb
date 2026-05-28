@@ -5,7 +5,8 @@ use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use curb::cli::{
-    config_command, default_config_path, default_home_dir, init_config, install_binary,
+    config_command, dashboard_command, default_config_path, default_home_dir, init_config,
+    install_binary,
 };
 
 #[derive(Debug, Parser)]
@@ -40,6 +41,22 @@ enum Command {
     Config {
         /// show, path, aggressive, reasonable, or observe.
         action: Option<String>,
+    },
+    /// Show live agents and usage from the Rust read model.
+    #[command(alias = "dash")]
+    Dashboard {
+        /// Config file to use.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Maximum sessions to print.
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Validate a Curb YAML config.
     ValidateConfig {
@@ -127,6 +144,22 @@ fn run() -> Result<()> {
         }) => init_config(config.unwrap_or_else(default_config_path), force, &mode)?,
         Some(Command::Install { prefix }) => install_binary(prefix)?,
         Some(Command::Config { action }) => config_command(action)?,
+        Some(Command::Dashboard {
+            config,
+            home,
+            limit,
+            json,
+        }) => {
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            dashboard_command(
+                config.unwrap_or_else(default_config_path),
+                home,
+                limit,
+                json,
+            )?
+        }
         Some(Command::Usage {
             home,
             json,

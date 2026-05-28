@@ -32,6 +32,7 @@ cargo run -- init --config /tmp/curb/config.yaml
 cargo run -- config reasonable
 cargo run -- validate-config configs/curb.example.yaml
 cargo run -- usage --all
+cargo run -- dashboard
 cargo run -- watch --once
 cargo run -- serve
 cargo run -- app
@@ -49,7 +50,8 @@ Until the Rust daemon reaches feature parity, the Go implementation remains the
 oracle for the full product surface. The Rust `serve` command runs the usage
 watcher in-process while serving the loopback API. The Rust `app` command serves
 the embedded dashboard on loopback and opens it in the browser. The Rust CLI
-also owns the first-run `init`, `install`, and preset-based `config` flows.
+also owns the first-run `init`, `install`, preset-based `config`, and terminal
+`dashboard` visibility flows.
 
 ## Go Implementation
 

@@ -118,6 +118,58 @@ fn usage_reads_synthetic_provider_metadata() {
 }
 
 #[test]
+fn dashboard_prints_service_snapshot_from_synthetic_usage() {
+    let home = tempdir().expect("home");
+    let state = tempdir().expect("state");
+    let config_path = state.path().join("curb.yaml");
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 107);
+    let mut cfg = curb::config::Config::local_default(
+        curb::config::Mode::Visibility,
+        state.path().join("state"),
+    );
+    cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
+    cfg.save(&config_path).expect("save config");
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["dashboard", "--config"])
+        .arg(&config_path)
+        .arg("--home")
+        .arg(home.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("curb dashboard"))
+        .stdout(predicate::str::contains("status:"))
+        .stdout(predicate::str::contains("live agents:"))
+        .stdout(predicate::str::contains("sessions"))
+        .stdout(predicate::str::contains("codex"))
+        .stdout(predicate::str::contains("session: session_codex"));
+}
+
+#[test]
+fn dashboard_json_prints_snapshot_read_model() {
+    let home = tempdir().expect("home");
+    let state = tempdir().expect("state");
+    let config_path = state.path().join("curb.yaml");
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 107);
+    let cfg = curb::config::Config::local_default(
+        curb::config::Mode::Visibility,
+        state.path().join("state"),
+    );
+    cfg.save(&config_path).expect("save config");
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["dashboard", "--json", "--config"])
+        .arg(&config_path)
+        .arg("--home")
+        .arg(home.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"overview\""))
+        .stdout(predicate::str::contains("\"sessions\""))
+        .stdout(predicate::str::contains("\"provider\": \"codex\""));
+}
+
+#[test]
 fn serve_rejects_non_loopback_address_before_binding() {
     let mut cmd = Command::cargo_bin("curb").expect("curb binary");
 
@@ -156,4 +208,19 @@ fn watch_once_runs_a_single_usage_policy_scan() {
         .success()
         .stdout(predicate::str::contains("curb rust watcher"))
         .stdout(predicate::str::contains("scan: status="));
+}
+
+fn write_synthetic_codex_usage(home: &std::path::Path, session: &str, cwd: &str, total: i64) {
+    let codex_dir = home.join(".codex").join("archived_sessions");
+    std::fs::create_dir_all(&codex_dir).expect("codex dir");
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    std::fs::write(
+        codex_dir.join("rollout.jsonl"),
+        format!(
+            r#"{{"timestamp":"{timestamp}","type":"session_meta","payload":{{"id":"{session}","cwd":"{cwd}"}}}}
+{{"timestamp":"{timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":100,"cached_input_tokens":20,"output_tokens":5,"reasoning_output_tokens":2,"total_tokens":{total}}},"total_token_usage":{{"total_tokens":{total}}},"model_context_window":258400}}}}}}
+"#
+        ),
+    )
+    .expect("codex fixture");
 }

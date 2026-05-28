@@ -1,11 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result, bail};
+use chrono::Utc;
 
 use crate::config::{Config, Mode, Preset};
+use crate::platform::SystemPlatform;
+use crate::runtime::Runtime;
 
 pub fn init_config(path: PathBuf, force: bool, mode: &str) -> Result<()> {
     let mode = Mode::from_str(mode).map_err(anyhow::Error::msg)?;
@@ -63,6 +67,25 @@ pub fn config_command(action: Option<String>) -> Result<()> {
         }
         Some(other) => bail!("unknown config command {other:?}"),
     }
+}
+
+pub fn dashboard_command(
+    config_path: PathBuf,
+    home: PathBuf,
+    limit: usize,
+    json: bool,
+) -> Result<()> {
+    let cfg = Config::load(&config_path)?;
+    let runtime =
+        Arc::new(Runtime::new(cfg.clone(), home, SystemPlatform).with_config_path(&config_path));
+    let snapshot = runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
+    if json {
+        serde_json::to_writer_pretty(std::io::stdout(), &snapshot)?;
+        println!();
+        return Ok(());
+    }
+    crate::dashboard::render(std::io::stdout(), &config_path, &cfg, &snapshot, limit)?;
+    Ok(())
 }
 
 pub fn load_or_default_config(path: &Path) -> Result<Config> {

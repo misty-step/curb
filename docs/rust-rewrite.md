@@ -37,6 +37,7 @@ The rewrite keeps deep modules and narrow interfaces:
 - `src/runtime.rs`: local daemon orchestration: config updates, usage scans,
   snapshot cache, notification health, and shared runtime state for API and
   background watching.
+- `src/dashboard.rs`: terminal rendering for the snapshot read model.
 - `src/api.rs`: loopback API routes, auth, and UI cookie issuance.
 - `src/web.rs`: embedded UI assets only.
 
@@ -67,13 +68,16 @@ The rewrite keeps deep modules and narrow interfaces:
    Status: Rust now supports `init`, `install`, `config`, config path discovery
    via `CURB_CONFIG`/local/user defaults, and preset updates backed by Rust
    config primitives.
-8. Port warnings, notification delivery, grace policy, and automatic
+8. Port terminal visibility surfaces.
+   Status: Rust now supports `dashboard`/`dash` text and JSON output backed by
+   the same `Snapshot` read model used by the API.
+9. Port warnings, notification delivery, grace policy, and automatic
    usage enforcement.
    Status: Rust now has automatic usage scan ticks and `curb serve` starts the
    watcher in-process. Remaining daemon work includes graceful shutdown and
    full CLI ergonomics.
-9. Port the safe synthetic demo to use the Rust binary.
-10. Remove Go only after Rust passes the behavior oracle and the product demo.
+10. Port the safe synthetic demo to use the Rust binary.
+11. Remove Go only after Rust passes the behavior oracle and the product demo.
 
 ## Validation
 
