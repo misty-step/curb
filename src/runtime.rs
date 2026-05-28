@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::{self, JoinHandle};
 
 use chrono::{DateTime, Utc};
 use thiserror::Error;
@@ -44,6 +45,40 @@ pub struct TurnQuery {
     pub limit: usize,
 }
 
+pub struct WatcherHandle {
+    shutdown: Arc<WatcherShutdown>,
+    thread: Option<JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct WatcherShutdown {
+    stopped: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl WatcherHandle {
+    pub fn request_shutdown(&self) {
+        let mut stopped = self
+            .shutdown
+            .stopped
+            .lock()
+            .expect("watcher mutex poisoned");
+        *stopped = true;
+        self.shutdown.changed.notify_all();
+    }
+
+    pub fn join(mut self) -> thread::Result<()> {
+        self.request_shutdown();
+        self.thread.take().map_or(Ok(()), JoinHandle::join)
+    }
+}
+
+impl Drop for WatcherHandle {
+    fn drop(&mut self) {
+        self.request_shutdown();
+    }
+}
+
 pub struct Runtime<P: Platform> {
     cfg: Mutex<Config>,
     config_path: Option<PathBuf>,
@@ -52,6 +87,44 @@ pub struct Runtime<P: Platform> {
     cache: Mutex<Option<Snapshot>>,
     notification: Mutex<Option<NotificationView>>,
     usagewatch: Mutex<UsageWatch>,
+}
+
+impl<P> Runtime<P>
+where
+    P: Platform + Send + Sync + 'static,
+{
+    pub fn start_usage_watcher(self: Arc<Self>) -> WatcherHandle {
+        let shutdown = Arc::new(WatcherShutdown::default());
+        let thread_shutdown = Arc::clone(&shutdown);
+        let thread = thread::spawn(move || {
+            loop {
+                if thread_shutdown.wait_timeout(self.config().usage.scan_interval.as_std()) {
+                    return;
+                }
+                if let Err(error) = self.usage_tick(Utc::now()) {
+                    eprintln!("curb: usage scan failed: {error:#}");
+                }
+            }
+        });
+        WatcherHandle {
+            shutdown,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl WatcherShutdown {
+    fn wait_timeout(&self, interval: std::time::Duration) -> bool {
+        let stopped = self.stopped.lock().expect("watcher mutex poisoned");
+        if *stopped {
+            return true;
+        }
+        let (stopped, _) = self
+            .changed
+            .wait_timeout(stopped, interval)
+            .expect("watcher condvar poisoned");
+        *stopped
+    }
 }
 
 impl<P: Platform> Runtime<P> {
@@ -145,6 +218,18 @@ impl<P: Platform> Runtime<P> {
             .expect("usage watcher mutex poisoned")
             .scan(&cfg, &scan.events, &processes, &self.platform, now)?;
         self.rescan(now)
+    }
+
+    pub fn usage_tick(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
+        match self.usage_scan(now) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(error) => {
+                self.append_runtime_event(
+                    crate::ledger::Event::new("usage_scan_failed").with_message(error.to_string()),
+                )?;
+                self.rescan(now)
+            }
+        }
     }
 
     pub fn snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
@@ -330,6 +415,13 @@ impl<P: Platform> Runtime<P> {
             .lock()
             .expect("notification mutex poisoned") = Some(view);
     }
+
+    fn append_runtime_event(&self, mut event: crate::ledger::Event) -> Result<(), RuntimeError> {
+        let cfg = self.config();
+        event.mode = Some(cfg.mode.to_string());
+        crate::ledger::Ledger::open(&cfg.ledger.path)?.append(event)?;
+        Ok(())
+    }
 }
 
 fn onboarding_completed(state_dir: &Path) -> bool {
@@ -394,7 +486,7 @@ fn capture_source_error(error: PlatformError) -> crate::usage::SourceReport {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use chrono::TimeZone;
     use serde_json::{Map, Value};
@@ -1049,6 +1141,50 @@ mod tests {
             ]
         );
         assert!(runtime.platform.terminated.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn usage_tick_records_scan_failures_without_losing_visibility() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let runtime = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Err(PlatformError::Capture("ps unavailable".to_string()))),
+        );
+
+        let snapshot = runtime.usage_tick(now).unwrap();
+
+        assert_eq!(snapshot.sessions[0].state, "uncorrelated");
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
+        assert_eq!(event_types(&events), ["usage_scan_failed"]);
+        assert!(
+            events[0]
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("ps unavailable"))
+        );
+    }
+
+    #[test]
+    fn usage_watcher_handle_shuts_down_without_waiting_for_scan_interval() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        let mut cfg = test_config(home.path(), Mode::Alert);
+        cfg.usage.scan_interval = HumanDuration::hours(1);
+        let runtime = Arc::new(Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        ));
+
+        let watcher = Arc::clone(&runtime).start_usage_watcher();
+        watcher.request_shutdown();
+
+        watcher.join().unwrap();
     }
 
     fn temp_home() -> TempDir {

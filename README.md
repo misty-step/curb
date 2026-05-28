@@ -20,13 +20,18 @@ The implementation is active. The most useful entry points are:
 
 ## Rust Rewrite
 
-The Rust rewrite is active on top of the existing Go behavior oracle. The first
+The Rust rewrite is active on top of the existing Go behavior oracle. The
 ported modules are intentionally deep: strict config loading, append-only
-ledger handling, and platform process identity/termination-target safety.
+ledger handling, platform process identity/termination-target safety, usage
+metadata reading, read models, session actions, and automatic usage-policy
+watching.
 
 ```sh
 cargo test
 cargo run -- validate-config configs/curb.example.yaml
+cargo run -- usage --all
+cargo run -- watch --once
+cargo run -- serve
 ```
 
 Rust gates are part of `scripts/validate.sh`:
@@ -38,7 +43,9 @@ cargo test
 ```
 
 Until the Rust daemon reaches feature parity, the Go implementation remains the
-oracle for product behavior and the embedded UI remains the thin client.
+oracle for the full product surface. The Rust `serve` command now runs the
+usage watcher in-process while serving the loopback API; embedded UI and CLI
+ergonomics are still being ported.
 
 ## Go Implementation
 

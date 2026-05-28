@@ -26,11 +26,16 @@ The rewrite keeps deep modules and narrow interfaces:
   tail reads, replacement detection, per-provider scan errors, and session
   summaries.
 - `src/service.rs`: usage-derived snapshot/read-model vocabulary, live worker
-  matching, session/process correlation, watch-only classification, and
-  actionability safety. Session acknowledgement and manual stop-session
-  revalidation are ported; ledger action events, notifications, grace policy,
-  and daemon orchestration are still to port.
-- future `src/api.rs`: loopback HTTP adapter only.
+  matching, session/process correlation, watch-only classification,
+  actionability safety, session acknowledgements, and manual stop-session
+  revalidation.
+- `src/usagewatch.rs`: automatic usage policy state: warning dedupe,
+  acknowledgement suppression, grace windows, stored termination targets,
+  notifications, and usage enforcement events.
+- `src/runtime.rs`: local daemon orchestration: config updates, usage scans,
+  snapshot cache, notification health, and shared runtime state for API and
+  background watching.
+- `src/api.rs`: loopback HTTP adapter only.
 - future `src/web.rs`: embedded UI assets only.
 
 ## Load-Bearing Type Invariants
@@ -56,6 +61,9 @@ The rewrite keeps deep modules and narrow interfaces:
 6. Serve the existing React UI from the Rust daemon.
 7. Port warnings, notification delivery, grace policy, and automatic
    usage enforcement.
+   Status: Rust now has automatic usage scan ticks and `curb serve` starts the
+   watcher in-process. Remaining daemon work includes graceful shutdown,
+   embedded UI parity, and full CLI ergonomics.
 8. Port the safe synthetic demo to use the Rust binary.
 9. Remove Go only after Rust passes the behavior oracle and the product demo.
 

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -149,6 +150,79 @@ impl<P: Platform> Backend for Runtime<P> {
 
     fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
         self.test_notification(now).map_err(ApiError::from)
+    }
+}
+
+impl<B: Backend> Backend for Arc<B> {
+    fn snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+        (**self).snapshot(now)
+    }
+
+    fn rescan(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+        (**self).rescan(now)
+    }
+
+    fn session(&self, key: &str, now: DateTime<Utc>) -> Result<SessionView, ApiError> {
+        (**self).session(key, now)
+    }
+
+    fn turns(
+        &self,
+        key: &str,
+        query: TurnQuery,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<TurnView>, ApiError> {
+        (**self).turns(key, query, now)
+    }
+
+    fn events(&self, limit: usize) -> Result<Vec<EventView>, ApiError> {
+        (**self).events(limit)
+    }
+
+    fn alerts(&self, limit: usize, now: DateTime<Utc>) -> Result<Vec<AlertView>, ApiError> {
+        (**self).alerts(limit, now)
+    }
+
+    fn acknowledge_session(
+        &self,
+        key: &str,
+        request: AckRequest,
+        now: DateTime<Utc>,
+    ) -> Result<AckView, ApiError> {
+        (**self).acknowledge_session(key, request, now)
+    }
+
+    fn stop_session(
+        &self,
+        key: &str,
+        request: StopRequest,
+        now: DateTime<Utc>,
+    ) -> Result<StopView, ApiError> {
+        (**self).stop_session(key, request, now)
+    }
+
+    fn config(&self) -> Result<ConfigView, ApiError> {
+        (**self).config()
+    }
+
+    fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError> {
+        (**self).update_config(update)
+    }
+
+    fn onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+        (**self).onboarding(now)
+    }
+
+    fn complete_onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+        (**self).complete_onboarding(now)
+    }
+
+    fn notification_health(&self) -> Result<NotificationView, ApiError> {
+        (**self).notification_health()
+    }
+
+    fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
+        (**self).test_notification(now)
     }
 }
 
@@ -869,6 +943,17 @@ mod tests {
     }
 
     #[test]
+    fn server_accepts_shared_backend_for_daemon_side_loops() {
+        let backend = Arc::new(SharedBackend);
+        let server = Server::new("test-token", Arc::clone(&backend)).unwrap();
+
+        let response = server.handle(authed("GET", "/v1/overview"), fixed_now());
+
+        assert_eq!(response.status, 200);
+        assert!(response.text().contains("\"status\":\"WATCH\""));
+    }
+
+    #[test]
     fn returns_events_and_alerts_with_limit_and_method_semantics() {
         let server = Server::new("test-token", FakeBackend::default()).unwrap();
         let now = fixed_now();
@@ -1201,6 +1286,81 @@ mod tests {
     #[derive(Default)]
     struct FakeBackend {
         next_error: RefCell<Option<ApiError>>,
+    }
+
+    struct SharedBackend;
+
+    impl Backend for SharedBackend {
+        fn snapshot(&self, _now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+            Ok(snapshot())
+        }
+
+        fn rescan(&self, _now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
+            Ok(snapshot())
+        }
+
+        fn session(&self, _key: &str, _now: DateTime<Utc>) -> Result<SessionView, ApiError> {
+            Err(ApiError::SessionNotFound)
+        }
+
+        fn turns(
+            &self,
+            _key: &str,
+            _query: TurnQuery,
+            _now: DateTime<Utc>,
+        ) -> Result<Vec<TurnView>, ApiError> {
+            Ok(Vec::new())
+        }
+
+        fn events(&self, _limit: usize) -> Result<Vec<EventView>, ApiError> {
+            Ok(Vec::new())
+        }
+
+        fn alerts(&self, _limit: usize, _now: DateTime<Utc>) -> Result<Vec<AlertView>, ApiError> {
+            Ok(Vec::new())
+        }
+
+        fn acknowledge_session(
+            &self,
+            _key: &str,
+            _request: AckRequest,
+            _now: DateTime<Utc>,
+        ) -> Result<AckView, ApiError> {
+            Err(ApiError::SessionNotFound)
+        }
+
+        fn stop_session(
+            &self,
+            _key: &str,
+            _request: StopRequest,
+            _now: DateTime<Utc>,
+        ) -> Result<StopView, ApiError> {
+            Err(ApiError::SessionNotFound)
+        }
+
+        fn config(&self) -> Result<ConfigView, ApiError> {
+            Ok(config_view("alert", 1000, 3000, 900, true))
+        }
+
+        fn update_config(&self, _update: ConfigUpdate) -> Result<ConfigView, ApiError> {
+            Ok(config_view("alert", 1000, 3000, 900, true))
+        }
+
+        fn onboarding(&self, _now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+            Ok(onboarding_view(false))
+        }
+
+        fn complete_onboarding(&self, _now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+            Ok(onboarding_view(false))
+        }
+
+        fn notification_health(&self) -> Result<NotificationView, ApiError> {
+            Ok(notification_view(true, true, "ready"))
+        }
+
+        fn test_notification(&self, _now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
+            Ok(notification_view(true, true, "delivered"))
+        }
     }
 
     impl FakeBackend {

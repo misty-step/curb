@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
@@ -129,15 +130,19 @@ fn run() -> Result<()> {
             let home = home
                 .or_else(default_home_dir)
                 .context("home directory is required for usage log discovery")?;
-            let runtime = curb::runtime::Runtime::new(cfg, home, curb::platform::SystemPlatform)
-                .with_config_path(config);
-            runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
+            let runtime = Arc::new(
+                curb::runtime::Runtime::new(cfg, home, curb::platform::SystemPlatform)
+                    .with_config_path(config),
+            );
+            runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
+            let _watcher = Arc::clone(&runtime).start_usage_watcher();
             let server = curb::api::Server::new(token, runtime).map_err(anyhow::Error::msg)?;
             let listener = curb::http::bind_loopback(&addr).map_err(anyhow::Error::msg)?;
             println!("curb rust api");
             println!("  listening: http://{}", listener.local_addr()?);
             println!("  token: {}", token_path.display());
             println!("  auth: Authorization: Bearer $(cat token-file)");
+            println!("  watcher: usage policy scans run in this process");
             curb::http::serve_blocking(listener, &server).map_err(anyhow::Error::msg)?;
         }
         Some(Command::Watch { config, home, once }) => {
@@ -159,7 +164,7 @@ fn run() -> Result<()> {
             );
             println!("  ledger: {}", cfg.ledger.path.display());
             loop {
-                let snapshot = runtime.usage_scan(Utc::now()).map_err(anyhow::Error::msg)?;
+                let snapshot = runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
                 println!(
                     "scan: status={} active={} warn={} stop={}",
                     snapshot.overview.status,
