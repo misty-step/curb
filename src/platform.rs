@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -157,6 +158,18 @@ impl TerminationTarget {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminationResult {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub soft_signaled: Vec<i32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hard_signaled: Vec<i32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gone: Vec<i32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
 #[derive(Clone, Debug, Error)]
 pub enum PlatformError {
     #[error("process capture failed: {0}")]
@@ -186,7 +199,7 @@ pub trait Platform {
     fn notification_capability(&self) -> NotificationCapability;
     fn termination_capability(&self) -> TerminationCapability;
     fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError>;
-    fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError>;
+    fn terminate(&self, target: &TerminationTarget, grace: Duration) -> TerminationResult;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -218,9 +231,9 @@ impl Platform for SystemPlatform {
 
     fn termination_capability(&self) -> TerminationCapability {
         TerminationCapability {
-            supported: false,
-            status: "unavailable".to_string(),
-            message: "Rust live process termination is not implemented yet".to_string(),
+            supported: true,
+            status: "available".to_string(),
+            message: "process-tree termination is available".to_string(),
         }
     }
 
@@ -228,11 +241,118 @@ impl Platform for SystemPlatform {
         run_notification(notification_command(std::env::consts::OS, title, body)?)
     }
 
-    fn terminate(&self, _target: &TerminationTarget) -> Result<(), PlatformError> {
-        Err(PlatformError::Terminate(
-            "rust live platform has not ported termination yet".to_string(),
-        ))
+    fn terminate(&self, target: &TerminationTarget, grace: Duration) -> TerminationResult {
+        terminate_tree(target, grace)
     }
+}
+
+fn terminate_tree(target: &TerminationTarget, grace: Duration) -> TerminationResult {
+    let mut pids = target
+        .scope()
+        .iter()
+        .map(|pid| pid.get())
+        .collect::<Vec<_>>();
+    if pids.is_empty() || target.root().pid.get() == 0 {
+        return TerminationResult {
+            errors: vec!["empty termination target".to_string()],
+            ..TerminationResult::default()
+        };
+    }
+    pids.sort_by(|left, right| right.cmp(left));
+
+    let mut result = TerminationResult::default();
+    for pid in &pids {
+        match soft_terminate(*pid) {
+            Ok(()) => result.soft_signaled.push(*pid),
+            Err(_error) if !pid_alive(*pid) => result.gone.push(*pid),
+            Err(error) => result.errors.push(format!("soft pid {pid}: {error}")),
+        }
+    }
+
+    std::thread::sleep(grace);
+
+    for pid in pids {
+        if !pid_alive(pid) {
+            if !result.gone.contains(&pid) {
+                result.gone.push(pid);
+            }
+            continue;
+        }
+        match hard_terminate(pid) {
+            Ok(()) => result.hard_signaled.push(pid),
+            Err(error) => result.errors.push(format!("hard pid {pid}: {error}")),
+        }
+    }
+    result
+}
+
+#[cfg(unix)]
+fn soft_terminate(pid: i32) -> Result<(), String> {
+    signal_with_kill("-TERM", pid)
+}
+
+#[cfg(unix)]
+fn hard_terminate(pid: i32) -> Result<(), String> {
+    signal_with_kill("-KILL", pid)
+}
+
+#[cfg(unix)]
+fn signal_with_kill(signal: &str, pid: i32) -> Result<(), String> {
+    let status = Command::new("kill")
+        .args([signal, &pid.to_string()])
+        .status()
+        .map_err(|source| source.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("kill {signal} {pid} exited with {status}"))
+    }
+}
+
+#[cfg(windows)]
+fn soft_terminate(pid: i32) -> Result<(), String> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T"])
+        .status()
+        .map_err(|source| source.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("taskkill /PID {pid} /T exited with {status}"))
+    }
+}
+
+#[cfg(windows)]
+fn hard_terminate(pid: i32) -> Result<(), String> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status()
+        .map_err(|source| source.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("taskkill /PID {pid} /T /F exited with {status}"))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn soft_terminate(pid: i32) -> Result<(), String> {
+    Err(format!("soft termination unsupported for pid {pid}"))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn hard_terminate(pid: i32) -> Result<(), String> {
+    Err(format!("hard termination unsupported for pid {pid}"))
+}
+
+fn pid_alive(pid: i32) -> bool {
+    let Some(pid) = u32::try_from(pid).ok().map(sysinfo::Pid::from_u32) else {
+        return false;
+    };
+    let system = System::new_with_specifics(
+        RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
+    );
+    system.process(pid).is_some()
 }
 
 fn notification_capability_for(os: &str, exists: impl Fn(&str) -> bool) -> NotificationCapability {
@@ -436,10 +556,11 @@ impl Platform for EmptyPlatform {
         ))
     }
 
-    fn terminate(&self, _target: &TerminationTarget) -> Result<(), PlatformError> {
-        Err(PlatformError::Terminate(
-            "empty platform cannot terminate processes".to_string(),
-        ))
+    fn terminate(&self, _target: &TerminationTarget, _grace: Duration) -> TerminationResult {
+        TerminationResult {
+            errors: vec!["empty platform cannot terminate processes".to_string()],
+            ..TerminationResult::default()
+        }
     }
 }
 
@@ -567,6 +688,27 @@ mod tests {
 
         child.kill().ok();
         child.wait().ok();
+    }
+
+    #[test]
+    fn system_platform_terminates_a_live_child_process() {
+        let mut child = sleeping_child();
+        let pid = Pid::new(i32::try_from(child.id()).expect("child pid fits i32"));
+        let snapshot = SystemPlatform.capture().expect("capture");
+        let observed = snapshot.process(pid).expect("child process in snapshot");
+        let target = snapshot
+            .termination_target(observed)
+            .expect("termination identity");
+
+        let result = SystemPlatform.terminate(&target, std::time::Duration::from_millis(50));
+        let _ = child.wait();
+
+        assert!(
+            result.soft_signaled.contains(&pid.get())
+                || result.hard_signaled.contains(&pid.get())
+                || result.gone.contains(&pid.get()),
+            "termination result = {result:?}"
+        );
     }
 
     #[test]

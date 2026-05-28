@@ -968,6 +968,17 @@ mod tests {
         );
         assert_eq!(ok.status, 200);
         assert!(ok.text().contains("still supervising"));
+
+        let stopped = server.handle(
+            authed("POST", "/v1/sessions/codex:session%2Fone/stop").body(stop_body()),
+            now,
+        );
+        assert_eq!(stopped.status, 200);
+        assert!(
+            stopped
+                .text()
+                .contains("\"result\":{\"soft_signaled\":[4242]}")
+        );
     }
 
     #[test]
@@ -1334,7 +1345,10 @@ mod tests {
                 team_id: None,
                 scope: "tree".to_string(),
                 scope_pids: vec![4242],
-                result: "terminated".to_string(),
+                result: crate::platform::TerminationResult {
+                    soft_signaled: vec![4242],
+                    ..crate::platform::TerminationResult::default()
+                },
             })
         }
 

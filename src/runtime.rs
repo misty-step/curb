@@ -527,7 +527,7 @@ mod tests {
             .stop_session("s1", stop_request_for(&root), now)
             .unwrap();
 
-        assert_eq!(stop.result, "terminated");
+        assert_eq!(stop.result.soft_signaled, vec![100]);
         assert_eq!(stop.scope_pids, vec![100]);
         assert_eq!(
             *runtime.platform.terminated.lock().unwrap(),
@@ -1071,12 +1071,19 @@ mod tests {
             Ok(())
         }
 
-        fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError> {
+        fn terminate(
+            &self,
+            target: &TerminationTarget,
+            _grace: std::time::Duration,
+        ) -> platform::TerminationResult {
             self.terminated
                 .lock()
                 .unwrap()
                 .push(target.scope().iter().map(|pid| pid.get()).collect());
-            Ok(())
+            platform::TerminationResult {
+                soft_signaled: target.scope().iter().map(|pid| pid.get()).collect(),
+                ..platform::TerminationResult::default()
+            }
         }
     }
 }

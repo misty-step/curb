@@ -230,6 +230,7 @@ pub struct AckView {
     pub session_key: String,
     pub extend_seconds: i64,
     pub until: DateTime<Utc>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub reason: String,
 }
 
@@ -266,13 +267,17 @@ pub struct StopView {
     pub agent_id: String,
     pub pid: i32,
     pub started_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub owner: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub executable: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub team_id: Option<String>,
     pub scope: String,
     pub scope_pids: Vec<i32>,
-    pub result: String,
+    pub result: platform::TerminationResult,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1563,23 +1568,15 @@ impl<'a, P: Platform> Service<'a, P> {
             None,
             &request.reason,
         )?;
-        if let Err(error) = self.platform.terminate(&target) {
-            self.append_manual_stop_event(
-                "manual_stop_failed",
-                &session,
-                &correlation,
-                &target,
-                Some("failed"),
-                &request.reason,
-            )?;
-            return Err(error.into());
-        }
+        let result = self
+            .platform
+            .terminate(&target, self.cfg.usage.grace_period.as_std());
         self.append_manual_stop_event(
             "manual_stop_completed",
             &session,
             &correlation,
             &target,
-            Some("terminated"),
+            Some("completed"),
             &request.reason,
         )?;
         let root = target.root();
@@ -1594,7 +1591,7 @@ impl<'a, P: Platform> Service<'a, P> {
             team_id: root.team_id.clone(),
             scope: scope.to_string(),
             scope_pids: target.scope().iter().map(|pid| pid.get()).collect(),
-            result: "terminated".to_string(),
+            result,
         })
     }
 
@@ -2946,7 +2943,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_session_records_failed_termination_attempt() {
+    fn stop_session_records_structured_termination_result_errors() {
         let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
@@ -2960,17 +2957,20 @@ mod tests {
             .with_terminate_error("unsupported in this slice");
         let service = Service::new(&cfg, &events, &platform);
 
-        let err = service
+        let view = service
             .stop_session("s1", stop_request_for(&root), now)
-            .unwrap_err();
+            .unwrap();
 
-        assert!(err.to_string().contains("unsupported in this slice"));
+        assert_eq!(
+            view.result.errors,
+            vec!["unsupported in this slice".to_string()]
+        );
         let events = crate::ledger::read(cfg.ledger.path.clone()).unwrap();
         assert_eq!(events[0].event_type, "manual_stop_started");
-        assert_eq!(events[1].event_type, "manual_stop_failed");
+        assert_eq!(events[1].event_type, "manual_stop_completed");
         assert_eq!(
             events[1].data.as_ref().unwrap().get("result").unwrap(),
-            "failed"
+            "completed"
         );
     }
 
@@ -3393,15 +3393,25 @@ mod tests {
             Ok(())
         }
 
-        fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError> {
+        fn terminate(
+            &self,
+            target: &TerminationTarget,
+            _grace: std::time::Duration,
+        ) -> platform::TerminationResult {
             if let Some(message) = &self.terminate_error {
-                return Err(PlatformError::Terminate(message.clone()));
+                return platform::TerminationResult {
+                    errors: vec![message.clone()],
+                    ..platform::TerminationResult::default()
+                };
             }
             self.terminated
                 .lock()
                 .unwrap()
                 .push(target.scope().iter().map(|pid| pid.get()).collect());
-            Ok(())
+            platform::TerminationResult {
+                soft_signaled: target.scope().iter().map(|pid| pid.get()).collect(),
+                ..platform::TerminationResult::default()
+            }
         }
     }
 
