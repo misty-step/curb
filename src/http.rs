@@ -251,6 +251,7 @@ mod tests {
             Ok(Snapshot {
                 overview: Overview {
                     mode: "visibility".to_string(),
+                    action: "record only; no warnings or kills".to_string(),
                     status: "OK".to_string(),
                     message: "ok".to_string(),
                     active_agents: 0,
@@ -262,6 +263,8 @@ mod tests {
                     lookback_tokens: 0,
                     last_scan: fixed_now(),
                     sources: Vec::new(),
+                    changes: Default::default(),
+                    capabilities: Default::default(),
                 },
                 agents: Vec::new(),
                 sessions: Vec::new(),

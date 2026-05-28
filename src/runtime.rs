@@ -120,8 +120,9 @@ impl<P: Platform> Runtime<P> {
     }
 
     pub fn rescan(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
-        let snapshot = self.build_snapshot(now)?;
-        *self.cache.lock().expect("runtime cache mutex poisoned") = Some(snapshot.clone());
+        let mut cache = self.cache.lock().expect("runtime cache mutex poisoned");
+        let snapshot = service::annotate_overview_delta(cache.as_ref(), self.build_snapshot(now)?);
+        *cache = Some(snapshot.clone());
         Ok(snapshot)
     }
 
@@ -250,20 +251,31 @@ impl<P: Platform> Runtime<P> {
         let scan = self.reader.scan_since(Some(self.lookback_start(now)))?;
         let cfg = self.config();
         let mut sources = scan.sources;
+        let mut capture_error = None;
         let captured = match self.platform.capture() {
             Ok(processes) => Some(processes),
             Err(error) => {
-                sources.push(capture_source_error(error));
+                sources.push(capture_source_error(error.clone()));
+                capture_error = Some(error);
                 None
             }
         };
-        Ok(service::build_snapshot_with_processes(
+        let mut snapshot = service::build_snapshot_with_processes(
             &cfg,
             captured.as_ref(),
             &scan.events,
             sources,
             now,
-        ))
+        );
+        snapshot.overview.capabilities = service::platform_capabilities(
+            &cfg,
+            captured.as_ref(),
+            capture_error.as_ref(),
+            self.notification_health()?,
+            self.platform.termination_capability(),
+            &snapshot.agents,
+        );
+        Ok(snapshot)
     }
 
     fn fresh_events(&self, now: DateTime<Utc>) -> Result<Vec<crate::usage::Event>, RuntimeError> {
@@ -397,8 +409,12 @@ mod tests {
         let rescanned = runtime.rescan(now).unwrap();
 
         assert_eq!(first.sessions.len(), 1);
+        assert_eq!(first.overview.changes, Default::default());
         assert_eq!(cached.sessions.len(), 1);
         assert_eq!(rescanned.sessions.len(), 2);
+        assert_eq!(rescanned.overview.changes.new_sessions, 1);
+        assert_eq!(rescanned.overview.changes.sessions_with_new_turns, 1);
+        assert_eq!(rescanned.overview.changes.tokens_added, 90);
     }
 
     #[test]
@@ -719,6 +735,15 @@ mod tests {
         let snapshot = runtime.rescan(now).unwrap();
 
         assert_eq!(snapshot.sessions[0].state, "uncorrelated");
+        assert_eq!(
+            snapshot.overview.capabilities.process_capture.status,
+            "error"
+        );
+        assert_eq!(
+            snapshot.overview.capabilities.process_identity.status,
+            "error"
+        );
+        assert_eq!(snapshot.overview.capabilities.enforcement.status, "blocked");
         assert!(snapshot.overview.sources.iter().any(|source| {
             source.provider == "processes"
                 && source
@@ -780,6 +805,34 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn overview_capabilities_report_enforcement_ready_only_when_revalidatable() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let runtime = Runtime::new(
+            test_config(home.path(), Mode::Enforcement),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        );
+
+        let snapshot = runtime.rescan(now).unwrap();
+
+        assert_eq!(snapshot.overview.action, "enforcement enabled");
+        assert_eq!(
+            snapshot.overview.capabilities.process_capture.status,
+            "ready"
+        );
+        assert_eq!(
+            snapshot.overview.capabilities.process_identity.status,
+            "ready"
+        );
+        assert!(snapshot.overview.capabilities.enforcement.available);
+        assert_eq!(snapshot.overview.capabilities.enforcement.status, "ready");
     }
 
     fn temp_home() -> TempDir {

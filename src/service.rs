@@ -53,6 +53,7 @@ pub struct Snapshot {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Overview {
     pub mode: String,
+    pub action: String,
     pub status: String,
     pub message: String,
     pub active_agents: usize,
@@ -64,6 +65,19 @@ pub struct Overview {
     pub lookback_tokens: i64,
     pub last_scan: DateTime<Utc>,
     pub sources: Vec<SourceReport>,
+    pub changes: OverviewDelta,
+    pub capabilities: PlatformCapabilities,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OverviewDelta {
+    pub new_sessions: usize,
+    pub sessions_with_new_turns: usize,
+    pub tokens_added: i64,
+    pub new_alerts: usize,
+    pub agents_started: usize,
+    pub agents_ended: usize,
+    pub source_errors: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -223,14 +237,14 @@ pub struct NotificationView {
     pub last_error: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityView {
     pub available: bool,
     pub status: String,
     pub message: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PlatformCapabilities {
     pub platform: String,
     pub notifications: CapabilityView,
@@ -506,6 +520,139 @@ pub fn onboarding_view(
     }
 }
 
+pub fn platform_capabilities(
+    cfg: &Config,
+    processes: Option<&platform::Snapshot>,
+    capture_error: Option<&platform::PlatformError>,
+    notifications: NotificationView,
+    termination: TerminationCapability,
+    agents: &[AgentView],
+) -> PlatformCapabilities {
+    PlatformCapabilities {
+        platform: std::env::consts::OS.to_string(),
+        notifications: notification_capability_view(&notifications),
+        process_capture: process_capture_capability_from_platform(processes, capture_error),
+        process_identity: process_identity_capability_from_platform(processes, capture_error),
+        enforcement: platform_enforcement_capability(
+            cfg,
+            processes,
+            capture_error,
+            &termination,
+            agents,
+        ),
+    }
+}
+
+pub fn annotate_overview_delta(previous: Option<&Snapshot>, mut next: Snapshot) -> Snapshot {
+    next.overview.changes = previous
+        .map(|previous| build_overview_delta(previous, &next))
+        .unwrap_or_default();
+    next
+}
+
+fn build_overview_delta(previous: &Snapshot, next: &Snapshot) -> OverviewDelta {
+    let previous_sessions = previous
+        .sessions
+        .iter()
+        .map(|session| (session.key.as_str(), session))
+        .collect::<HashMap<_, _>>();
+    let previous_turns = previous.turns.iter().map(turn_key).collect::<BTreeSet<_>>();
+    let mut sessions_with_turns = BTreeSet::new();
+    let mut delta = OverviewDelta::default();
+    for session in &next.sessions {
+        let previous = previous_sessions.get(session.key.as_str()).copied();
+        if previous.is_none() {
+            delta.new_sessions += 1;
+        }
+        if is_alerting_session(session) && !previous.is_some_and(is_alerting_session) {
+            delta.new_alerts += 1;
+        }
+    }
+    for turn in &next.turns {
+        if previous_turns.contains(&turn_key(turn)) {
+            continue;
+        }
+        delta.tokens_added += turn.total_tokens;
+        if !turn.session_key.is_empty() {
+            sessions_with_turns.insert(turn.session_key.clone());
+        }
+    }
+    delta.sessions_with_new_turns = sessions_with_turns.len();
+
+    let previous_agents = previous
+        .agents
+        .iter()
+        .map(agent_key)
+        .collect::<BTreeSet<_>>();
+    let next_agents = next.agents.iter().map(agent_key).collect::<BTreeSet<_>>();
+    delta.agents_started = next_agents.difference(&previous_agents).count();
+    delta.agents_ended = previous_agents.difference(&next_agents).count();
+
+    let previous_source_errors = previous
+        .overview
+        .sources
+        .iter()
+        .filter_map(|source| {
+            source
+                .error
+                .as_ref()
+                .map(|error| (source.provider.as_str(), error.as_str()))
+        })
+        .collect::<HashMap<_, _>>();
+    delta.source_errors = next
+        .overview
+        .sources
+        .iter()
+        .filter(|source| {
+            source.error.as_ref().is_some_and(|error| {
+                previous_source_errors
+                    .get(source.provider.as_str())
+                    .is_none_or(|previous| previous != error)
+            })
+        })
+        .count();
+    delta
+}
+
+fn is_alerting_session(session: &SessionView) -> bool {
+    matches!(session.usage_state.as_str(), "warn" | "stop")
+        || matches!(session.state.as_str(), "warn" | "stop")
+}
+
+fn turn_key(turn: &TurnView) -> String {
+    if let Some(id) = &turn.id
+        && !id.is_empty()
+    {
+        return format!("{}:{}:{}", turn.provider, turn.session_key, id);
+    }
+    if let Some(request_id) = &turn.request_id
+        && !request_id.is_empty()
+    {
+        return format!("{}:{}:{}", turn.provider, turn.session_key, request_id);
+    }
+    format!(
+        "{}:{}:{}:{}:{}:{}",
+        turn.provider,
+        turn.session_key,
+        turn.model.as_deref().unwrap_or_default(),
+        turn.at.map(|at| at.to_rfc3339()).unwrap_or_default(),
+        turn.total_tokens,
+        turn.cumulative_tokens
+    )
+}
+
+fn agent_key(agent: &AgentView) -> String {
+    format!(
+        "{}:{}:{}",
+        agent.id,
+        agent.pid,
+        agent
+            .process_started_at
+            .map(|started_at| started_at.to_rfc3339())
+            .unwrap_or_default()
+    )
+}
+
 fn onboarding_capabilities(
     config: &ConfigView,
     notifications: &NotificationView,
@@ -549,6 +696,82 @@ fn process_capture_capability(sources: &[SourceReport]) -> CapabilityView {
     }
 }
 
+fn process_capture_capability_from_platform(
+    processes: Option<&platform::Snapshot>,
+    capture_error: Option<&platform::PlatformError>,
+) -> CapabilityView {
+    if let Some(error) = capture_error {
+        return CapabilityView {
+            available: false,
+            status: "error".to_string(),
+            message: format!("process capture failed: {error}"),
+        };
+    }
+    let Some(processes) = processes else {
+        return CapabilityView {
+            available: false,
+            status: "waiting".to_string(),
+            message: "process capture has not run yet".to_string(),
+        };
+    };
+    CapabilityView {
+        available: true,
+        status: "ready".to_string(),
+        message: format!(
+            "{} captured",
+            format_count(processes.processes().count(), "process")
+        ),
+    }
+}
+
+fn process_identity_capability_from_platform(
+    processes: Option<&platform::Snapshot>,
+    capture_error: Option<&platform::PlatformError>,
+) -> CapabilityView {
+    if capture_error.is_some() {
+        return CapabilityView {
+            available: false,
+            status: "error".to_string(),
+            message: "process identity unavailable until capture succeeds".to_string(),
+        };
+    }
+    let Some(processes) = processes else {
+        return CapabilityView {
+            available: false,
+            status: "waiting".to_string(),
+            message: "process identity has not been sampled yet".to_string(),
+        };
+    };
+    let total = processes.processes().count();
+    if total == 0 {
+        return CapabilityView {
+            available: false,
+            status: "waiting".to_string(),
+            message: "no processes captured yet".to_string(),
+        };
+    }
+    let with_identity = processes
+        .processes()
+        .filter(|process| process.has_termination_identity())
+        .count();
+    if with_identity == 0 {
+        return CapabilityView {
+            available: false,
+            status: "degraded".to_string(),
+            message: "captured processes lack start-time or executable identity evidence"
+                .to_string(),
+        };
+    }
+    CapabilityView {
+        available: true,
+        status: "ready".to_string(),
+        message: format!(
+            "{} with identity evidence",
+            format_count(with_identity, "process")
+        ),
+    }
+}
+
 fn process_identity_capability(snapshot: &Snapshot) -> CapabilityView {
     let matched = snapshot.agents.iter().filter(|agent| agent.pid > 0).count();
     let revalidatable = snapshot
@@ -578,6 +801,65 @@ fn process_identity_capability(snapshot: &Snapshot) -> CapabilityView {
             status: "waiting".to_string(),
             message: "no live worker identity evidence yet".to_string(),
         }
+    }
+}
+
+fn platform_enforcement_capability(
+    cfg: &Config,
+    processes: Option<&platform::Snapshot>,
+    capture_error: Option<&platform::PlatformError>,
+    termination: &TerminationCapability,
+    agents: &[AgentView],
+) -> CapabilityView {
+    if cfg.mode != Mode::Enforcement {
+        return CapabilityView {
+            available: false,
+            status: "disabled".to_string(),
+            message: "current mode will not terminate processes".to_string(),
+        };
+    }
+    if !termination.supported {
+        return CapabilityView {
+            available: false,
+            status: termination.status.clone(),
+            message: termination.message.clone(),
+        };
+    }
+    if !cfg.agents.iter().any(Agent::termination_allowed) {
+        return CapabilityView {
+            available: false,
+            status: "blocked".to_string(),
+            message: "no enforceable agent types are configured".to_string(),
+        };
+    }
+    if !process_identity_capability_from_platform(processes, capture_error).available {
+        return CapabilityView {
+            available: false,
+            status: "blocked".to_string(),
+            message: "process identity is not strong enough for enforcement".to_string(),
+        };
+    }
+    let enforceable = cfg
+        .agents
+        .iter()
+        .filter(|agent| agent.termination_allowed())
+        .map(|agent| agent.id.as_str())
+        .collect::<BTreeSet<_>>();
+    if !agents.iter().any(|agent| {
+        enforceable.contains(agent.id.as_str())
+            && agent.pid > 0
+            && agent.process_started_at.is_some()
+    }) {
+        return CapabilityView {
+            available: false,
+            status: "blocked".to_string(),
+            message: "no live enforceable worker is currently matched".to_string(),
+        };
+    }
+    CapabilityView {
+        available: true,
+        status: "ready".to_string(),
+        message: "enforcement can target revalidated worker processes only".to_string(),
     }
 }
 
@@ -1642,6 +1924,7 @@ fn build_overview(
     };
     Overview {
         mode: cfg.mode.to_string(),
+        action: action_label(&cfg.mode.to_string()),
         status: status.to_string(),
         message: message.to_string(),
         active_agents: agents.len(),
@@ -1657,6 +1940,8 @@ fn build_overview(
         lookback_tokens: sessions.iter().map(|session| session.total_tokens).sum(),
         last_scan: now,
         sources,
+        changes: OverviewDelta::default(),
+        capabilities: PlatformCapabilities::default(),
     }
 }
 
@@ -2136,6 +2421,70 @@ mod tests {
                 .iter()
                 .all(|session| session.correlated_pid == Some(100))
         );
+    }
+
+    #[test]
+    fn overview_delta_reports_new_usage_alerts_agents_and_source_errors() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let previous_processes = platform::Snapshot::new([process(now, 100, "codex", "/repo")]);
+        let next_processes = platform::Snapshot::new([process(now, 101, "codex", "/repo")]);
+        let previous = build_snapshot_with_processes(
+            &cfg,
+            Some(&previous_processes),
+            &[event("codex", "old", now, 50)],
+            vec![
+                SourceReport {
+                    provider: "codex".to_string(),
+                    files: 1,
+                    events: 1,
+                    error: None,
+                },
+                SourceReport {
+                    provider: "claude".to_string(),
+                    files: 1,
+                    events: 0,
+                    error: Some("permission denied".to_string()),
+                },
+            ],
+            now,
+        );
+        let next = build_snapshot_with_processes(
+            &cfg,
+            Some(&next_processes),
+            &[
+                event("codex", "old", now, 50),
+                event("codex", "old", now + chrono::Duration::seconds(1), 250),
+                event("codex", "new", now + chrono::Duration::seconds(2), 25),
+            ],
+            vec![
+                SourceReport {
+                    provider: "codex".to_string(),
+                    files: 1,
+                    events: 3,
+                    error: Some("schema changed".to_string()),
+                },
+                SourceReport {
+                    provider: "claude".to_string(),
+                    files: 1,
+                    events: 0,
+                    error: Some("permission denied".to_string()),
+                },
+            ],
+            now,
+        );
+
+        let annotated = annotate_overview_delta(Some(&previous), next);
+
+        assert_eq!(annotated.overview.changes.new_sessions, 1);
+        assert_eq!(annotated.overview.changes.sessions_with_new_turns, 2);
+        assert_eq!(annotated.overview.changes.tokens_added, 275);
+        assert_eq!(annotated.overview.changes.new_alerts, 1);
+        assert_eq!(annotated.overview.changes.agents_started, 1);
+        assert_eq!(annotated.overview.changes.agents_ended, 1);
+        assert_eq!(annotated.overview.changes.source_errors, 1);
     }
 
     #[test]

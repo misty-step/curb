@@ -822,6 +822,13 @@ mod tests {
         let overview = server.handle(authed("GET", "/v1/overview"), now);
         assert_eq!(overview.status, 200);
         assert!(overview.text().contains("\"status\":\"WATCH\""));
+        assert!(overview.text().contains("\"changes\""));
+        assert!(overview.text().contains("\"capabilities\""));
+        assert!(
+            overview
+                .text()
+                .contains("\"action\":\"notify only; never kill\"")
+        );
 
         let agents = server.handle(authed("GET", "/v1/agents"), now);
         assert_eq!(agents.status, 200);
@@ -1339,6 +1346,7 @@ mod tests {
         Snapshot {
             overview: Overview {
                 mode: "alert".to_string(),
+                action: "notify only; never kill".to_string(),
                 status: "WATCH".to_string(),
                 message: "active usage is over a warning threshold".to_string(),
                 active_agents: 1,
@@ -1350,6 +1358,18 @@ mod tests {
                 lookback_tokens: 1000,
                 last_scan: fixed_now(),
                 sources: Vec::new(),
+                changes: Default::default(),
+                capabilities: PlatformCapabilities {
+                    platform: "test".to_string(),
+                    notifications: capability(true, "ready", "ready"),
+                    process_capture: capability(true, "ready", "process capture available"),
+                    process_identity: capability(true, "ready", "identity evidence available"),
+                    enforcement: capability(
+                        false,
+                        "disabled",
+                        "current mode never terminates processes",
+                    ),
+                },
             },
             agents: vec![AgentView {
                 id: "codex-worker".to_string(),
