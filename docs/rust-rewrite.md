@@ -27,7 +27,9 @@ The rewrite keeps deep modules and narrow interfaces:
   summaries.
 - `src/service.rs`: usage-derived snapshot/read-model vocabulary, live worker
   matching, session/process correlation, watch-only classification, and
-  actionability safety. Acknowledgement, grace, and actions are still to port.
+  actionability safety. Session acknowledgement and manual stop-session
+  revalidation are ported; ledger action events, notifications, grace policy,
+  and daemon orchestration are still to port.
 - future `src/api.rs`: loopback HTTP adapter only.
 - future `src/web.rs`: embedded UI assets only.
 
@@ -50,10 +52,12 @@ The rewrite keeps deep modules and narrow interfaces:
 2. Port provider usage readers for Codex and Claude using existing log fixtures.
 3. Port durable usage cache semantics from the Go oracle.
 4. Port service read models and session/process correlation.
-5. Serve the existing React UI from the Rust daemon.
-6. Port warnings, acknowledgement, notification, and usage enforcement.
-7. Port the safe synthetic demo to use the Rust binary.
-8. Remove Go only after Rust passes the behavior oracle and the product demo.
+5. Port acknowledgement and manual stop-session actions.
+6. Serve the existing React UI from the Rust daemon.
+7. Port warnings, notification delivery, grace policy, and automatic
+   usage enforcement.
+8. Port the safe synthetic demo to use the Rust binary.
+9. Remove Go only after Rust passes the behavior oracle and the product demo.
 
 ## Validation
 

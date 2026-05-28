@@ -1,13 +1,40 @@
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
 
 use crate::config::{Agent, Config, Mode};
-use crate::platform;
+use crate::platform::{self, Platform};
 use crate::usage::{Event, SourceReport};
+
+#[derive(Debug, Error)]
+pub enum ServiceError {
+    #[error("session not found")]
+    SessionNotFound,
+    #[error("invalid acknowledgement: {0}")]
+    InvalidAck(String),
+    #[error("invalid stop request: {0}")]
+    InvalidStop(String),
+    #[error("session cannot be stopped safely: {0}")]
+    StopConflict(String),
+    #[error("service io {path}: {source}")]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("service json {path}: {source}")]
+    Json {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    #[error(transparent)]
+    Platform(#[from] platform::PlatformError),
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -44,6 +71,9 @@ pub struct SessionView {
     pub action_state: String,
     pub actionable: bool,
     pub can_acknowledge: bool,
+    pub acknowledged: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged_until: Option<DateTime<Utc>>,
     pub cwd: Option<PathBuf>,
     pub models: Vec<String>,
     pub last_seen_at: DateTime<Utc>,
@@ -118,6 +148,207 @@ pub struct TurnView {
     pub source: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AckRequest {
+    pub extend_seconds: i64,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AckView {
+    pub session_key: String,
+    pub extend_seconds: i64,
+    pub until: DateTime<Utc>,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SessionAck {
+    pub session_key: String,
+    pub reason: String,
+    pub until: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StopRequest {
+    pub confirm: bool,
+    pub scope: String,
+    pub reason: String,
+    pub expected: StopExpectedIdentity,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StopExpectedIdentity {
+    pub pid: i32,
+    pub started_at: Option<DateTime<Utc>>,
+    pub owner: String,
+    pub executable: Option<PathBuf>,
+    pub bundle_id: Option<String>,
+    pub team_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StopView {
+    pub session_key: String,
+    pub agent_id: String,
+    pub pid: i32,
+    pub started_at: DateTime<Utc>,
+    pub owner: String,
+    pub executable: Option<PathBuf>,
+    pub bundle_id: Option<String>,
+    pub team_id: Option<String>,
+    pub scope: String,
+    pub scope_pids: Vec<i32>,
+    pub result: String,
+}
+
+pub struct Service<'a, P: Platform> {
+    cfg: &'a Config,
+    events: &'a [Event],
+    platform: &'a P,
+}
+
+impl<'a, P: Platform> Service<'a, P> {
+    pub fn new(cfg: &'a Config, events: &'a [Event], platform: &'a P) -> Self {
+        Self {
+            cfg,
+            events,
+            platform,
+        }
+    }
+
+    pub fn acknowledge_session(
+        &self,
+        session_key: &str,
+        request: AckRequest,
+        now: DateTime<Utc>,
+    ) -> Result<AckView, ServiceError> {
+        if session_key.is_empty() {
+            return Err(ServiceError::InvalidAck(
+                "session key is required".to_string(),
+            ));
+        }
+        if request.extend_seconds < 0 {
+            return Err(ServiceError::InvalidAck(
+                "extension must be positive".to_string(),
+            ));
+        }
+        let session =
+            find_session(self.events, session_key).ok_or(ServiceError::SessionNotFound)?;
+        let default_extend = self.cfg.defaults.ack_extension.as_std();
+        let mut extend = if request.extend_seconds == 0 {
+            default_extend
+        } else {
+            std::time::Duration::from_secs(request.extend_seconds as u64)
+        };
+        if extend.is_zero() {
+            return Err(ServiceError::InvalidAck(
+                "ack extension must be configured".to_string(),
+            ));
+        }
+        if !default_extend.is_zero() && extend > default_extend {
+            extend = default_extend;
+        }
+        let ack = write_session_ack(
+            &self.cfg.service.state_dir,
+            &session.key,
+            extend,
+            &request.reason,
+            now,
+        )?;
+        Ok(AckView {
+            session_key: ack.session_key,
+            extend_seconds: extend.as_secs() as i64,
+            until: ack.until,
+            reason: ack.reason,
+        })
+    }
+
+    pub fn stop_session(
+        &self,
+        session_key: &str,
+        request: StopRequest,
+        now: DateTime<Utc>,
+    ) -> Result<StopView, ServiceError> {
+        if session_key.is_empty() {
+            return Err(ServiceError::InvalidStop(
+                "session key is required".to_string(),
+            ));
+        }
+        if !request.confirm {
+            return Err(ServiceError::InvalidStop(
+                "confirmation is required".to_string(),
+            ));
+        }
+        let scope = if request.scope.is_empty() {
+            "tree"
+        } else {
+            request.scope.as_str()
+        };
+        if scope != "tree" {
+            return Err(ServiceError::InvalidStop(
+                "only process tree scope is supported".to_string(),
+            ));
+        }
+        validate_expected_stop_identity(&request.expected)?;
+        if self.cfg.mode != Mode::Enforcement {
+            return Err(ServiceError::StopConflict(
+                "enforcement mode is required".to_string(),
+            ));
+        }
+        let session =
+            find_session(self.events, session_key).ok_or(ServiceError::SessionNotFound)?;
+        if active_session_ack(&self.cfg.service.state_dir, &session.key, now)?.is_some() {
+            return Err(ServiceError::StopConflict(
+                "session is acknowledged".to_string(),
+            ));
+        }
+        let snapshot = self.platform.capture()?;
+        let matches = process_matches(self.cfg, &snapshot);
+        let correlation = correlate(&session, &matches);
+        if !correlation.matched {
+            return Err(ServiceError::StopConflict(
+                "no live process correlation".to_string(),
+            ));
+        }
+        let agent = correlation.agent.as_ref().expect("matched agent");
+        if !agent.termination_allowed() {
+            return Err(ServiceError::StopConflict(
+                "matched agent is watch-only".to_string(),
+            ));
+        }
+        let window_start =
+            now - chrono::Duration::from_std(self.cfg.usage.window.as_std()).unwrap();
+        let view = build_session_view(self.cfg, &session, &correlation, window_start, now);
+        if view.usage_state != "stop" || !view.actionable {
+            return Err(ServiceError::StopConflict(
+                "session is not an actionable stop candidate".to_string(),
+            ));
+        }
+        let process = correlation.process.as_ref().expect("matched process");
+        validate_stop_expectation(&request.expected, process)?;
+        let target = snapshot.termination_target(process).ok_or_else(|| {
+            ServiceError::StopConflict("process identity could not be revalidated".to_string())
+        })?;
+        self.platform.terminate(&target)?;
+        let root = target.root();
+        Ok(StopView {
+            session_key: session.key,
+            agent_id: agent.id.clone(),
+            pid: root.pid.get(),
+            started_at: root.started_at.expect("validated start time"),
+            owner: root.username.clone().unwrap_or_default(),
+            executable: root.executable.clone(),
+            bundle_id: root.bundle_id.clone(),
+            team_id: root.team_id.clone(),
+            scope: scope.to_string(),
+            scope_pids: target.scope().iter().map(|pid| pid.get()).collect(),
+            result: "terminated".to_string(),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Session {
     key: String,
@@ -179,7 +410,7 @@ pub fn build_snapshot_with_processes(
         .iter()
         .map(|session| {
             let correlation = correlate(session, &matches);
-            build_session_view(cfg, session, &correlation, window_start)
+            build_session_view(cfg, session, &correlation, window_start, now)
         })
         .collect::<Vec<_>>();
     sort_session_views(&mut session_views);
@@ -190,7 +421,7 @@ pub fn build_snapshot_with_processes(
             let best = best_session_for_match(matched, &sessions);
             let session_view = best.as_ref().map(|session| {
                 let correlation = correlate(session, std::slice::from_ref(matched));
-                build_session_view(cfg, session, &correlation, window_start)
+                build_session_view(cfg, session, &correlation, window_start, now)
             });
             build_agent_view(matched, session_view.as_ref(), now)
         })
@@ -272,18 +503,129 @@ fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> Vec<Session>
     by_key.into_values().collect()
 }
 
+fn find_session(events: &[Event], key: &str) -> Option<Session> {
+    build_sessions(events, DateTime::<Utc>::MIN_UTC)
+        .into_iter()
+        .find(|session| session.key == key || session.id == key)
+}
+
+pub fn write_session_ack(
+    state_dir: &Path,
+    session_key: &str,
+    extend: std::time::Duration,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> Result<SessionAck, ServiceError> {
+    if session_key.is_empty() {
+        return Err(ServiceError::InvalidAck(
+            "session key is required".to_string(),
+        ));
+    }
+    if extend.is_zero() {
+        return Err(ServiceError::InvalidAck(
+            "extension must be positive".to_string(),
+        ));
+    }
+    let ack = SessionAck {
+        session_key: session_key.to_string(),
+        reason: reason.to_string(),
+        until: now + chrono::Duration::from_std(extend).unwrap(),
+        created_at: now,
+    };
+    let path = session_ack_path(state_dir, session_key);
+    let dir = path.parent().unwrap_or(state_dir);
+    fs::create_dir_all(dir).map_err(|source| ServiceError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
+            ServiceError::Io {
+                path: dir.to_path_buf(),
+                source,
+            }
+        })?;
+    }
+    let content = serde_json::to_vec_pretty(&ack).map_err(|source| ServiceError::Json {
+        path: path.clone(),
+        source,
+    })?;
+    fs::write(&path, content).map_err(|source| ServiceError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            ServiceError::Io {
+                path: path.clone(),
+                source,
+            }
+        })?;
+    }
+    Ok(ack)
+}
+
+pub fn read_session_ack(
+    state_dir: &Path,
+    session_key: &str,
+) -> Result<Option<SessionAck>, ServiceError> {
+    let path = session_ack_path(state_dir, session_key);
+    let content = match fs::read(&path) {
+        Ok(content) => content,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(ServiceError::Io { path, source }),
+    };
+    serde_json::from_slice(&content)
+        .map(Some)
+        .map_err(|source| ServiceError::Json { path, source })
+}
+
+pub fn active_session_ack(
+    state_dir: &Path,
+    session_key: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<SessionAck>, ServiceError> {
+    let Some(ack) = read_session_ack(state_dir, session_key)? else {
+        return Ok(None);
+    };
+    if now < ack.until {
+        Ok(Some(ack))
+    } else {
+        Ok(None)
+    }
+}
+
+fn session_ack_path(state_dir: &Path, session_key: &str) -> PathBuf {
+    let mut hasher = Sha256::new();
+    hasher.update(session_key.as_bytes());
+    state_dir
+        .join("usage-acks")
+        .join(format!("{}.json", hex::encode(hasher.finalize())))
+}
+
 fn build_session_view(
     cfg: &Config,
     session: &Session,
     correlation: &Correlation,
     window_start: DateTime<Utc>,
+    now: DateTime<Utc>,
 ) -> SessionView {
     let active = session.last_usage.is_some_and(|last| last >= window_start);
     let over_stop = session.latest_turn_tokens >= cfg.usage.kill_turn_tokens;
     let over_warn = session.latest_turn_tokens >= cfg.usage.warn_turn_tokens;
     let matched_agent = correlation.agent.as_ref();
     let termination_allowed = matched_agent.is_some_and(Agent::termination_allowed);
-    let (state, usage_state, action_state, risk_rank, explanation) = if active && over_stop {
+    let ack_until = active_session_ack(&cfg.service.state_dir, &session.key, now)
+        .ok()
+        .flatten()
+        .map(|ack| ack.until);
+    let (mut state, usage_state, mut action_state, mut risk_rank, mut explanation) = if active
+        && over_stop
+    {
         let state = match (correlation.matched, termination_allowed) {
             (false, _) => "uncorrelated",
             (true, false) => "watch-only",
@@ -356,6 +698,12 @@ fn build_session_view(
     } else {
         ("quiet", "quiet", "none", 5, "no recent token usage")
     };
+    if ack_until.is_some() && matches!(usage_state, "warn" | "stop") {
+        state = "acknowledged";
+        action_state = "acknowledged";
+        risk_rank = 2;
+        explanation = "usage crossed threshold, but this session is acknowledged";
+    }
     let process_state = session_process_state(state, usage_state, correlation);
     SessionView {
         key: session.key.clone(),
@@ -366,7 +714,9 @@ fn build_session_view(
         usage_state: usage_state.to_string(),
         action_state: action_state.to_string(),
         actionable: action_state == "stop-pending",
-        can_acknowledge: matches!(usage_state, "warn" | "stop"),
+        can_acknowledge: ack_until.is_none() && matches!(usage_state, "warn" | "stop"),
+        acknowledged: ack_until.is_some(),
+        acknowledged_until: ack_until,
         cwd: session.cwd.clone(),
         models: session.models.iter().cloned().collect(),
         last_seen_at: session.last.unwrap_or(window_start),
@@ -743,12 +1093,79 @@ fn path_contains(parent: &std::path::Path, child: &std::path::Path) -> bool {
     child.starts_with(parent)
 }
 
+fn validate_expected_stop_identity(expected: &StopExpectedIdentity) -> Result<(), ServiceError> {
+    if expected.pid == 0 {
+        return Err(ServiceError::InvalidStop(
+            "expected pid is required".to_string(),
+        ));
+    }
+    if expected.started_at.is_none() {
+        return Err(ServiceError::InvalidStop(
+            "expected process start time is required".to_string(),
+        ));
+    }
+    if expected.owner.is_empty() {
+        return Err(ServiceError::InvalidStop(
+            "expected owner is required".to_string(),
+        ));
+    }
+    if expected.executable.is_none() && expected.bundle_id.is_none() && expected.team_id.is_none() {
+        return Err(ServiceError::InvalidStop(
+            "expected executable or app identity is required".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_stop_expectation(
+    expected: &StopExpectedIdentity,
+    actual: &platform::Process,
+) -> Result<(), ServiceError> {
+    if actual.pid.get() != expected.pid {
+        return Err(ServiceError::StopConflict("pid changed".to_string()));
+    }
+    if actual.started_at != expected.started_at {
+        return Err(ServiceError::StopConflict(
+            "process start time changed".to_string(),
+        ));
+    }
+    if actual.username.as_deref() != Some(expected.owner.as_str()) {
+        return Err(ServiceError::StopConflict(
+            "process owner changed".to_string(),
+        ));
+    }
+    if let Some(executable) = &expected.executable
+        && actual.executable.as_ref() != Some(executable)
+    {
+        return Err(ServiceError::StopConflict("executable changed".to_string()));
+    }
+    if let Some(bundle_id) = &expected.bundle_id
+        && actual.bundle_id.as_ref() != Some(bundle_id)
+    {
+        return Err(ServiceError::StopConflict("bundle id changed".to_string()));
+    }
+    if let Some(team_id) = &expected.team_id
+        && actual.team_id.as_ref() != Some(team_id)
+    {
+        return Err(ServiceError::StopConflict("team id changed".to_string()));
+    }
+    if !actual.has_termination_identity() {
+        return Err(ServiceError::StopConflict(
+            "process identity is incomplete".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use chrono::TimeZone;
 
     use super::*;
     use crate::config::Config;
+    use crate::platform::{PlatformError, TerminationTarget};
     use crate::usage::Event;
 
     #[test]
@@ -899,6 +1316,159 @@ mod tests {
     }
 
     #[test]
+    fn acknowledge_session_persists_and_suppresses_actionability() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.mode = crate::config::Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.defaults.ack_extension = crate::config::HumanDuration::seconds(60);
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![event("codex", "s1", now, 250)];
+        let platform = FakePlatform::new(process_snapshot(now, "codex", "/repo"));
+        let service = Service::new(&cfg, &events, &platform);
+
+        let ack = service
+            .acknowledge_session(
+                "s1",
+                AckRequest {
+                    extend_seconds: 300,
+                    reason: "still supervising".to_string(),
+                },
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(ack.session_key, "codex:s1");
+        assert_eq!(ack.extend_seconds, 60);
+        let stored = active_session_ack(&cfg.service.state_dir, "codex:s1", now).unwrap();
+        assert!(stored.is_some());
+        let snapshot = build_snapshot_with_processes(
+            &cfg,
+            Some(&platform.capture().unwrap()),
+            &events,
+            Vec::new(),
+            now,
+        );
+        assert_eq!(snapshot.sessions[0].state, "acknowledged");
+        assert_eq!(snapshot.sessions[0].action_state, "acknowledged");
+        assert!(!snapshot.sessions[0].actionable);
+        assert!(!snapshot.sessions[0].can_acknowledge);
+    }
+
+    #[test]
+    fn stop_session_revalidates_identity_and_terminates_tree() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = crate::config::Mode::Enforcement;
+        cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![event("codex", "s1", now, 250)];
+        let root = process(now, 100, "codex", "/repo");
+        let mut child = process(now, 101, "node", "/repo");
+        child.ppid = Some(platform::Pid::new(100));
+        let platform = FakePlatform::new(platform::Snapshot::new([root.clone(), child]));
+        let service = Service::new(&cfg, &events, &platform);
+
+        let view = service
+            .stop_session("s1", stop_request_for(&root), now)
+            .unwrap();
+
+        assert_eq!(view.session_key, "codex:s1");
+        assert_eq!(view.agent_id, "codex-cli");
+        assert_eq!(view.scope_pids, vec![101, 100]);
+        assert_eq!(*platform.terminated.lock().unwrap(), vec![vec![101, 100]]);
+    }
+
+    #[test]
+    fn stop_session_rejects_stale_identity_without_terminating() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = crate::config::Mode::Enforcement;
+        cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![event("codex", "s1", now, 250)];
+        let root = process(now, 100, "codex", "/repo");
+        let platform = FakePlatform::new(platform::Snapshot::new([root.clone()]));
+        let service = Service::new(&cfg, &events, &platform);
+        let mut request = stop_request_for(&root);
+        request.expected.started_at = root.started_at.map(|at| at - chrono::Duration::seconds(1));
+
+        let err = service.stop_session("s1", request, now).unwrap_err();
+
+        assert!(matches!(err, ServiceError::StopConflict(_)));
+        assert!(platform.terminated.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stop_session_rejects_watch_only_uncorrelated_acknowledged_and_alert_mode() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![event("codex", "s1", now, 250)];
+        let root = process(now, 100, "codex", "/repo");
+
+        let mut alert_cfg = Config::load("configs/curb.example.yaml").unwrap();
+        alert_cfg.mode = crate::config::Mode::Alert;
+        alert_cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        alert_cfg.usage.warn_turn_tokens = 100;
+        alert_cfg.usage.kill_turn_tokens = 200;
+        let alert_platform = FakePlatform::new(platform::Snapshot::new([root.clone()]));
+        assert!(matches!(
+            Service::new(&alert_cfg, &events, &alert_platform).stop_session(
+                "s1",
+                stop_request_for(&root),
+                now
+            ),
+            Err(ServiceError::StopConflict(_))
+        ));
+
+        let mut uncorrelated_cfg = alert_cfg.clone();
+        uncorrelated_cfg.mode = crate::config::Mode::Enforcement;
+        let other = process(now, 100, "codex", "/other");
+        let uncorrelated_platform = FakePlatform::new(platform::Snapshot::new([other.clone()]));
+        assert!(matches!(
+            Service::new(&uncorrelated_cfg, &events, &uncorrelated_platform).stop_session(
+                "s1",
+                stop_request_for(&other),
+                now
+            ),
+            Err(ServiceError::StopConflict(_))
+        ));
+
+        let mut watch_cfg = uncorrelated_cfg.clone();
+        watch_cfg.agents[1].kind = crate::config::AgentKind::App;
+        let watch_platform = FakePlatform::new(platform::Snapshot::new([root.clone()]));
+        assert!(matches!(
+            Service::new(&watch_cfg, &events, &watch_platform).stop_session(
+                "s1",
+                stop_request_for(&root),
+                now
+            ),
+            Err(ServiceError::StopConflict(_))
+        ));
+
+        let ack_cfg = uncorrelated_cfg;
+        write_session_ack(
+            &ack_cfg.service.state_dir,
+            "codex:s1",
+            std::time::Duration::from_secs(60),
+            "still supervising",
+            now,
+        )
+        .unwrap();
+        let ack_platform = FakePlatform::new(platform::Snapshot::new([root.clone()]));
+        assert!(matches!(
+            Service::new(&ack_cfg, &events, &ack_platform).stop_session(
+                "s1",
+                stop_request_for(&root),
+                now
+            ),
+            Err(ServiceError::StopConflict(_))
+        ));
+    }
+
+    #[test]
     fn old_high_usage_is_idle_high_not_active_stop() {
         let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
         cfg.usage.warn_turn_tokens = 100;
@@ -951,6 +1521,54 @@ mod tests {
             username: Some("tester".to_string()),
             bundle_id: None,
             team_id: None,
+        }
+    }
+
+    fn stop_request_for(process: &platform::Process) -> StopRequest {
+        StopRequest {
+            confirm: true,
+            scope: "tree".to_string(),
+            reason: "test".to_string(),
+            expected: StopExpectedIdentity {
+                pid: process.pid.get(),
+                started_at: process.started_at,
+                owner: process.username.clone().unwrap_or_default(),
+                executable: process.executable.clone(),
+                bundle_id: process.bundle_id.clone(),
+                team_id: process.team_id.clone(),
+            },
+        }
+    }
+
+    struct FakePlatform {
+        snapshot: platform::Snapshot,
+        terminated: Mutex<Vec<Vec<i32>>>,
+    }
+
+    impl FakePlatform {
+        fn new(snapshot: platform::Snapshot) -> Self {
+            Self {
+                snapshot,
+                terminated: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Platform for FakePlatform {
+        fn capture(&self) -> Result<platform::Snapshot, PlatformError> {
+            Ok(self.snapshot.clone())
+        }
+
+        fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
+            Ok(())
+        }
+
+        fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError> {
+            self.terminated
+                .lock()
+                .unwrap()
+                .push(target.scope().iter().map(|pid| pid.get()).collect());
+            Ok(())
         }
     }
 
