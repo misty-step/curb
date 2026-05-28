@@ -6,8 +6,8 @@ use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use curb::cli::{
-    config_command, dashboard_command, default_config_path, default_home_dir, doctor_command,
-    init_config, install_binary,
+    ack_command, config_command, dashboard_command, default_config_path, default_home_dir,
+    doctor_command, init_config, install_binary, runs_command, status_command,
 };
 
 #[derive(Debug, Parser)]
@@ -103,6 +103,60 @@ enum Command {
         /// Run one scan and exit.
         #[arg(long)]
         once: bool,
+    },
+    /// Show current Curb status from the Rust read model.
+    Status {
+        /// Config file to use.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show sessions tracked by local provider metadata.
+    #[command(alias = "sessions")]
+    Runs {
+        /// Config file to use.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Show only active or live sessions.
+        #[arg(long)]
+        active: bool,
+        /// Maximum sessions to print.
+        #[arg(long, default_value_t = 12)]
+        limit: usize,
+        /// Filter by session state: all, attention, active, warning, stop, acknowledged.
+        #[arg(long, default_value = "all")]
+        state: String,
+        /// Filter by provider, such as codex or claude.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Acknowledge and extend a warning session.
+    Ack {
+        /// Session key, such as codex:session-id.
+        key: String,
+        /// Config file to use.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Extension duration. Curb clamps this to the configured max.
+        #[arg(long, default_value = "30m")]
+        extend: String,
+        /// Optional acknowledgement reason.
+        #[arg(long, default_value = "")]
+        reason: String,
     },
     /// Serve the Rust local API on loopback.
     Serve {
@@ -243,6 +297,52 @@ fn run() -> Result<()> {
             let interval =
                 curb::config::parse_duration_for_cli(&interval).map_err(anyhow::Error::msg)?;
             tail_command(home, since, interval, once)?;
+        }
+        Some(Command::Status { config, home, json }) => {
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            status_command(config.unwrap_or_else(default_config_path), home, json)?;
+        }
+        Some(Command::Runs {
+            config,
+            home,
+            active,
+            limit,
+            state,
+            provider,
+            json,
+        }) => {
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            runs_command(
+                config.unwrap_or_else(default_config_path),
+                home,
+                active,
+                &state,
+                provider.as_deref(),
+                json,
+                limit,
+            )?;
+        }
+        Some(Command::Ack {
+            key,
+            config,
+            home,
+            extend,
+            reason,
+        }) => {
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            ack_command(
+                config.unwrap_or_else(default_config_path),
+                home,
+                key,
+                &extend,
+                reason,
+            )?;
         }
         Some(Command::Serve { config, addr, home }) => serve_dashboard(
             config.unwrap_or_else(default_config_path),

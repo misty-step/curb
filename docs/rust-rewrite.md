@@ -73,7 +73,9 @@ The rewrite keeps deep modules and narrow interfaces:
    the same `Snapshot` read model used by the API. Rust also supports `doctor`
    for config, state directory, ledger, process snapshot, and notification
    capability checks. Rust also supports `tail` for streaming recent provider
-   usage events from the metadata readers.
+   usage events from the metadata readers. Rust now supports `status`, `runs`
+   (alias `sessions`), and `ack` over usage session keys rather than legacy
+   run-ledger ids.
 9. Port warnings, notification delivery, grace policy, and automatic
    usage enforcement.
    Status: Rust now has automatic usage scan ticks and `curb serve` starts the

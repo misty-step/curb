@@ -35,6 +35,9 @@ cargo run -- usage --all
 cargo run -- dashboard
 cargo run -- doctor
 cargo run -- watch --once
+cargo run -- status
+cargo run -- runs
+cargo run -- ack codex:session-id --extend 30m
 cargo run -- serve
 cargo run -- app
 ```
@@ -52,7 +55,7 @@ oracle for the full product surface. The Rust `serve` command runs the usage
 watcher in-process while serving the loopback API. The Rust `app` command serves
 the embedded dashboard on loopback and opens it in the browser. The Rust CLI
 also owns the first-run `init`, `install`, preset-based `config`, and terminal
-`dashboard`/`doctor` visibility and health-check flows.
+`dashboard`/`status`/`runs`/`ack`/`doctor` visibility and health-check flows.
 
 ## Go Implementation
 
@@ -75,9 +78,11 @@ Useful commands:
 ./curb daemon
 ./curb usage --since 24h
 ./curb tail
+./curb status
+./curb runs --state attention
+./curb ack codex:session-id --extend 30m
 ./curb config aggressive
 ./curb config reasonable
-./curb runs
 ```
 
 The normal product surface is intentionally small: configure Curb, then run
@@ -94,6 +99,9 @@ models, and token usage without printing or storing prompt or response content.
 `curb tail` streams new local usage events as agents spend tokens. Use
 `curb tail --since 1h --interval 2s` for an operator view, or
 `curb tail --once` in scripts and demos.
+`curb status`, `curb runs`, and `curb ack` use usage session keys such as
+`codex:session-id`; legacy ledger run ids remain event metadata, not the action
+handle.
 
 The built UI is embedded in the Go binary. `curb app` is the normal launch path;
 `cd ui && npm run dev` is only needed while developing the frontend.

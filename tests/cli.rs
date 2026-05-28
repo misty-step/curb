@@ -271,6 +271,85 @@ fn watch_once_runs_a_single_usage_policy_scan() {
         .stdout(predicate::str::contains("scan: status="));
 }
 
+#[test]
+fn status_reports_warning_sessions_from_usage_read_model() {
+    let home = tempdir().expect("home");
+    let state = tempdir().expect("state");
+    let config_path = warning_config(state.path());
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 150);
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["status", "--config"])
+        .arg(&config_path)
+        .arg("--home")
+        .arg(home.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("curb status"))
+        .stdout(predicate::str::contains("status: WATCH"))
+        .stdout(predicate::str::contains("1 warning"))
+        .stdout(predicate::str::contains("attention"))
+        .stdout(predicate::str::contains("codex:session_codex"))
+        .stdout(predicate::str::contains(
+            "next: curb ack codex:session_codex",
+        ));
+}
+
+#[test]
+fn runs_prints_and_filters_session_read_model() {
+    let home = tempdir().expect("home");
+    let state = tempdir().expect("state");
+    let config_path = warning_config(state.path());
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 150);
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args([
+        "sessions",
+        "--active",
+        "--state",
+        "attention",
+        "--provider",
+        "codex",
+        "--config",
+    ])
+    .arg(&config_path)
+    .arg("--home")
+    .arg(home.path())
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("curb runs"))
+    .stdout(predicate::str::contains("sessions"))
+    .stdout(predicate::str::contains("codex:session_codex"))
+    .stdout(predicate::str::contains("acknowledge"));
+}
+
+#[test]
+fn ack_acknowledges_usage_session_and_records_ledger_event() {
+    let home = tempdir().expect("home");
+    let state = tempdir().expect("state");
+    let config_path = warning_config(state.path());
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 150);
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["ack", "codex:session_codex", "--config"])
+        .arg(&config_path)
+        .arg("--home")
+        .arg(home.path())
+        .args(["--extend", "30s", "--reason", "still watching"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("acknowledged codex:session_codex"))
+        .stdout(predicate::str::contains("extended: 30s"))
+        .stdout(predicate::str::contains("reason: still watching"));
+
+    let events =
+        curb::ledger::read(state.path().join("state").join("runs.ndjson")).expect("ledger events");
+    assert!(events.iter().any(|event| {
+        event.event_type == "session_ack_received"
+            && event.message.as_deref() == Some("still watching")
+    }));
+}
+
 fn write_synthetic_codex_usage(home: &std::path::Path, session: &str, cwd: &str, total: i64) {
     let codex_dir = home.join(".codex").join("archived_sessions");
     std::fs::create_dir_all(&codex_dir).expect("codex dir");
@@ -284,4 +363,16 @@ fn write_synthetic_codex_usage(home: &std::path::Path, session: &str, cwd: &str,
         ),
     )
     .expect("codex fixture");
+}
+
+fn warning_config(root: &std::path::Path) -> std::path::PathBuf {
+    let config_path = root.join("curb.yaml");
+    let mut cfg =
+        curb::config::Config::local_default(curb::config::Mode::Alert, root.join("state"));
+    cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
+    cfg.usage.warn_turn_tokens = 100;
+    cfg.usage.kill_turn_tokens = 300;
+    cfg.defaults.ack_extension = curb::config::HumanDuration::seconds(60);
+    cfg.save(&config_path).expect("save config");
+    config_path
 }

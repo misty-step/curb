@@ -12,6 +12,7 @@ use crate::ledger::{Event, Ledger};
 use crate::platform::SystemPlatform;
 use crate::platform::{NotificationCapability, PlatformError};
 use crate::runtime::Runtime;
+use crate::service::{AckRequest, SessionView};
 
 pub fn init_config(path: PathBuf, force: bool, mode: &str) -> Result<()> {
     let mode = Mode::from_str(mode).map_err(anyhow::Error::msg)?;
@@ -87,6 +88,122 @@ pub fn dashboard_command(
         return Ok(());
     }
     crate::dashboard::render(std::io::stdout(), &config_path, &cfg, &snapshot, limit)?;
+    Ok(())
+}
+
+pub fn status_command(config_path: PathBuf, home: PathBuf, json: bool) -> Result<()> {
+    let cfg = Config::load(&config_path)?;
+    let runtime = Runtime::new(cfg.clone(), home, SystemPlatform).with_config_path(&config_path);
+    let snapshot = runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
+    if json {
+        serde_json::to_writer_pretty(std::io::stdout(), &snapshot.overview)?;
+        println!();
+        return Ok(());
+    }
+    println!("curb status");
+    println!("  config: {}", compact_home(&config_path));
+    println!(
+        "  status: {} - {}",
+        snapshot.overview.status, snapshot.overview.message
+    );
+    println!(
+        "  sessions: {} active, {} warning, {} stop, {} idle-high",
+        snapshot.overview.active_sessions,
+        snapshot.overview.warning_sessions,
+        snapshot.overview.stop_sessions,
+        snapshot.overview.idle_high_sessions
+    );
+    println!(
+        "  usage: {} in window, {} lookback",
+        token_count(snapshot.overview.window_tokens),
+        token_count(snapshot.overview.lookback_tokens)
+    );
+    println!("  action: {}", snapshot.overview.action);
+    println!("  ledger: {}", compact_home(&cfg.ledger.path));
+    let attention = attention_sessions(&snapshot.sessions);
+    if !attention.is_empty() {
+        println!();
+        print_session_table("attention", attention.iter().copied(), 5);
+    }
+    Ok(())
+}
+
+pub fn runs_command(
+    config_path: PathBuf,
+    home: PathBuf,
+    active_only: bool,
+    state: &str,
+    provider: Option<&str>,
+    json: bool,
+    limit: usize,
+) -> Result<()> {
+    let cfg = Config::load(&config_path)?;
+    let runtime = Runtime::new(cfg, home, SystemPlatform).with_config_path(&config_path);
+    let snapshot = runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
+    let mut sessions = snapshot.sessions;
+    if active_only {
+        sessions.retain(|session| {
+            matches!(session.usage_state.as_str(), "spending" | "warn" | "stop")
+                || session.process_state == "running"
+        });
+    }
+    if let Some(provider) = provider {
+        sessions.retain(|session| session.provider == provider);
+    }
+    let state = state.to_ascii_lowercase();
+    if state != "all" {
+        sessions.retain(|session| session_matches_state(session, &state));
+    }
+    if json {
+        serde_json::to_writer_pretty(std::io::stdout(), &sessions)?;
+        println!();
+        return Ok(());
+    }
+    println!("curb runs");
+    if sessions.is_empty() {
+        println!("  no sessions");
+        return Ok(());
+    }
+    print_session_table("sessions", sessions.iter(), limit);
+    Ok(())
+}
+
+pub fn ack_command(
+    config_path: PathBuf,
+    home: PathBuf,
+    key: String,
+    extend: &str,
+    reason: String,
+) -> Result<()> {
+    let cfg = Config::load(&config_path)?;
+    let runtime = Runtime::new(cfg, home, SystemPlatform).with_config_path(&config_path);
+    let extend_seconds = crate::config::parse_duration_for_cli(extend)
+        .map_err(anyhow::Error::msg)?
+        .as_secs() as i64;
+    let ack = runtime
+        .acknowledge_session(
+            &key,
+            AckRequest {
+                extend_seconds,
+                reason,
+            },
+            Utc::now(),
+        )
+        .map_err(anyhow::Error::msg)?;
+    println!("acknowledged {}", ack.session_key);
+    println!(
+        "  extended: {}",
+        short_duration(StdDuration::from_secs(ack.extend_seconds as u64))
+    );
+    println!(
+        "  until: {}",
+        ack.until
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+    );
+    if !ack.reason.is_empty() {
+        println!("  reason: {}", ack.reason);
+    }
     Ok(())
 }
 
@@ -297,6 +414,69 @@ fn compact_home(path: &Path) -> String {
         }
     }
     rendered
+}
+
+fn attention_sessions(sessions: &[SessionView]) -> Vec<&SessionView> {
+    sessions
+        .iter()
+        .filter(|session| {
+            matches!(session.usage_state.as_str(), "warn" | "stop")
+                || session.actionable
+                || session.can_acknowledge
+        })
+        .collect()
+}
+
+fn session_matches_state(session: &SessionView, state: &str) -> bool {
+    match state {
+        "attention" => {
+            matches!(session.usage_state.as_str(), "warn" | "stop")
+                || session.actionable
+                || session.can_acknowledge
+        }
+        "active" => {
+            matches!(session.usage_state.as_str(), "spending" | "warn" | "stop")
+                || session.process_state == "running"
+        }
+        "warning" | "warn" => session.usage_state == "warn",
+        "stop" => session.usage_state == "stop",
+        "acknowledged" | "ack" => session.acknowledged,
+        "idle-high" => session.usage_state == "quiet-high",
+        other => {
+            session.state == other || session.usage_state == other || session.action_state == other
+        }
+    }
+}
+
+fn print_session_table<'a>(
+    label: &str,
+    sessions: impl IntoIterator<Item = &'a SessionView>,
+    limit: usize,
+) {
+    let sessions = sessions.into_iter().take(limit).collect::<Vec<_>>();
+    println!("{label}");
+    println!(
+        "  {:<12} {:<9} {:<13} {:<12} {:<12} SESSION",
+        "PROVIDER", "STATE", "ACTION", "TURN", "WINDOW"
+    );
+    for session in sessions {
+        println!(
+            "  {:<12} {:<9} {:<13} {:<12} {:<12} {}",
+            session.provider,
+            session.usage_state,
+            session.action_state,
+            token_count(session.latest_turn_tokens),
+            token_count(session.window_tokens),
+            session.key,
+        );
+        println!("    {}", session.explanation);
+        if let Some(cwd) = &session.cwd {
+            println!("    cwd: {}", compact_home(cwd));
+        }
+        if session.can_acknowledge {
+            println!("    next: curb ack {}", session.key);
+        }
+    }
 }
 
 fn state_dir_for_config(path: &Path) -> PathBuf {
