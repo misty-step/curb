@@ -117,7 +117,7 @@ fn run() -> Result<()> {
             let home = home
                 .or_else(default_home_dir)
                 .context("home directory is required for usage log discovery")?;
-            let runtime = curb::runtime::Runtime::new(cfg, home, curb::platform::EmptyPlatform);
+            let runtime = curb::runtime::Runtime::new(cfg, home, curb::platform::SystemPlatform);
             runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
             let server = curb::api::Server::new(token, runtime).map_err(anyhow::Error::msg)?;
             let listener = curb::http::bind_loopback(&addr).map_err(anyhow::Error::msg)?;

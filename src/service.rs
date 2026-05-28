@@ -315,7 +315,9 @@ impl<'a, P: Platform> Service<'a, P> {
                 "session is acknowledged".to_string(),
             ));
         }
-        let snapshot = self.platform.capture()?;
+        let snapshot = self.platform.capture().map_err(|error| {
+            ServiceError::StopConflict(format!("process snapshot unavailable: {error}"))
+        })?;
         let matches = process_matches(self.cfg, &snapshot);
         let correlation = correlate(&session, &matches);
         if !correlation.matched {
@@ -350,7 +352,17 @@ impl<'a, P: Platform> Service<'a, P> {
             None,
             &request.reason,
         )?;
-        self.platform.terminate(&target)?;
+        if let Err(error) = self.platform.terminate(&target) {
+            self.append_manual_stop_event(
+                "manual_stop_failed",
+                &session,
+                &correlation,
+                &target,
+                Some("failed"),
+                &request.reason,
+            )?;
+            return Err(error.into());
+        }
         self.append_manual_stop_event(
             "manual_stop_completed",
             &session,
@@ -1126,8 +1138,8 @@ fn correlate(session: &Session, matches: &[ProcessMatch]) -> Correlation {
         };
         let (score, reason) = if process_cwd == session_cwd {
             (125, "provider+cwd")
-        } else if path_contains(&process_cwd, &session_cwd)
-            || path_contains(&session_cwd, &process_cwd)
+        } else if safe_cwd_prefix_match(&process_cwd, &session_cwd)
+            || safe_cwd_prefix_match(&session_cwd, &process_cwd)
         {
             (75, "provider+cwd-prefix")
         } else {
@@ -1289,6 +1301,16 @@ fn clean_path(path: Option<&PathBuf>) -> Option<PathBuf> {
 
 fn path_contains(parent: &std::path::Path, child: &std::path::Path) -> bool {
     child.starts_with(parent)
+}
+
+fn safe_cwd_prefix_match(parent: &std::path::Path, child: &std::path::Path) -> bool {
+    path_specificity(parent) >= 2 && path_specificity(child) >= 2 && path_contains(parent, child)
+}
+
+fn path_specificity(path: &std::path::Path) -> usize {
+    path.components()
+        .filter(|component| matches!(component, std::path::Component::Normal(_)))
+        .count()
 }
 
 fn validate_expected_stop_identity(expected: &StopExpectedIdentity) -> Result<(), ServiceError> {
@@ -1514,6 +1536,31 @@ mod tests {
     }
 
     #[test]
+    fn cwd_prefix_correlation_rejects_root_or_top_level_paths() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let processes = platform::Snapshot::new([
+            process(now, 100, "codex", "/repo/a"),
+            process(now, 200, "codex", "/Users/phaedrus/project"),
+        ]);
+        let snapshot = build_snapshot_with_processes(
+            &cfg,
+            Some(&processes),
+            &[
+                event("codex", "root", now, 50).with_cwd("/"),
+                event("codex", "top", now, 50).with_cwd("/Users"),
+            ],
+            Vec::new(),
+            now,
+        );
+
+        assert_eq!(snapshot.sessions[0].correlated_pid, None);
+        assert_eq!(snapshot.sessions[1].correlated_pid, None);
+    }
+
+    #[test]
     fn acknowledge_session_persists_and_suppresses_actionability() {
         let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
@@ -1579,6 +1626,62 @@ mod tests {
         assert_eq!(view.agent_id, "codex-cli");
         assert_eq!(view.scope_pids, vec![101, 100]);
         assert_eq!(*platform.terminated.lock().unwrap(), vec![vec![101, 100]]);
+    }
+
+    #[test]
+    fn stop_session_records_failed_termination_attempt() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = crate::config::Mode::Enforcement;
+        cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![event("codex", "s1", now, 250)];
+        let root = process(now, 100, "codex", "/repo");
+        let platform = FakePlatform::new(platform::Snapshot::new([root.clone()]))
+            .with_terminate_error("unsupported in this slice");
+        let service = Service::new(&cfg, &events, &platform);
+
+        let err = service
+            .stop_session("s1", stop_request_for(&root), now)
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unsupported in this slice"));
+        let events = crate::ledger::read(cfg.ledger.path.clone()).unwrap();
+        assert_eq!(events[0].event_type, "manual_stop_started");
+        assert_eq!(events[1].event_type, "manual_stop_failed");
+        assert_eq!(
+            events[1].data.as_ref().unwrap().get("result").unwrap(),
+            "failed"
+        );
+    }
+
+    #[test]
+    fn stop_session_treats_process_capture_failure_as_stop_conflict() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = crate::config::Mode::Enforcement;
+        cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![event("codex", "s1", now, 250)];
+        let root = process(now, 100, "codex", "/repo");
+        let platform = FakePlatform::capture_error("ps unavailable");
+        let service = Service::new(&cfg, &events, &platform);
+
+        let err = service
+            .stop_session("s1", stop_request_for(&root), now)
+            .unwrap_err();
+
+        assert!(matches!(err, ServiceError::StopConflict(_)));
+        assert!(platform.terminated.lock().unwrap().is_empty());
+        assert!(
+            crate::ledger::read(cfg.ledger.path.clone())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1743,22 +1846,37 @@ mod tests {
     }
 
     struct FakePlatform {
-        snapshot: platform::Snapshot,
+        capture: Result<platform::Snapshot, PlatformError>,
         terminated: Mutex<Vec<Vec<i32>>>,
+        terminate_error: Option<String>,
     }
 
     impl FakePlatform {
         fn new(snapshot: platform::Snapshot) -> Self {
             Self {
-                snapshot,
+                capture: Ok(snapshot),
                 terminated: Mutex::new(Vec::new()),
+                terminate_error: None,
             }
+        }
+
+        fn capture_error(message: &str) -> Self {
+            Self {
+                capture: Err(PlatformError::Capture(message.to_string())),
+                terminated: Mutex::new(Vec::new()),
+                terminate_error: None,
+            }
+        }
+
+        fn with_terminate_error(mut self, message: &str) -> Self {
+            self.terminate_error = Some(message.to_string());
+            self
         }
     }
 
     impl Platform for FakePlatform {
         fn capture(&self) -> Result<platform::Snapshot, PlatformError> {
-            Ok(self.snapshot.clone())
+            self.capture.clone()
         }
 
         fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
@@ -1766,6 +1884,9 @@ mod tests {
         }
 
         fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError> {
+            if let Some(message) = &self.terminate_error {
+                return Err(PlatformError::Terminate(message.clone()));
+            }
             self.terminated
                 .lock()
                 .unwrap()
