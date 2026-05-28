@@ -172,9 +172,9 @@ mod tests {
     use crate::api::{ApiError, Backend, Server};
     use crate::runtime::TurnQuery;
     use crate::service::{
-        AckRequest, AckView, CapabilityView, ConfigUpdate, ConfigView, NotificationView,
-        OnboardingView, Overview, PlatformCapabilities, SessionView, Snapshot, StopRequest,
-        StopView, TurnView,
+        AckRequest, AckView, AlertView, CapabilityView, ConfigUpdate, ConfigView, EventView,
+        NotificationView, OnboardingView, Overview, PlatformCapabilities, SessionView, Snapshot,
+        StopRequest, StopView, TurnView,
     };
 
     #[test]
@@ -286,6 +286,14 @@ mod tests {
             _query: TurnQuery,
             _now: DateTime<Utc>,
         ) -> Result<Vec<TurnView>, ApiError> {
+            Ok(Vec::new())
+        }
+
+        fn events(&self, _limit: usize) -> Result<Vec<EventView>, ApiError> {
+            Ok(Vec::new())
+        }
+
+        fn alerts(&self, _limit: usize, _now: DateTime<Utc>) -> Result<Vec<AlertView>, ApiError> {
             Ok(Vec::new())
         }
 

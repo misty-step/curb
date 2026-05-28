@@ -13,8 +13,8 @@ use crate::config::parse_duration_for_cli;
 use crate::platform::Platform;
 use crate::runtime::{Runtime, RuntimeError, TurnQuery};
 use crate::service::{
-    AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, OnboardingView, ServiceError,
-    SessionView, Snapshot, StopRequest, StopView, TurnView,
+    AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, NotificationView,
+    OnboardingView, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 
 pub const TOKEN_COOKIE: &str = "curb_token";
@@ -56,6 +56,8 @@ pub trait Backend {
         query: TurnQuery,
         now: DateTime<Utc>,
     ) -> Result<Vec<TurnView>, ApiError>;
+    fn events(&self, limit: usize) -> Result<Vec<EventView>, ApiError>;
+    fn alerts(&self, limit: usize, now: DateTime<Utc>) -> Result<Vec<AlertView>, ApiError>;
     fn acknowledge_session(
         &self,
         key: &str,
@@ -96,6 +98,14 @@ impl<P: Platform> Backend for Runtime<P> {
         now: DateTime<Utc>,
     ) -> Result<Vec<TurnView>, ApiError> {
         self.turns(key, query, now).map_err(ApiError::from)
+    }
+
+    fn events(&self, limit: usize) -> Result<Vec<EventView>, ApiError> {
+        self.events(limit).map_err(ApiError::from)
+    }
+
+    fn alerts(&self, limit: usize, now: DateTime<Utc>) -> Result<Vec<AlertView>, ApiError> {
+        self.alerts(limit, now).map_err(ApiError::from)
     }
 
     fn acknowledge_session(
@@ -215,7 +225,18 @@ impl<B: Backend> Server<B> {
                 .unwrap_or_else(api_error_response),
             (_, "/v1/service/rescan") => error_response(405, "method not allowed"),
             _ if request.path.starts_with("/v1/sessions/") => self.handle_session(request, now),
-            ("GET", "/v1/events") | ("GET", "/v1/alerts") => json_response(200, json!([])),
+            ("GET", "/v1/events") => self
+                .backend
+                .events(limit_query(&request, 200))
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/events") => error_response(405, "method not allowed"),
+            ("GET", "/v1/alerts") => self
+                .backend
+                .alerts(limit_query(&request, 50), now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/alerts") => error_response(405, "method not allowed"),
             ("GET", "/v1/notifications/health") => self
                 .backend
                 .notification_health()
@@ -662,12 +683,16 @@ fn hex_value(byte: u8) -> Option<u8> {
 fn turn_query(request: &Request, now: DateTime<Utc>) -> TurnQuery {
     TurnQuery {
         since: query_param(&request.query, "since").and_then(|value| since_param(&value, now)),
-        limit: query_param(&request.query, "limit")
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
-            .map(|value| value.min(1000))
-            .unwrap_or(200),
+        limit: limit_query(request, 200),
     }
+}
+
+fn limit_query(request: &Request, default: usize) -> usize {
+    query_param(&request.query, "limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| value.min(1000))
+        .unwrap_or(default)
 }
 
 fn query_param(query: &str, name: &str) -> Option<String> {
@@ -841,6 +866,31 @@ mod tests {
         assert!(sessions.text().contains("codex:session/one"));
         assert!(sessions.text().contains("\"agent_state\":\"warn\""));
         assert!(sessions.text().contains("\"project\":\"repo\""));
+    }
+
+    #[test]
+    fn returns_events_and_alerts_with_limit_and_method_semantics() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let events = server.handle(authed("GET", "/v1/events?limit=1"), now);
+        assert_eq!(events.status, 200);
+        assert!(events.text().contains("\"category\":\"alert\""));
+        assert!(events.text().contains("\"kind\":\"warning\""));
+        assert!(!events.text().contains("\"kind\":\"completed\""));
+
+        let alerts = server.handle(authed("GET", "/v1/alerts?limit=1"), now);
+        assert_eq!(alerts.status, 200);
+        assert!(alerts.text().contains("\"category\":\"warning\""));
+        assert!(alerts.text().contains("\"can_acknowledge\":true"));
+        assert!(
+            alerts
+                .text()
+                .contains("\"session_key\":\"codex:session/one\"")
+        );
+
+        assert_eq!(server.handle(authed("POST", "/v1/events"), now).status, 405);
+        assert_eq!(server.handle(authed("POST", "/v1/alerts"), now).status, 405);
     }
 
     #[test]
@@ -1195,6 +1245,60 @@ mod tests {
                 cumulative_tokens: 789,
                 source: "test".to_string(),
             }])
+        }
+
+        fn events(&self, limit: usize) -> Result<Vec<EventView>, ApiError> {
+            self.maybe_error()?;
+            Ok(vec![
+                EventView {
+                    seq: 1,
+                    at: fixed_now(),
+                    category: "alert".to_string(),
+                    kind: "warning".to_string(),
+                    message: "warning".to_string(),
+                    run_id: None,
+                    agent_id: Some("codex-worker".to_string()),
+                    mode: Some("alert".to_string()),
+                },
+                EventView {
+                    seq: 2,
+                    at: fixed_now(),
+                    category: "termination".to_string(),
+                    kind: "completed".to_string(),
+                    message: "stopped".to_string(),
+                    run_id: None,
+                    agent_id: Some("codex-worker".to_string()),
+                    mode: Some("enforcement".to_string()),
+                },
+            ]
+            .into_iter()
+            .take(limit)
+            .collect())
+        }
+
+        fn alerts(&self, limit: usize, _now: DateTime<Utc>) -> Result<Vec<AlertView>, ApiError> {
+            self.maybe_error()?;
+            Ok(vec![AlertView {
+                severity: "warn".to_string(),
+                label: "warning".to_string(),
+                category: "warning".to_string(),
+                message: "warning".to_string(),
+                at: fixed_now(),
+                seq: 1,
+                run_id: None,
+                agent_id: Some("codex-worker".to_string()),
+                provider: Some("codex".to_string()),
+                mode: Some("alert".to_string()),
+                cwd: Some("/repo".to_string()),
+                session_key: Some("codex:session/one".to_string()),
+                session_id: Some("session/one".to_string()),
+                actionable: false,
+                can_acknowledge: true,
+                explanation: "Usage or runtime crossed the warning policy.".to_string(),
+            }]
+            .into_iter()
+            .take(limit)
+            .collect())
         }
 
         fn acknowledge_session(

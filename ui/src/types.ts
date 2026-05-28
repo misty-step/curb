@@ -249,3 +249,14 @@ export interface AlertView {
   can_acknowledge: boolean;
   explanation: string;
 }
+
+export interface EventView {
+  seq: number;
+  at: string;
+  category: string;
+  kind: string;
+  message: string;
+  run_id?: string;
+  agent_id?: string;
+  mode?: string;
+}

@@ -176,6 +176,48 @@ pub struct TurnView {
     pub source: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EventView {
+    pub seq: i64,
+    pub at: DateTime<Utc>,
+    pub category: String,
+    pub kind: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AlertView {
+    pub severity: String,
+    pub label: String,
+    pub category: String,
+    pub message: String,
+    pub at: DateTime<Utc>,
+    pub seq: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub actionable: bool,
+    pub can_acknowledge: bool,
+    pub explanation: String,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AckRequest {
@@ -556,6 +598,257 @@ pub fn annotate_overview_delta(previous: Option<&Snapshot>, mut next: Snapshot) 
         .map(|previous| build_overview_delta(previous, &next))
         .unwrap_or_default();
     next
+}
+
+pub fn event_views(events: &[ledger::Event], limit: usize) -> Vec<EventView> {
+    recent_events(events, limit)
+        .into_iter()
+        .map(new_event_view)
+        .collect()
+}
+
+pub fn alert_views(
+    events: &[ledger::Event],
+    snapshot: Option<&Snapshot>,
+    limit: usize,
+) -> Vec<AlertView> {
+    let sessions = snapshot.map(session_index).unwrap_or_default();
+    let mut alerts = Vec::new();
+    for event in events.iter().rev() {
+        if alerts.len() == effective_limit(limit, events.len()) {
+            break;
+        }
+        let Some(mut alert) = new_alert_view(event) else {
+            continue;
+        };
+        project_alert_action(&mut alert, &sessions);
+        alerts.push(alert);
+    }
+    alerts.reverse();
+    alerts
+}
+
+fn recent_events(events: &[ledger::Event], limit: usize) -> Vec<&ledger::Event> {
+    let limit = effective_limit(limit, events.len());
+    if limit >= events.len() {
+        events.iter().collect()
+    } else {
+        events[events.len() - limit..].iter().collect()
+    }
+}
+
+fn effective_limit(limit: usize, len: usize) -> usize {
+    if limit == 0 { len } else { limit.min(len) }
+}
+
+fn new_event_view(event: &ledger::Event) -> EventView {
+    let (category, kind) = event_class(&event.event_type);
+    EventView {
+        seq: event.seq,
+        at: event.ts,
+        category: category.to_string(),
+        kind: kind.to_string(),
+        message: event
+            .message
+            .clone()
+            .unwrap_or_else(|| default_event_message(category, kind)),
+        run_id: event.run_id.clone(),
+        agent_id: event.agent_id.clone(),
+        mode: event.mode.clone(),
+    }
+}
+
+fn new_alert_view(event: &ledger::Event) -> Option<AlertView> {
+    if !alert_event(&event.event_type) {
+        return None;
+    }
+    let category = alert_category(&event.event_type);
+    Some(AlertView {
+        severity: alert_severity(event).to_string(),
+        label: alert_label(&event.event_type).to_string(),
+        category: category.to_string(),
+        message: event
+            .message
+            .clone()
+            .unwrap_or_else(|| default_alert_message(category).to_string()),
+        at: event.ts,
+        seq: event.seq,
+        run_id: event.run_id.clone(),
+        agent_id: event.agent_id.clone(),
+        provider: string_data(event, "provider"),
+        mode: event.mode.clone(),
+        cwd: string_data(event, "cwd"),
+        session_key: None,
+        session_id: string_data(event, "session_id"),
+        actionable: actionable_event(event),
+        can_acknowledge: false,
+        explanation: alert_explanation(&event.event_type).to_string(),
+    })
+}
+
+fn event_class(event_type: &str) -> (&'static str, &'static str) {
+    match event_type {
+        "service_started" => ("service", "started"),
+        "service_stopped" => ("service", "stopped"),
+        "run_started" => ("run", "started"),
+        "run_stopped" => ("run", "stopped"),
+        "ack_received" | "session_ack_received" => ("ack", "received"),
+        "ack_rejected" => ("ack", "rejected"),
+        "policy_warning" | "usage_warning" => ("alert", "warning"),
+        "usage_would_terminate" => ("alert", "would_stop"),
+        "usage_kill_blocked" => ("alert", "blocked"),
+        "usage_grace_started" => ("alert", "grace"),
+        "usage_termination_started" | "termination_started" => ("termination", "started"),
+        "usage_termination_completed" | "termination_completed" => ("termination", "completed"),
+        "usage_termination_failed" | "termination_failed" => ("termination", "failed"),
+        "scan_failed" | "usage_scan_failed" => ("error", "scan_failed"),
+        "notification_failed" => ("error", "notification_failed"),
+        _ => ("other", "recorded"),
+    }
+}
+
+fn default_event_message(category: &str, kind: &str) -> String {
+    match category {
+        "service" => format!("Curb service {kind}."),
+        "run" => format!("Agent run {kind}."),
+        "ack" => format!("Acknowledgement {kind}."),
+        "alert" => "Policy alert recorded.".to_string(),
+        "termination" => format!("Termination {kind}."),
+        "error" => "Curb recorded an error.".to_string(),
+        _ => "Curb recorded an event.".to_string(),
+    }
+}
+
+fn alert_event(event_type: &str) -> bool {
+    event_type.contains("warning")
+        || event_type.contains("terminate")
+        || event_type.contains("termination")
+        || event_type.contains("kill")
+        || event_type.contains("grace")
+}
+
+fn alert_category(event_type: &str) -> &'static str {
+    if event_type.contains("completed") {
+        "stopped"
+    } else if event_type.contains("started") || event_type.contains("grace") {
+        "grace"
+    } else if event_type.contains("would") {
+        "would_stop"
+    } else if event_type.contains("blocked") {
+        "blocked"
+    } else if event_type.contains("failed") {
+        "failed"
+    } else {
+        "warning"
+    }
+}
+
+fn alert_severity(event: &ledger::Event) -> &'static str {
+    if event.event_type == "usage_termination_completed" {
+        "stop"
+    } else if event.event_type.contains("failed") {
+        "error"
+    } else if event.event_type.contains("blocked") {
+        "blocked"
+    } else if event.event_type.contains("would") || event.event_type.contains("grace") {
+        "watch"
+    } else {
+        "warn"
+    }
+}
+
+fn alert_label(event_type: &str) -> &'static str {
+    if event_type.contains("completed") {
+        "stopped"
+    } else if event_type.contains("started") || event_type.contains("grace") {
+        "grace"
+    } else if event_type.contains("would") {
+        "would stop"
+    } else if event_type.contains("blocked") {
+        "blocked"
+    } else if event_type.contains("failed") {
+        "failed"
+    } else {
+        "warning"
+    }
+}
+
+fn default_alert_message(category: &str) -> &'static str {
+    match category {
+        "stopped" => "Curb stopped a correlated worker.",
+        "grace" => "Curb started an enforcement grace period.",
+        "would_stop" => "Curb would stop a correlated worker in enforcement mode.",
+        "blocked" => "Curb blocked termination for an uncorrelated or protected process.",
+        "failed" => "Curb could not complete a policy action.",
+        _ => "Usage or runtime crossed policy.",
+    }
+}
+
+fn actionable_event(event: &ledger::Event) -> bool {
+    matches!(
+        event.event_type.as_str(),
+        "usage_termination_started" | "usage_termination_completed"
+    )
+}
+
+fn alert_explanation(event_type: &str) -> &'static str {
+    match event_type {
+        "usage_would_terminate" => {
+            "Alert mode: Curb would stop this correlated worker in enforcement mode."
+        }
+        "usage_kill_blocked" => {
+            "Curb did not stop anything because the session was uncorrelated or watch-only."
+        }
+        "usage_grace_started" => "Enforcement grace period started for a correlated worker.",
+        "usage_termination_started" => "Curb started terminating a correlated worker.",
+        "usage_termination_completed" => "Curb completed termination for a correlated worker.",
+        "policy_warning" | "usage_warning" => "Usage or runtime crossed the warning policy.",
+        _ => "",
+    }
+}
+
+fn session_index(snapshot: &Snapshot) -> HashMap<String, &SessionView> {
+    snapshot
+        .sessions
+        .iter()
+        .filter(|session| !session.provider.is_empty() && !session.id.is_empty())
+        .map(|session| {
+            (
+                provider_session_key(&session.provider, &session.id),
+                session,
+            )
+        })
+        .collect()
+}
+
+fn project_alert_action(alert: &mut AlertView, sessions: &HashMap<String, &SessionView>) {
+    let (Some(provider), Some(session_id)) = (&alert.provider, &alert.session_id) else {
+        return;
+    };
+    let Some(session) = sessions.get(&provider_session_key(provider, session_id)) else {
+        return;
+    };
+    alert.session_key = Some(session.key.clone());
+    if matches!(
+        alert.category.as_str(),
+        "warning" | "would_stop" | "blocked" | "grace"
+    ) {
+        alert.can_acknowledge = session.can_acknowledge;
+    }
+}
+
+fn provider_session_key(provider: &str, session_id: &str) -> String {
+    format!("{provider}\0{session_id}")
+}
+
+fn string_data(event: &ledger::Event, key: &str) -> Option<String> {
+    event
+        .data
+        .as_ref()
+        .and_then(|data| data.get(key))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn build_overview_delta(previous: &Snapshot, next: &Snapshot) -> OverviewDelta {
@@ -2843,6 +3136,126 @@ mod tests {
         assert_eq!(running_for_seconds(None, now), None);
     }
 
+    #[test]
+    fn event_views_classify_ledger_events_and_apply_limits() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = vec![
+            ledger_event("service_started", 1, now),
+            ledger_event("usage_warning", 2, now + chrono::Duration::seconds(1)),
+            ledger_event(
+                "usage_would_terminate",
+                3,
+                now + chrono::Duration::seconds(2),
+            ),
+            ledger_event(
+                "session_ack_received",
+                4,
+                now + chrono::Duration::seconds(3),
+            ),
+        ];
+
+        let views = event_views(&events, 3);
+
+        assert_eq!(views.len(), 3);
+        assert_eq!(
+            (views[0].category.as_str(), views[0].kind.as_str()),
+            ("alert", "warning")
+        );
+        assert_eq!(
+            (views[1].category.as_str(), views[1].kind.as_str()),
+            ("alert", "would_stop")
+        );
+        assert_eq!(
+            (views[2].category.as_str(), views[2].kind.as_str()),
+            ("ack", "received")
+        );
+        assert_eq!(views[2].message, "Acknowledgement received.");
+    }
+
+    #[test]
+    fn alert_views_filter_limit_order_and_project_session_actions() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let snapshot = build_snapshot_with_processes(
+            &cfg,
+            Some(&process_snapshot(now, "codex", "/repo")),
+            &[event("codex", "s1", now, 150)],
+            Vec::new(),
+            now,
+        );
+        let events = vec![
+            ledger_event("run_started", 1, now),
+            ledger_event("usage_warning", 2, now + chrono::Duration::seconds(1))
+                .with_data(alert_data("codex", "s1", "/repo")),
+            ledger_event(
+                "usage_would_terminate",
+                3,
+                now + chrono::Duration::seconds(2),
+            )
+            .with_message("would stop"),
+            ledger_event(
+                "usage_termination_completed",
+                4,
+                now + chrono::Duration::seconds(3),
+            ),
+        ];
+
+        let alerts = alert_views(&events, Some(&snapshot), 2);
+
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts[0].category, "would_stop");
+        assert_eq!(alerts[0].severity, "watch");
+        assert_eq!(alerts[1].category, "stopped");
+        assert_eq!(alerts[1].severity, "stop");
+        assert!(alerts[1].actionable);
+
+        let all = alert_views(&events, Some(&snapshot), 0);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].session_key.as_deref(), Some("codex:s1"));
+        assert!(all[0].can_acknowledge);
+        assert_eq!(all[0].cwd.as_deref(), Some("/repo"));
+    }
+
+    #[test]
+    fn alert_views_do_not_ack_missing_or_already_acknowledged_sessions() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+        cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        write_session_ack(
+            &cfg.service.state_dir,
+            "codex:s1",
+            std::time::Duration::from_secs(60),
+            "handled",
+            now,
+        )
+        .unwrap();
+        let snapshot = build_snapshot_with_processes(
+            &cfg,
+            Some(&process_snapshot(now, "codex", "/repo")),
+            &[event("codex", "s1", now, 150)],
+            Vec::new(),
+            now,
+        );
+        let events = vec![
+            ledger_event("usage_warning", 1, now).with_data(alert_data("codex", "s1", "/repo")),
+            ledger_event("usage_warning", 2, now)
+                .with_data(alert_data("codex", "missing", "/repo")),
+        ];
+
+        let alerts = alert_views(&events, Some(&snapshot), 0);
+
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts[0].session_key.as_deref(), Some("codex:s1"));
+        assert!(!alerts[0].can_acknowledge);
+        assert_eq!(alerts[1].session_key, None);
+        assert!(!alerts[1].can_acknowledge);
+    }
+
     fn event(provider: &str, session: &str, at: DateTime<Utc>, total: i64) -> Event {
         Event {
             provider: provider.to_string(),
@@ -2863,6 +3276,32 @@ mod tests {
             cumulative_tokens: total,
             model_context_window: 0,
         }
+    }
+
+    fn ledger_event(event_type: &str, seq: i64, at: DateTime<Utc>) -> ledger::Event {
+        ledger::Event {
+            event_type: event_type.to_string(),
+            seq,
+            ts: at,
+            run_id: None,
+            agent_id: Some("codex-cli".to_string()),
+            mode: Some("alert".to_string()),
+            message: None,
+            data: None,
+            prev_hash: None,
+            event_hash: None,
+        }
+    }
+
+    fn alert_data(provider: &str, session_id: &str, cwd: &str) -> Map<String, Value> {
+        let mut data = Map::new();
+        data.insert("provider".to_string(), Value::String(provider.to_string()));
+        data.insert(
+            "session_id".to_string(),
+            Value::String(session_id.to_string()),
+        );
+        data.insert("cwd".to_string(), Value::String(cwd.to_string()));
+        data
     }
 
     fn process_snapshot(now: DateTime<Utc>, name: &str, cwd: &str) -> platform::Snapshot {

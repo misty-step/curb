@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
-    self, AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, OnboardingView, Service,
-    ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
+    self, AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, NotificationView,
+    OnboardingView, Service, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
 
@@ -21,6 +21,8 @@ pub enum RuntimeError {
     Usage(#[from] UsageError),
     #[error(transparent)]
     Service(#[from] ServiceError),
+    #[error(transparent)]
+    Ledger(#[from] crate::ledger::LedgerError),
     #[error("config path is unavailable")]
     ConfigPathUnavailable,
     #[error(transparent)]
@@ -164,6 +166,19 @@ impl<P: Platform> Runtime<P> {
             Some(turn_since),
             query.limit,
         )?)
+    }
+
+    pub fn events(&self, limit: usize) -> Result<Vec<EventView>, RuntimeError> {
+        let cfg = self.config();
+        let events = crate::ledger::read(&cfg.ledger.path)?;
+        Ok(service::event_views(&events, limit))
+    }
+
+    pub fn alerts(&self, limit: usize, now: DateTime<Utc>) -> Result<Vec<AlertView>, RuntimeError> {
+        let cfg = self.config();
+        let events = crate::ledger::read(&cfg.ledger.path)?;
+        let snapshot = self.snapshot(now).ok();
+        Ok(service::alert_views(&events, snapshot.as_ref(), limit))
     }
 
     pub fn acknowledge_session(
@@ -363,6 +378,7 @@ mod tests {
     use std::sync::Mutex;
 
     use chrono::TimeZone;
+    use serde_json::{Map, Value};
     use tempfile::TempDir;
 
     use super::*;
@@ -835,6 +851,45 @@ mod tests {
         assert_eq!(snapshot.overview.capabilities.enforcement.status, "ready");
     }
 
+    #[test]
+    fn runtime_projects_events_and_alerts_from_ledger_with_live_session_affordance() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 150, 150);
+        let runtime = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        );
+        let cfg = runtime.config();
+        let ledger = crate::ledger::Ledger::open(&cfg.ledger.path).unwrap();
+        ledger
+            .append(crate::ledger::Event::new("run_started"))
+            .unwrap();
+        ledger
+            .append(
+                crate::ledger::Event::new("usage_warning")
+                    .with_data(alert_data("codex", "s1", "/repo")),
+            )
+            .unwrap();
+        ledger
+            .append(crate::ledger::Event::new("usage_would_terminate"))
+            .unwrap();
+
+        let events = runtime.events(2).unwrap();
+        let alerts = runtime.alerts(10, now).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "warning");
+        assert_eq!(events[1].kind, "would_stop");
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts[0].session_key.as_deref(), Some("codex:s1"));
+        assert!(alerts[0].can_acknowledge);
+        assert_eq!(alerts[1].category, "would_stop");
+    }
+
     fn temp_home() -> TempDir {
         let home = tempfile::tempdir().unwrap();
         fs::create_dir_all(home.path().join(".codex/archived_sessions")).unwrap();
@@ -906,6 +961,17 @@ mod tests {
 "#,
             at.to_rfc3339()
         )
+    }
+
+    fn alert_data(provider: &str, session_id: &str, cwd: &str) -> Map<String, Value> {
+        let mut data = Map::new();
+        data.insert("provider".to_string(), Value::String(provider.to_string()));
+        data.insert(
+            "session_id".to_string(),
+            Value::String(session_id.to_string()),
+        );
+        data.insert("cwd".to_string(), Value::String(cwd.to_string()));
+        data
     }
 
     fn process(now: DateTime<Utc>, pid: i32, name: &str, cwd: &str) -> platform::Process {
