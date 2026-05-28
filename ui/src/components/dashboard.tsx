@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { formatDuration, formatTokens, relativeTime, stateLabel, statusTone } from "../format";
 import { aliveAgentSummary, selectOperatorSummary, sessionForAgent } from "../readModel";
+import type { AliveAgentGroup } from "../readModel";
 import type { AgentView, AlertView, ConfigView, NotificationView, OnboardingView, SessionView, Snapshot, TurnView } from "../types";
 
 export function ReadinessStrip({
@@ -435,7 +436,7 @@ export function OperatorSummary({
   const model = selectOperatorSummary(snapshot);
   const subline =
     model.spendingAgents.length > 0
-      ? `${formatTokens(model.latestInputTokens)} since latest user input across active sessions`
+      ? `${formatTokens(model.latestSpentTokens)} spent in the latest fresh checkpoints`
       : model.recentUncorrelated.length > 0
         ? `${formatTokens(model.recentUncorrelatedTokens)} recent tokens are uncorrelated to a live worker`
         : `${model.aliveAgents.length} worker process${model.aliveAgents.length === 1 ? "" : "es"} are alive but idle`;
@@ -449,16 +450,17 @@ export function OperatorSummary({
           <p>{subline}</p>
         </div>
         <div className="operator-stats">
-          <MiniStat label="Active runs" value={`${model.spendingAgents.length}`} />
+          <MiniStat label="Active runs" value={`${model.spendingRows.length}`} />
           <MiniStat label="Alive workers" value={`${model.aliveAgents.length}`} />
-          <MiniStat label="Tokens this turn" value={formatTokens(model.latestInputTokens)} />
+          <MiniStat label="Fresh spend" value={formatTokens(model.latestSpentTokens)} />
           <MiniStat label="Unmatched logs" value={formatTokens(model.recentUncorrelatedTokens)} />
           <MiniStat label="Policy" value={summaryPolicy(config)} />
         </div>
       </div>
       <div className="operator-list" aria-label="Current agent runs">
         {model.spendingRows.length > 0 ? (
-          model.spendingRows.map((agent) => {
+          <>
+            {model.spendingRows.map((agent) => {
             const session = sessionForAgent(agent, snapshot.sessions);
             return (
               <button
@@ -475,12 +477,12 @@ export function OperatorSummary({
                   <span>{agent.provider} · {agent.label}</span>
                 </span>
                 <span>
-                  <strong>{formatTokens(agent.latest_turn_tokens ?? 0)}</strong>
-                  <span>since input</span>
+                  <strong>{formatTokens(agent.latest_spent_tokens ?? agent.latest_turn_tokens ?? 0)}</strong>
+                  <span>latest spend</span>
                 </span>
                 <span>
-                  <strong>{formatTokens(agent.window_tokens ?? 0)}</strong>
-                  <span>current window</span>
+                  <strong>{formatTokens(agent.window_spent_tokens ?? agent.window_tokens ?? 0)}</strong>
+                  <span>window spend</span>
                 </span>
                 <span>
                   <strong>{formatDuration(agent.running_for_seconds)}</strong>
@@ -488,31 +490,11 @@ export function OperatorSummary({
                 </span>
               </button>
             );
-          })
-        ) : model.aliveRows.length > 0 ? (
-          model.aliveRows.map((group) => (
-            <div className="operator-row passive" key={`${group.id}-${group.project}-${group.cwd}`}>
-              <span className="operator-state">
-                <StateChip state="idle" />
-              </span>
-              <span className="operator-main">
-                <strong>{group.project || group.label}</strong>
-                <span>{group.provider} · {group.label}</span>
-              </span>
-              <span>
-                <strong>{group.count}</strong>
-                <span>worker process{group.count === 1 ? "" : "es"}</span>
-              </span>
-              <span>
-                <strong>{formatDuration(group.runningForSeconds)}</strong>
-                <span>alive</span>
-              </span>
-              <span>
-                <strong>idle</strong>
-                <span>no matched token use</span>
-              </span>
-            </div>
-          ))
+          })}
+            {model.quietRows.map((group) => <QuietWorkerRow group={group} key={`${group.id}-${group.project}-${group.cwd}`} />)}
+          </>
+        ) : model.quietRows.length > 0 ? (
+          model.quietRows.map((group) => <QuietWorkerRow group={group} key={`${group.id}-${group.project}-${group.cwd}`} />)
         ) : (
           <div className="operator-empty">
             <strong>No live agent run is correlated to usage yet.</strong>
@@ -524,6 +506,32 @@ export function OperatorSummary({
   );
 }
 
+function QuietWorkerRow({ group }: { group: AliveAgentGroup }) {
+  return (
+    <div className="operator-row passive">
+      <span className="operator-state">
+        <StateChip state="idle" />
+      </span>
+      <span className="operator-main">
+        <strong>{group.project || group.label}</strong>
+        <span>{group.provider} · {group.label}</span>
+      </span>
+      <span>
+        <strong>{group.count}</strong>
+        <span>worker process{group.count === 1 ? "" : "es"}</span>
+      </span>
+      <span>
+        <strong>{formatDuration(group.runningForSeconds)}</strong>
+        <span>alive</span>
+      </span>
+      <span>
+        <strong>idle</strong>
+        <span>no fresh token use</span>
+      </span>
+    </div>
+  );
+}
+
 function summaryPolicy(config: ConfigView): string {
   if (config.mode === "enforcement") return `stop over ${formatTokens(config.kill_turn_tokens)}`;
   if (config.mode === "alert") return "notify only";
@@ -532,9 +540,9 @@ function summaryPolicy(config: ConfigView): string {
 
 export function MetricStrip({ snapshot }: { snapshot: Snapshot }) {
   const metrics = [
-    ["Window tokens", formatTokens(snapshot.overview.window_tokens)],
+    ["Window spend", formatTokens(snapshot.overview.window_tokens)],
     ["Since last scan", changeSummary(snapshot.overview.changes)],
-    ["Active sessions", `${snapshot.overview.active_sessions}`],
+    ["Fresh sessions", `${snapshot.overview.active_sessions}`],
     ["Warnings / stop", `${snapshot.overview.warning_sessions} / ${snapshot.overview.stop_sessions}`],
     ["Policy action", snapshot.overview.action],
   ];
@@ -596,7 +604,7 @@ export function AgentTable({ agents }: { agents: AgentView[] }) {
             <th>Agent</th>
             <th>Project</th>
             <th>Running</th>
-            <th>Latest</th>
+            <th>Latest spend</th>
             <th>PID</th>
             <th>Why</th>
           </tr>
@@ -616,7 +624,7 @@ export function AgentTable({ agents }: { agents: AgentView[] }) {
               </td>
               <td data-label="Project">{agent.project || "-"}</td>
               <td data-label="Running">{formatDuration(agent.running_for_seconds)}</td>
-              <td data-label="Latest">{agent.latest_turn_tokens ? formatTokens(agent.latest_turn_tokens) : "-"}</td>
+              <td data-label="Latest spend">{agent.latest_spent_tokens ? formatTokens(agent.latest_spent_tokens) : "-"}</td>
               <td data-label="PID">{agent.pid || "-"}</td>
               <td data-label="Why">{agent.explanation}</td>
             </tr>
@@ -650,7 +658,7 @@ export function SessionTable({
             <th>Model</th>
             <th>Project</th>
             <th>Last</th>
-            <th>Total</th>
+            <th>Total spend</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -669,8 +677,8 @@ export function SessionTable({
               </td>
               <td data-label="Spend">
                 <SpendMeter
-                  latest={session.latest_turn_tokens ?? 0}
-                  window={session.window_tokens ?? 0}
+                  latest={session.latest_spent_tokens ?? session.latest_turn_tokens ?? 0}
+                  window={session.window_spent_tokens ?? session.window_tokens ?? 0}
                   warn={config.warn_turn_tokens}
                   stop={config.kill_turn_tokens}
                 />
@@ -681,7 +689,7 @@ export function SessionTable({
               </td>
               <td data-label="Project">{session.project || "-"}</td>
               <td data-label="Last">{relativeTime(session.last_usage_at ?? session.last_seen_at)}</td>
-              <td data-label="Total">{formatTokens(session.total_tokens)}</td>
+              <td data-label="Total spend">{formatTokens(session.total_spent_tokens ?? session.total_tokens)}</td>
               <td data-label="Action">
                 <strong>{session.action_state}</strong>
                 <span>{session.explanation}</span>
@@ -787,14 +795,15 @@ export function SessionDetail({
         </div>
       ) : null}
       <div className="detail-stats">
-        <MiniStat label="Latest turn" value={formatTokens(session.latest_turn_tokens)} />
-        <MiniStat label="Window" value={formatTokens(session.window_tokens)} />
-        <MiniStat label="Total" value={formatTokens(session.total_tokens)} />
+        <MiniStat label="Latest spend" value={formatTokens(session.latest_spent_tokens ?? session.latest_turn_tokens)} />
+        <MiniStat label="Window spend" value={formatTokens(session.window_spent_tokens ?? session.window_tokens)} />
+        <MiniStat label="Total spend" value={formatTokens(session.total_spent_tokens ?? session.total_tokens)} />
+        <MiniStat label="Checkpoint" value={formatTokens(session.latest_turn_tokens)} />
         <MiniStat label="Calls" value={`${session.calls}`} />
       </div>
       <SpendMeter
-        latest={session.latest_turn_tokens ?? 0}
-        window={session.window_tokens ?? 0}
+        latest={session.latest_spent_tokens ?? session.latest_turn_tokens ?? 0}
+        window={session.window_spent_tokens ?? session.window_tokens ?? 0}
         warn={config.warn_turn_tokens}
         stop={config.kill_turn_tokens}
       />
@@ -854,10 +863,10 @@ function SpendMeter({ latest, window, warn, stop }: { latest: number; window: nu
   const warnLeft = Math.min(100, (warn / denominator) * 100);
   const stopLeft = Math.min(100, (stop / denominator) * 100);
   return (
-    <div className="spend-meter" aria-label={`Latest turn ${formatTokens(latest)}, window ${formatTokens(window)}`}>
+    <div className="spend-meter" aria-label={`Latest spend ${formatTokens(latest)}, window ${formatTokens(window)}`}>
       <div className="spend-row">
         <strong>{formatTokens(latest)}</strong>
-        <span>latest turn</span>
+        <span>latest spend</span>
       </div>
       <div className="spend-track">
         <div className="spend-fill" style={{ width: `${latestWidth}%` }} />
@@ -887,17 +896,17 @@ function TurnTimeline({
       </div>
     );
   }
-  const scale = Math.max(maxTurn(turns), config.kill_turn_tokens, config.warn_turn_tokens, 1);
+  const scale = Math.max(maxTurnSpend(turns), config.kill_turn_tokens, config.warn_turn_tokens, 1);
   const warnPosition = thresholdPosition(config.warn_turn_tokens, scale);
   const stopPosition = thresholdPosition(config.kill_turn_tokens, scale);
   const selectedTurn = turns.find((turn) => turnKey(turn) === selectedTurnKey) ?? turns[0];
   return (
     <section
       className="turn-timeline"
-      aria-label={`Turn token timeline. Warning threshold ${formatTokens(config.warn_turn_tokens)}. Stop threshold ${formatTokens(config.kill_turn_tokens)}.`}
+      aria-label={`Turn spend timeline. Warning threshold ${formatTokens(config.warn_turn_tokens)}. Stop threshold ${formatTokens(config.kill_turn_tokens)}.`}
     >
       <div className="timeline-heading">
-        <h3>Turn Timeline</h3>
+        <h3>Spend Timeline</h3>
         <span>
           Window {formatDuration(config.usage_window_seconds)} · warn {formatTokens(config.warn_turn_tokens)} · stop{" "}
           {formatTokens(config.kill_turn_tokens)}
@@ -942,14 +951,15 @@ function TurnTimelineRow({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const spent = turn.spent_tokens ?? turn.total_tokens ?? 0;
   const total = turn.total_tokens ?? 0;
-  const width = Math.max(2, Math.min(100, (total / scale) * 100));
+  const width = Math.max(2, Math.min(100, (spent / scale) * 100));
   const segments = turnSegments(turn);
   return (
     <button
       type="button"
       className={`timeline-row ${selected ? "selected" : ""}`}
-      aria-label={`${relativeTime(turn.at)} ${turn.model || "unknown model"} total ${formatTokens(total)} input ${formatTokens(
+      aria-label={`${relativeTime(turn.at)} ${turn.model || "unknown model"} spent ${formatTokens(spent)} checkpoint ${formatTokens(total)} input ${formatTokens(
         turn.input_tokens,
       )} cached ${formatTokens(turn.cached_input_tokens)} output ${formatTokens(turn.output_tokens)} reasoning ${formatTokens(
         turn.reasoning_output_tokens,
@@ -958,7 +968,7 @@ function TurnTimelineRow({
       onClick={onSelect}
     >
       <div className="timeline-meta">
-        <strong>{formatTokens(total)}</strong>
+        <strong>{formatTokens(spent)}</strong>
         <span>{turn.model || turn.provider}</span>
         <span>{relativeTime(turn.at)}</span>
       </div>
@@ -984,7 +994,8 @@ function SelectedTurnMix({ turn }: { turn: TurnView }) {
   return (
     <div className="selected-turn-mix" aria-label="Selected turn token fields">
       <span>Selected</span>
-      <strong>{formatTokens(turn.total_tokens)} total</strong>
+      <strong>{formatTokens(turn.spent_tokens ?? turn.total_tokens)} spent</strong>
+      <span>checkpoint {formatTokens(turn.total_tokens)}</span>
       <span>input {formatTokens(turn.input_tokens)}</span>
       <span>cached {formatTokens(turn.cached_input_tokens)}</span>
       <span>output {formatTokens(turn.output_tokens)}</span>
@@ -1076,7 +1087,8 @@ function TurnTable({ turns, selectedTurnKey }: { turns: TurnView[]; selectedTurn
             <th>Created</th>
             <th>Output</th>
             <th>Reasoning</th>
-            <th>Total</th>
+            <th>Spent</th>
+            <th>Checkpoint</th>
             <th>Cumulative</th>
           </tr>
         </thead>
@@ -1102,9 +1114,10 @@ function TurnTable({ turns, selectedTurnKey }: { turns: TurnView[]; selectedTurn
                 <td data-label="Created">{formatTokens(turn.cache_creation_input_tokens)}</td>
                 <td data-label="Output">{formatTokens(turn.output_tokens)}</td>
                 <td data-label="Reasoning">{formatTokens(turn.reasoning_output_tokens)}</td>
-                <td data-label="Total">
-                  <strong>{formatTokens(turn.total_tokens)}</strong>
+                <td data-label="Spent">
+                  <strong>{formatTokens(turn.spent_tokens ?? turn.total_tokens)}</strong>
                 </td>
+                <td data-label="Checkpoint">{formatTokens(turn.total_tokens)}</td>
                 <td data-label="Cumulative">{formatTokens(turn.cumulative_tokens)}</td>
               </tr>
             );
@@ -1139,12 +1152,12 @@ function StateChip({ state, usageState }: { state: string; usageState?: string }
   return <span className={`state-chip ${cssState(state)}`}>{stateLabel(state, usageState)}</span>;
 }
 
-function maxTurn(turns: TurnView[]): number {
-  return Math.max(1, ...turns.map((turn) => turn.total_tokens ?? 0));
+function maxTurnSpend(turns: TurnView[]): number {
+  return Math.max(1, ...turns.map((turn) => turn.spent_tokens ?? turn.total_tokens ?? 0));
 }
 
 function turnKey(turn: TurnView): string {
-  return turn.id || turn.request_id || `${turn.provider}:${turn.at}:${turn.total_tokens ?? 0}`;
+  return turn.id || turn.request_id || `${turn.provider}:${turn.at}:${turn.total_tokens ?? 0}:${turn.spent_tokens ?? 0}`;
 }
 
 function thresholdPosition(tokens: number, scale: number): CSSProperties {

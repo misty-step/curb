@@ -13,6 +13,7 @@ const baseAgent: AgentView = {
   provider: "codex",
   label: "Codex Desktop Worker",
   state: "running",
+  activity_state: "idle",
   process_state: "running",
   usage_state: "quiet",
   action_state: "none",
@@ -30,6 +31,7 @@ const baseSession: SessionView = {
   id: "s1",
   provider: "codex",
   state: "active",
+  activity_state: "idle",
   process_state: "running",
   usage_state: "quiet",
   action_state: "none",
@@ -51,6 +53,7 @@ describe("read model selectors", () => {
         {
           ...baseAgent,
           state: "spending",
+          activity_state: "spending",
           usage_state: "spending",
           latest_session_id: "s1",
           latest_turn_tokens: 125_000,
@@ -89,10 +92,10 @@ describe("read model selectors", () => {
 
     expect(model.aliveAgents).toHaveLength(2);
     expect(model.spendingAgents).toHaveLength(1);
-    expect(model.latestInputTokens).toBe(125_000);
+    expect(model.latestSpentTokens).toBe(125_000);
     expect(model.recentUncorrelated).toHaveLength(1);
     expect(model.recentUncorrelatedTokens).toBe(80_000);
-    expect(model.headline).toBe("1 agent actively consuming tokens");
+    expect(model.headline).toBe("1 agent with fresh token usage");
   });
 
   it("groups multiple worker processes by agent and cwd without multiplying sessions", () => {
@@ -125,6 +128,91 @@ describe("read model selectors", () => {
 
     expect(groups[0]).toMatchObject({ provider: "antigravity", project: "daybook", count: 1 });
     expect(groups[1]).toMatchObject({ provider: "codex", project: "curb", count: 2, runningForSeconds: 300 });
+  });
+
+  it("deduplicates active rows that point at the same provider session", () => {
+    const snapshot: Snapshot = {
+      ...demoSnapshot,
+      agents: [
+        {
+          ...baseAgent,
+          pid: 100,
+          state: "warn",
+          activity_state: "spending",
+          usage_state: "warn",
+          latest_session_id: "canary-session",
+          latest_turn_tokens: 29_000,
+          window_tokens: 100_000,
+          project: "canary",
+          cwd: "/work/canary",
+        },
+        {
+          ...baseAgent,
+          pid: 101,
+          state: "warn",
+          activity_state: "spending",
+          usage_state: "warn",
+          latest_session_id: "canary-session",
+          latest_turn_tokens: 29_000,
+          window_tokens: 100_000,
+          project: "canary",
+          cwd: "/work/canary",
+        },
+      ],
+      sessions: [
+        {
+          ...baseSession,
+          id: "canary-session",
+          key: "codex:canary-session",
+          correlated_pid: 100,
+          latest_turn_tokens: 29_000,
+          window_tokens: 100_000,
+        },
+      ],
+    };
+
+    const model = selectOperatorSummary(snapshot);
+
+    expect(model.spendingAgents).toHaveLength(2);
+    expect(model.spendingRows).toHaveLength(1);
+    expect(model.latestSpentTokens).toBe(29_000);
+    expect(model.headline).toBe("1 agent with fresh token usage");
+  });
+
+  it("does not treat a stale policy warning as fresh token usage", () => {
+    const snapshot: Snapshot = {
+      ...demoSnapshot,
+      agents: [
+        {
+          ...baseAgent,
+          state: "warn",
+          activity_state: "idle",
+          usage_state: "warn",
+          latest_session_id: "old-warning",
+          latest_turn_tokens: 250_000,
+          window_tokens: 250_000,
+        },
+      ],
+      sessions: [
+        {
+          ...baseSession,
+          id: "old-warning",
+          key: "codex:old-warning",
+          state: "warn",
+          activity_state: "idle",
+          usage_state: "warn",
+          correlated_pid: 100,
+          latest_turn_tokens: 250_000,
+          window_tokens: 250_000,
+        },
+      ],
+    };
+
+    const model = selectOperatorSummary(snapshot);
+
+    expect(model.spendingAgents).toHaveLength(0);
+    expect(model.spendingRows).toHaveLength(0);
+    expect(model.headline).toBe("No fresh token usage right now");
   });
 
   it("matches an agent to its exact latest session before pid fallback", () => {

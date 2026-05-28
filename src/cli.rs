@@ -654,7 +654,7 @@ fn print_session_table<'a>(
     println!("{label}");
     println!(
         "  {:<12} {:<9} {:<13} {:<12} {:<12} SESSION",
-        "PROVIDER", "STATE", "ACTION", "TURN", "WINDOW"
+        "PROVIDER", "STATE", "ACTION", "SPENT", "WINDOW"
     );
     for session in sessions {
         println!(
@@ -662,8 +662,8 @@ fn print_session_table<'a>(
             session.provider,
             session.usage_state,
             session.action_state,
-            token_count(session.latest_turn_tokens),
-            token_count(session.window_tokens),
+            token_count(session.latest_spent_tokens),
+            token_count(session.window_spent_tokens),
             session.key,
         );
         println!("    {}", session.explanation);

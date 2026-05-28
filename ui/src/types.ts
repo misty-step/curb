@@ -54,6 +54,7 @@ export interface AgentView {
   provider: string;
   label: string;
   state: string;
+  activity_state?: string;
   process_state: string;
   usage_state?: string;
   action_state: string;
@@ -68,7 +69,9 @@ export interface AgentView {
   cpu_percent?: number;
   latest_session_id?: string;
   latest_turn_tokens?: number;
+  latest_spent_tokens?: number;
   window_tokens?: number;
+  window_spent_tokens?: number;
   explanation: string;
 }
 
@@ -77,6 +80,7 @@ export interface SessionView {
   id?: string;
   provider: string;
   state: string;
+  activity_state?: string;
   agent_state?: string;
   process_state: string;
   usage_state?: string;
@@ -90,8 +94,11 @@ export interface SessionView {
   last_usage_at?: string;
   calls: number;
   latest_turn_tokens?: number;
+  latest_spent_tokens?: number;
   window_tokens?: number;
+  window_spent_tokens?: number;
   total_tokens: number;
+  total_spent_tokens?: number;
   correlated_agent_id?: string;
   correlated_pid?: number;
   correlated_process_started_at?: string;
@@ -123,6 +130,7 @@ export interface TurnView {
   output_tokens?: number;
   reasoning_output_tokens?: number;
   total_tokens?: number;
+  spent_tokens?: number;
   cumulative_tokens?: number;
   source?: string;
 }

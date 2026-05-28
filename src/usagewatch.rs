@@ -49,7 +49,7 @@ impl UsageWatch {
         let mut active_keys = BTreeSet::new();
         for session in sessions {
             if !session.recent_usage(window_start)
-                || session.latest_turn_tokens < cfg.usage.warn_turn_tokens
+                || session.latest_spent_tokens < cfg.usage.warn_turn_tokens
             {
                 self.suppress(&session.key);
                 continue;
@@ -76,7 +76,7 @@ impl UsageWatch {
         now: DateTime<Utc>,
     ) -> Result<(), UsageWatchError> {
         let key = session.key.as_str();
-        let over_stop = session.latest_turn_tokens >= cfg.usage.kill_turn_tokens;
+        let over_stop = session.latest_spent_tokens >= cfg.usage.kill_turn_tokens;
         let message = usage_message(session);
 
         if self.warned.insert(key.to_string()) {
@@ -301,6 +301,14 @@ fn event_data(
     data.insert("calls".to_string(), json!(session.calls));
     data.insert("total_tokens".to_string(), json!(session.total_tokens));
     data.insert("turn_tokens".to_string(), json!(session.latest_turn_tokens));
+    data.insert(
+        "latest_spent_tokens".to_string(),
+        json!(session.latest_spent_tokens),
+    );
+    data.insert(
+        "window_spent_tokens".to_string(),
+        json!(session.window_spent_tokens),
+    );
     if let Some(last) = session.last {
         data.insert("last".to_string(), Value::String(last.to_rfc3339()));
     }
@@ -337,11 +345,11 @@ fn event_data(
 
 fn usage_message(session: &service::Session) -> String {
     format!(
-        "{} session {} latest turn used {} tokens (total {} in {} calls)",
+        "{} session {} latest checkpoint spent {} tokens ({} in window, {} calls)",
         session.provider,
         short_id(&session.id),
-        format_tokens(session.latest_turn_tokens),
-        format_tokens(session.total_tokens),
+        format_tokens(session.latest_spent_tokens),
+        format_tokens(session.window_spent_tokens),
         session.calls
     )
 }

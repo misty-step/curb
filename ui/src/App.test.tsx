@@ -32,13 +32,13 @@ describe("App alert feed", () => {
     await actRender(<App />);
 
     const headings = Array.from(document.querySelectorAll("h2")).map((heading) => heading.textContent);
-    expect(headings[0]).toBe("1 agent actively consuming tokens");
+    expect(headings[0]).toBe("1 agent with fresh token usage");
     const page = document.body.textContent ?? "";
     expect(page).toContain("Right now");
     expect(page).toContain("Active runs");
     expect(page).toContain("Alive workers");
-    expect(page).toContain("Tokens this turn");
-    expect(page).toContain("since input");
+    expect(page).toContain("Fresh spend");
+    expect(page).toContain("latest spend");
     expect(page).toContain("Policy settings");
     expect(page).toContain("latest turn");
     expect(page).toContain("620k in window");
@@ -57,6 +57,7 @@ describe("App alert feed", () => {
         ...demoSnapshot.agents.map((agent) => ({
           ...agent,
           state: "running" as const,
+          activity_state: "idle" as const,
           usage_state: "quiet" as const,
           action_state: "none" as const,
           latest_session_id: undefined,
@@ -68,6 +69,7 @@ describe("App alert feed", () => {
           ...demoSnapshot.agents[0],
           pid: demoSnapshot.agents[0].pid + 1000,
           state: "running",
+          activity_state: "idle",
           usage_state: "quiet",
           action_state: "none",
           latest_session_id: undefined,
@@ -97,13 +99,13 @@ describe("App alert feed", () => {
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("No agents are actively consuming tokens");
+    expect(page).toContain("No fresh token usage right now");
     expect(page).toContain("220k recent tokens are uncorrelated to a live worker");
     expect(page).toContain("Unmatched logs");
     expect(page).toContain("worker processes");
-    expect(page).toContain("no matched token use");
+    expect(page).toContain("no fresh token use");
     expect(page).not.toContain("confirmed input");
-    expect(page).not.toContain("1 agent actively consuming tokens");
+    expect(page).not.toContain("1 agent with fresh token usage");
   });
 
   it("counts active runtime workers instead of provider usage sessions", async () => {
@@ -117,6 +119,7 @@ describe("App alert feed", () => {
           provider: "codex",
           label: "Codex CLI",
           state: "spending",
+          activity_state: "spending",
           process_state: "running",
           usage_state: "spending",
           pid: 100,
@@ -137,6 +140,7 @@ describe("App alert feed", () => {
           project: "spellbook",
           cwd: "/work/spellbook",
           state: "active",
+          activity_state: "spending",
           process_state: "running",
           usage_state: "spending",
           correlated_agent_id: "codex-cli",
@@ -154,6 +158,7 @@ describe("App alert feed", () => {
           project: "spellbook",
           cwd: "/work/spellbook",
           state: "active",
+          activity_state: "spending",
           process_state: "running",
           usage_state: "spending",
           correlated_agent_id: "codex-cli",
@@ -172,10 +177,10 @@ describe("App alert feed", () => {
     await actRender(<App />);
 
     const summary = document.querySelector(".operator-summary")?.textContent ?? "";
-    expect(summary).toContain("1 agent actively consuming tokens");
+    expect(summary).toContain("1 agent with fresh token usage");
     expect(summary).toContain("Codex CLI");
-    expect(summary).toContain("Tokens this turn77k");
-    expect(summary).not.toContain("2 agents actively consuming tokens");
+    expect(summary).toContain("Fresh spend77k");
+    expect(summary).not.toContain("2 agents with fresh token usage");
     expect(summary).not.toContain("claude ·");
   });
 
@@ -194,7 +199,7 @@ describe("App alert feed", () => {
     expect(readiness).toContain("Identity");
     expect(readiness).toContain("Enforcement");
     expect(readiness).toContain("notify only; never kill");
-    expect(readiness).toContain("active usage is over a warning threshold");
+    expect(readiness).toContain("usage is over a warning threshold");
   });
 
   it("marks demo readiness as illustrative instead of active protection", async () => {
@@ -330,7 +335,7 @@ describe("App alert feed", () => {
     expect(page).toContain("gpt-5.3-codex");
     expect(page).toContain("Created");
     expect(page).toContain("Cumulative");
-    expect(page).toContain("Turn Timeline");
+    expect(page).toContain("Spend Timeline");
     expect(page).toContain("warn 1.0M");
     expect(page).toContain("stop 3.0M");
     expect(page).toContain("10k");

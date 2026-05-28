@@ -96,9 +96,10 @@ handle.
 The built UI is embedded in the Rust binary. `curb app` is the normal launch
 path; `cd ui && npm run dev` is only needed while developing the frontend.
 
-`curb watch` is usage-first when usage monitoring is enabled. It warns on recent
-token activity that crosses the configured latest-turn limit, and in enforcement
-mode it stops only a correlated live agent process.
+`curb watch` is usage-first when usage monitoring is enabled. It warns when
+recent uncached spend crosses the configured latest-turn limit, and in
+enforcement mode it stops only a correlated live agent process. Cached/read
+context remains visible as checkpoint data, but it is not treated as fresh spend.
 
 The generated default config watches agent worker processes such as Codex
 Desktop workers, Codex CLI, Claude Code, and Anti-Gravity's `agy` CLI. Desktop

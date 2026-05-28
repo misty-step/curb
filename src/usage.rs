@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+const CODEX_LIVE_COLD_READ_LIMIT: u64 = 256 * 1024;
+
 #[derive(Debug, Error)]
 pub enum UsageError {
     #[error("usage io {path}: {source}")]
@@ -53,6 +55,7 @@ pub struct Event {
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
+    pub spent_tokens: i64,
     pub cumulative_tokens: i64,
     pub model_context_window: i64,
 }
@@ -186,13 +189,15 @@ impl Reader {
     pub fn scan_since(&self, since: Option<DateTime<Utc>>) -> Result<Scan, UsageError> {
         let mut state = self.state.lock().expect("usage reader mutex poisoned");
         state.load(self.state_dir.as_deref())?;
-        let codex_root = self.home.join(".codex").join("archived_sessions");
+        let codex_archived_root = self.home.join(".codex").join("archived_sessions");
+        let codex_live_root = self.home.join(".codex").join("sessions");
         let claude_root = self.home.join(".claude").join("projects");
         let mut errors = Vec::new();
-        let (mut events, codex_report) = match codex_archived_sessions_since_cached(
+        let (mut events, codex_archived_report) = match codex_sessions_since_cached(
             &mut state,
             self.state_dir.as_deref(),
-            &codex_root,
+            &codex_archived_root,
+            CodexSessionLayout::Archived,
             since,
         ) {
             Ok((events, report)) => (events, report),
@@ -210,6 +215,30 @@ impl Reader {
                 )
             }
         };
+        let (codex_live, codex_live_report) = match codex_sessions_since_cached(
+            &mut state,
+            self.state_dir.as_deref(),
+            &codex_live_root,
+            CodexSessionLayout::Live,
+            since,
+        ) {
+            Ok((events, report)) => (events, report),
+            Err(error) => {
+                let error = error.to_string();
+                errors.push(error.clone());
+                (
+                    Vec::new(),
+                    SourceReport {
+                        provider: "codex".to_string(),
+                        files: 0,
+                        events: 0,
+                        error: Some(error),
+                    },
+                )
+            }
+        };
+        events.extend(codex_live);
+        let codex_report = combine_source_reports(codex_archived_report, codex_live_report);
         let (claude, claude_report) = match claude_projects_since_cached(
             &mut state,
             self.state_dir.as_deref(),
@@ -388,18 +417,39 @@ pub fn codex_archived_sessions_since(
     Ok((events, report))
 }
 
-fn codex_archived_sessions_since_cached(
+#[derive(Clone, Copy)]
+enum CodexSessionLayout {
+    Archived,
+    Live,
+}
+
+impl CodexSessionLayout {
+    fn paths(self, root: &Path) -> Result<Vec<PathBuf>, UsageError> {
+        match self {
+            Self::Archived => jsonl_files_one_level(root),
+            Self::Live => jsonl_files_recursive(root),
+        }
+    }
+}
+
+fn codex_sessions_since_cached(
     state: &mut ReaderState,
     state_dir: Option<&Path>,
     root: &Path,
+    layout: CodexSessionLayout,
     since: Option<DateTime<Utc>>,
 ) -> Result<(Vec<Event>, SourceReport), UsageError> {
-    let mut paths = jsonl_files_one_level(root)?;
+    let mut paths = layout.paths(root)?;
     paths.retain(|path| modified_since(path, since).unwrap_or(true));
     prune_missing(state, state_dir, root, &paths)?;
     let mut events = Vec::new();
     for path in &paths {
-        match read_codex_cached(state, state_dir, path) {
+        let read = match layout {
+            CodexSessionLayout::Archived => read_codex_cached(state, state_dir, path),
+            CodexSessionLayout::Live if since.is_some() => read_codex_live_tail(path),
+            CodexSessionLayout::Live => read_codex_cached(state, state_dir, path),
+        };
+        match read {
             Ok(file_events) => events.extend(file_events),
             Err(error) if error.is_not_found() => continue,
             Err(error) => return Err(error),
@@ -415,6 +465,17 @@ fn codex_archived_sessions_since_cached(
         error: None,
     };
     Ok((events, report))
+}
+
+fn combine_source_reports(mut left: SourceReport, right: SourceReport) -> SourceReport {
+    left.files += right.files;
+    left.events += right.events;
+    left.error = match (left.error.take(), right.error) {
+        (None, None) => None,
+        (Some(error), None) | (None, Some(error)) => Some(error),
+        (Some(left), Some(right)) => Some(format!("{left}; {right}")),
+    };
+    left
 }
 
 pub fn claude_projects_since(
@@ -515,6 +576,98 @@ struct CodexParse {
     events: Vec<Event>,
     session_id: Option<String>,
     cwd: Option<PathBuf>,
+}
+
+fn read_codex_live_tail(path: &Path) -> Result<Vec<Event>, UsageError> {
+    let metadata = fs::metadata(path).map_err(|source| UsageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.len() <= CODEX_LIVE_COLD_READ_LIMIT {
+        return Ok(parse_codex_file(path, 0, None, None)?.events);
+    }
+    let (session_id, cwd) = parse_codex_metadata(path)?;
+    let offset = aligned_line_offset(path, metadata.len() - CODEX_LIVE_COLD_READ_LIMIT)?;
+    Ok(parse_codex_file(path, offset, session_id, cwd)?.events)
+}
+
+fn parse_codex_metadata(path: &Path) -> Result<(Option<String>, Option<PathBuf>), UsageError> {
+    let file = File::open(path).map_err(|source| UsageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut buffer = Vec::new();
+    file.take(64 * 1024)
+        .read_to_end(&mut buffer)
+        .map_err(|source| UsageError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let line = String::from_utf8_lossy(&buffer);
+    if line.contains(r#""type":"session_meta""#) || line.contains(r#""type": "session_meta""#) {
+        Ok((
+            json_string_field(&line, "id"),
+            json_string_field(&line, "cwd").map(PathBuf::from),
+        ))
+    } else {
+        Ok((None, None))
+    }
+}
+
+fn json_string_field(raw: &str, field: &str) -> Option<String> {
+    let needle = format!(r#""{field}":"#);
+    let start = raw.find(&needle)? + needle.len();
+    let mut chars = raw[start..].chars();
+    if chars.next()? != '"' {
+        return None;
+    }
+    let mut out = String::new();
+    let mut escaped = false;
+    for ch in chars {
+        if escaped {
+            out.push(match ch {
+                '"' => '"',
+                '\\' => '\\',
+                '/' => '/',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
+            });
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return Some(out);
+        } else {
+            out.push(ch);
+        }
+    }
+    None
+}
+
+fn aligned_line_offset(path: &Path, offset: u64) -> Result<u64, UsageError> {
+    if offset == 0 {
+        return Ok(0);
+    }
+    let mut file = File::open(path).map_err(|source| UsageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|source| UsageError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let mut reader = BufReader::new(file);
+    let mut discarded = String::new();
+    let read = reader
+        .read_line(&mut discarded)
+        .map_err(|source| UsageError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(offset + read as u64)
 }
 
 fn read_cached(
@@ -726,6 +879,8 @@ fn parse_codex_file(
             output_tokens: last.output_tokens,
             reasoning_output_tokens: last.reasoning_output_tokens,
             total_tokens: total,
+            spent_tokens: (last.input_tokens + last.output_tokens + last.reasoning_output_tokens)
+                .min(total),
             cumulative_tokens: info.total_token_usage.total_tokens,
             model_context_window: info.model_context_window,
         });
@@ -779,6 +934,9 @@ fn parse_claude_file(path: &Path, offset: u64) -> Result<Vec<Event>, UsageError>
             reasoning_output_tokens: 0,
             total_tokens: usage.input_tokens
                 + usage.cache_read_input_tokens
+                + usage.cache_creation_input_tokens
+                + usage.output_tokens,
+            spent_tokens: usage.input_tokens
                 + usage.cache_creation_input_tokens
                 + usage.output_tokens,
             cumulative_tokens: 0,
@@ -1027,6 +1185,7 @@ mod tests {
         assert_eq!(event.output_tokens, 5);
         assert_eq!(event.reasoning_output_tokens, 2);
         assert_eq!(event.total_tokens, 107);
+        assert_eq!(event.spent_tokens, 107);
         assert_eq!(event.cwd.as_deref(), Some(Path::new("/repo")));
         assert_eq!(event.model_context_window, 258400);
     }
@@ -1061,6 +1220,10 @@ mod tests {
         assert_eq!(summary.cached_input_tokens, 44);
         assert_eq!(summary.output_tokens, 11);
         assert_eq!(summary.total_tokens, 91);
+        assert_eq!(
+            events.iter().map(|event| event.spent_tokens).sum::<i64>(),
+            47
+        );
         assert_eq!(
             summary.models,
             vec![
@@ -1097,6 +1260,96 @@ mod tests {
         assert_eq!(report.sources[0].events, 1);
         assert_eq!(report.sources[1].provider, "claude");
         assert_eq!(report.sources[1].events, 1);
+    }
+
+    #[test]
+    fn reader_scans_live_codex_sessions_under_home() {
+        let home = tempdir().unwrap();
+        let live = home
+            .path()
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("28");
+        fs::create_dir_all(&live).unwrap();
+        fs::write(
+            live.join("rollout.jsonl"),
+            codex_fixture(
+                "session_live_codex",
+                "/repo",
+                "2026-05-28T16:00:00Z",
+                211,
+                211,
+            ),
+        )
+        .unwrap();
+
+        let report = Reader::new(home.path()).report_since(None).unwrap();
+
+        assert_eq!(report.sources[0].provider, "codex");
+        assert_eq!(report.sources[0].files, 1);
+        assert_eq!(report.sources[0].events, 1);
+        assert_eq!(report.sessions.len(), 1);
+        assert_eq!(report.sessions[0].provider, "codex");
+        assert_eq!(report.sessions[0].session_id, "session_live_codex");
+        assert_eq!(report.sessions[0].total_tokens, 211);
+    }
+
+    #[test]
+    fn lookback_scan_tails_large_live_codex_sessions() {
+        let home = tempdir().unwrap();
+        let live = home
+            .path()
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("28");
+        fs::create_dir_all(&live).unwrap();
+        let path = live.join("large.jsonl");
+        let padding = strings_of_length("a", CODEX_LIVE_COLD_READ_LIMIT as usize);
+        fs::write(
+            &path,
+            format!(
+                r#"{{"timestamp":"2026-05-28T16:00:00Z","type":"session_meta","payload":{{"id":"session_live_tail","cwd":"/repo"}}}}
+{{"timestamp":"2026-05-28T16:00:01Z","type":"event_msg","payload":{{"type":"ignored"}},"padding":"{padding}"}}
+{}"#,
+                codex_token_row("2026-05-28T16:00:02Z", 377, 377)
+            ),
+        )
+        .unwrap();
+
+        let since = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let (events, _) = Reader::new(home.path()).events_since(Some(since)).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].session_id.as_deref(), Some("session_live_tail"));
+        assert_eq!(events[0].cwd.as_deref(), Some(Path::new("/repo")));
+        assert_eq!(events[0].total_tokens, 377);
+    }
+
+    #[test]
+    fn live_tail_metadata_reader_keeps_session_identity_for_large_logs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("large.jsonl");
+        let padding = strings_of_length("x", CODEX_LIVE_COLD_READ_LIMIT as usize);
+        fs::write(
+            &path,
+            format!(
+                r#"{{"timestamp":"2026-05-28T16:00:00Z","type":"session_meta","payload":{{"id":"expected_session","cwd":"/expected/repo"}}}}
+{{"timestamp":"2026-05-28T16:00:01Z","type":"event_msg","payload":{{"type":"ignored"}},"padding":"{padding}"}}
+{}"#,
+                codex_token_row("2026-05-28T16:00:02Z", 144, 144)
+            ),
+        )
+        .unwrap();
+
+        let events = read_codex_live_tail(&path).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].session_id.as_deref(), Some("expected_session"));
+        assert_eq!(events[0].cwd.as_deref(), Some(Path::new("/expected/repo")));
     }
 
     #[test]

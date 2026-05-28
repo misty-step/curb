@@ -273,6 +273,7 @@ mod tests {
             output_tokens: 5,
             reasoning_output_tokens: 0,
             total_tokens: total,
+            spent_tokens: total,
             cumulative_tokens: total,
             model_context_window: 0,
         }

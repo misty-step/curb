@@ -86,6 +86,7 @@ pub struct SessionView {
     pub id: String,
     pub provider: String,
     pub state: String,
+    pub activity_state: String,
     pub process_state: String,
     pub usage_state: String,
     pub action_state: String,
@@ -104,8 +105,11 @@ pub struct SessionView {
     pub last_usage_at: Option<DateTime<Utc>>,
     pub calls: usize,
     pub latest_turn_tokens: i64,
+    pub latest_spent_tokens: i64,
     pub window_tokens: i64,
+    pub window_spent_tokens: i64,
     pub total_tokens: i64,
+    pub total_spent_tokens: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlated_agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +139,7 @@ pub struct AgentView {
     pub provider: String,
     pub label: String,
     pub state: String,
+    pub activity_state: String,
     pub process_state: String,
     pub usage_state: String,
     pub action_state: String,
@@ -153,7 +158,9 @@ pub struct AgentView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_session_id: Option<String>,
     pub latest_turn_tokens: i64,
+    pub latest_spent_tokens: i64,
     pub window_tokens: i64,
+    pub window_spent_tokens: i64,
     pub explanation: String,
 }
 
@@ -172,6 +179,7 @@ pub struct TurnView {
     pub cache_creation_input_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
+    pub spent_tokens: i64,
     pub cumulative_tokens: i64,
     pub source: String,
 }
@@ -878,7 +886,7 @@ fn build_overview_delta(previous: &Snapshot, next: &Snapshot) -> OverviewDelta {
         if previous_turns.contains(&turn_key(turn)) {
             continue;
         }
-        delta.tokens_added += turn.total_tokens;
+        delta.tokens_added += turn.spent_tokens;
         if !turn.session_key.is_empty() {
             sessions_with_turns.insert(turn.session_key.clone());
         }
@@ -1549,7 +1557,15 @@ impl<'a, P: Platform> Service<'a, P> {
         }
         let window_start =
             now - chrono::Duration::from_std(self.cfg.usage.window.as_std()).unwrap();
-        let view = build_session_view(self.cfg, &session, &correlation, window_start, now);
+        let fresh_start = usage_activity_start(self.cfg, now);
+        let view = build_session_view(
+            self.cfg,
+            &session,
+            &correlation,
+            window_start,
+            fresh_start,
+            now,
+        );
         if view.usage_state != "stop" || !view.actionable {
             return Err(ServiceError::StopConflict(
                 "session is not an actionable stop candidate".to_string(),
@@ -1657,8 +1673,11 @@ pub(crate) struct Session {
     pub(crate) last_usage: Option<DateTime<Utc>>,
     pub(crate) calls: usize,
     pub(crate) latest_turn_tokens: i64,
+    pub(crate) latest_spent_tokens: i64,
     pub(crate) window_tokens: i64,
+    pub(crate) window_spent_tokens: i64,
     pub(crate) total_tokens: i64,
+    pub(crate) total_spent_tokens: i64,
     turns: Vec<TurnView>,
 }
 
@@ -1705,6 +1724,7 @@ pub fn build_snapshot_with_processes(
     now: DateTime<Utc>,
 ) -> Snapshot {
     let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
+    let fresh_start = usage_activity_start(cfg, now);
     let sessions = build_sessions(events, window_start);
     let matches = processes
         .map(|snapshot| process_matches(cfg, snapshot))
@@ -1714,7 +1734,7 @@ pub fn build_snapshot_with_processes(
         .iter()
         .map(|session| {
             let correlation = correlate(session, &matches);
-            build_session_view(cfg, session, &correlation, window_start, now)
+            build_session_view(cfg, session, &correlation, window_start, fresh_start, now)
         })
         .collect::<Vec<_>>();
     sort_session_views(&mut session_views);
@@ -1725,7 +1745,7 @@ pub fn build_snapshot_with_processes(
             let best = best_session_for_match(matched, &sessions);
             let session_view = best.as_ref().map(|session| {
                 let correlation = correlate(session, std::slice::from_ref(matched));
-                build_session_view(cfg, session, &correlation, window_start, now)
+                build_session_view(cfg, session, &correlation, window_start, fresh_start, now)
             });
             build_agent_view(matched, session_view.as_ref(), now)
         })
@@ -1747,13 +1767,24 @@ pub fn build_snapshot_with_processes(
 
 pub(crate) fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> Vec<Session> {
     let mut by_key: HashMap<String, Session> = HashMap::new();
-    for event in events {
+    let mut ordered = events.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|event| {
+        (
+            event.provider.as_str(),
+            event.session_id.as_deref().unwrap_or_default(),
+            event.timestamp,
+            event.cumulative_tokens,
+            event.total_tokens,
+        )
+    });
+    for event in ordered {
         let id = event.session_id.clone().unwrap_or_default();
         let key = if id.is_empty() {
             format!("{}:{}", event.provider, event.source_path.display())
         } else {
             format!("{}:{id}", event.provider)
         };
+        let spent_tokens = event_spent_tokens(event);
         let session = by_key.entry(key.clone()).or_insert_with(|| Session {
             key: key.clone(),
             id: id.clone(),
@@ -1764,8 +1795,11 @@ pub(crate) fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> V
             last_usage: None,
             calls: 0,
             latest_turn_tokens: 0,
+            latest_spent_tokens: 0,
             window_tokens: 0,
+            window_spent_tokens: 0,
             total_tokens: 0,
+            total_spent_tokens: 0,
             turns: Vec::new(),
         });
         if session.cwd.is_none() {
@@ -1780,12 +1814,15 @@ pub(crate) fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> V
         if event.total_tokens > 0 && event.timestamp >= session.last_usage {
             session.last_usage = event.timestamp;
             session.latest_turn_tokens = event.total_tokens;
+            session.latest_spent_tokens = spent_tokens;
         }
         if event.timestamp.is_some_and(|at| at >= window_start) {
-            session.window_tokens += event.total_tokens;
+            session.window_tokens += spent_tokens;
+            session.window_spent_tokens += spent_tokens;
         }
         session.calls += 1;
-        session.total_tokens += event.total_tokens;
+        session.total_tokens += spent_tokens;
+        session.total_spent_tokens += spent_tokens;
         session.turns.push(TurnView {
             id: event.turn_id.clone(),
             request_id: event.request_id.clone(),
@@ -1800,11 +1837,16 @@ pub(crate) fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> V
             cache_creation_input_tokens: event.cache_creation_input_tokens,
             reasoning_output_tokens: event.reasoning_output_tokens,
             total_tokens: event.total_tokens,
+            spent_tokens,
             cumulative_tokens: event.cumulative_tokens,
             source: event.source.clone(),
         });
     }
     by_key.into_values().collect()
+}
+
+fn event_spent_tokens(event: &Event) -> i64 {
+    event.spent_tokens.max(0)
 }
 
 fn find_session(events: &[Event], key: &str) -> Option<Session> {
@@ -1983,6 +2025,14 @@ fn manual_stop_event_data(
         data.insert("cwd".to_string(), Value::String(cwd.display().to_string()));
     }
     data.insert("turn_tokens".to_string(), json!(session.latest_turn_tokens));
+    data.insert(
+        "latest_spent_tokens".to_string(),
+        json!(session.latest_spent_tokens),
+    );
+    data.insert(
+        "window_spent_tokens".to_string(),
+        json!(session.window_spent_tokens),
+    );
     if let Some(agent) = &correlation.agent {
         data.insert("agent_id".to_string(), Value::String(agent.id.clone()));
     }
@@ -2037,92 +2087,98 @@ fn build_session_view(
     session: &Session,
     correlation: &Correlation,
     window_start: DateTime<Utc>,
+    fresh_start: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> SessionView {
-    let active = session.last_usage.is_some_and(|last| last >= window_start);
-    let over_stop = session.latest_turn_tokens >= cfg.usage.kill_turn_tokens;
-    let over_warn = session.latest_turn_tokens >= cfg.usage.warn_turn_tokens;
+    let in_policy_window = session.last_usage.is_some_and(|last| last >= window_start);
+    let fresh_usage = session.last_usage.is_some_and(|last| last >= fresh_start);
+    let activity_state = if fresh_usage { "spending" } else { "idle" };
+    let over_stop = session.latest_spent_tokens >= cfg.usage.kill_turn_tokens;
+    let over_warn = session.latest_spent_tokens >= cfg.usage.warn_turn_tokens;
     let matched_agent = correlation.agent.as_ref();
     let termination_allowed = matched_agent.is_some_and(Agent::termination_allowed);
     let ack_until = active_session_ack(&cfg.service.state_dir, &session.key, now)
         .ok()
         .flatten()
         .map(|ack| ack.until);
-    let (mut state, usage_state, mut action_state, mut risk_rank, mut explanation) = if active
-        && over_stop
-    {
-        let state = match (correlation.matched, termination_allowed) {
-            (false, _) => "uncorrelated",
-            (true, false) => "watch-only",
-            (true, true) => "stop",
-        };
-        (
-            state,
-            "stop",
-            if state == "stop" && cfg.mode == Mode::Enforcement {
-                "stop-pending"
-            } else if state == "stop" {
-                "would-stop"
+    let (mut state, usage_state, mut action_state, mut risk_rank, mut explanation) =
+        if in_policy_window && over_stop {
+            let state = match (correlation.matched, termination_allowed) {
+                (false, _) => "uncorrelated",
+                (true, false) => "watch-only",
+                (true, true) => "stop",
+            };
+            (
+                state,
+                "stop",
+                if state == "stop" && cfg.mode == Mode::Enforcement {
+                    "stop-pending"
+                } else if state == "stop" {
+                    "would-stop"
+                } else {
+                    "blocked"
+                },
+                if state == "stop" && cfg.mode == Mode::Enforcement {
+                    0
+                } else {
+                    1
+                },
+                match state {
+                    "uncorrelated" => {
+                        "usage crossed threshold, but no live process matched; Curb will not stop anything"
+                    }
+                    "watch-only" => {
+                        "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
+                    }
+                    _ => "latest turn crossed the stop threshold",
+                },
+            )
+        } else if in_policy_window && over_warn {
+            let state = if !correlation.matched {
+                "uncorrelated"
+            } else if !termination_allowed {
+                "watch-only"
             } else {
-                "blocked"
-            },
-            if state == "stop" && cfg.mode == Mode::Enforcement {
-                0
-            } else {
-                1
-            },
-            match state {
-                "uncorrelated" => {
-                    "usage crossed threshold, but no live process matched; Curb will not stop anything"
-                }
-                "watch-only" => {
-                    "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
-                }
-                _ => "latest turn crossed the stop threshold",
-            },
-        )
-    } else if active && over_warn {
-        let state = if !correlation.matched {
-            "uncorrelated"
-        } else if !termination_allowed {
-            "watch-only"
+                "warn"
+            };
+            (
+                state,
+                "warn",
+                "acknowledge",
+                1,
+                match state {
+                    "uncorrelated" => {
+                        "usage crossed threshold, but no live process matched; Curb will not stop anything"
+                    }
+                    "watch-only" => {
+                        "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
+                    }
+                    _ => "latest turn crossed the warning threshold",
+                },
+            )
+        } else if in_policy_window {
+            (
+                "active",
+                if fresh_usage { "spending" } else { "quiet" },
+                "none",
+                1,
+                if fresh_usage {
+                    "fresh token usage is within policy"
+                } else {
+                    "token usage is within the policy window, but no fresh token use is visible"
+                },
+            )
+        } else if over_stop || over_warn {
+            (
+                "idle-high",
+                "quiet-high",
+                "none",
+                3,
+                "historically high usage is quiet in the policy window",
+            )
         } else {
-            "warn"
+            ("quiet", "quiet", "none", 5, "no recent token usage")
         };
-        (
-            state,
-            "warn",
-            "acknowledge",
-            1,
-            match state {
-                "uncorrelated" => {
-                    "usage crossed threshold, but no live process matched; Curb will not stop anything"
-                }
-                "watch-only" => {
-                    "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
-                }
-                _ => "latest turn crossed the warning threshold",
-            },
-        )
-    } else if active {
-        (
-            "active",
-            "spending",
-            "none",
-            1,
-            "recent token usage is within policy",
-        )
-    } else if over_stop || over_warn {
-        (
-            "idle-high",
-            "quiet-high",
-            "none",
-            3,
-            "historically high usage is quiet in the policy window",
-        )
-    } else {
-        ("quiet", "quiet", "none", 5, "no recent token usage")
-    };
     if ack_until.is_some() && matches!(usage_state, "warn" | "stop") {
         state = "acknowledged";
         action_state = "acknowledged";
@@ -2136,6 +2192,7 @@ fn build_session_view(
         id: session.id.clone(),
         provider: session.provider.clone(),
         state: state.to_string(),
+        activity_state: activity_state.to_string(),
         process_state: process_state.to_string(),
         usage_state: usage_state.to_string(),
         action_state: action_state.to_string(),
@@ -2151,8 +2208,11 @@ fn build_session_view(
         last_usage_at: session.last_usage,
         calls: session.calls,
         latest_turn_tokens: session.latest_turn_tokens,
+        latest_spent_tokens: session.latest_spent_tokens,
         window_tokens: session.window_tokens,
+        window_spent_tokens: session.window_spent_tokens,
         total_tokens: session.total_tokens,
+        total_spent_tokens: session.total_spent_tokens,
         correlated_agent_id: matched_agent.map(|agent| agent.id.clone()),
         correlated_pid: correlation
             .process
@@ -2197,8 +2257,7 @@ fn build_overview(
     let active_sessions = sessions
         .iter()
         .filter(|session| {
-            session.process_state == "running"
-                && matches!(session.usage_state.as_str(), "spending" | "warn" | "stop")
+            session.process_state == "running" && session.activity_state == "spending"
         })
         .count();
     let warning_sessions = sessions
@@ -2225,10 +2284,10 @@ fn build_overview(
         "OK"
     };
     let message = match status {
-        "ACTION" => "active usage is over a stop threshold",
-        "WATCH" => "active usage is over a warning threshold",
+        "ACTION" => "usage is over a stop threshold",
+        "WATCH" => "usage is over a warning threshold",
         "ACTIVE" => "agents are spending tokens within policy",
-        _ => "no active over-budget usage",
+        _ => "no fresh over-budget usage",
     };
     Overview {
         mode: cfg.mode.to_string(),
@@ -2253,11 +2312,17 @@ fn build_overview(
     }
 }
 
+fn usage_activity_start(cfg: &Config, now: DateTime<Utc>) -> DateTime<Utc> {
+    let scan = cfg.usage.scan_interval.as_std();
+    let freshness = std::time::Duration::from_secs(scan.as_secs().saturating_mul(3).max(30));
+    now - chrono::Duration::from_std(freshness).unwrap()
+}
+
 pub(crate) fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Vec<ProcessMatch> {
     let mut matches = Vec::new();
     for process in snapshot.processes() {
         for agent in &cfg.agents {
-            let (confidence, evidence) = match_agent(agent, process);
+            let (confidence, evidence) = match_agent(agent, process, snapshot);
             if confidence >= cfg.service.min_confidence {
                 matches.push(ProcessMatch {
                     agent: agent.clone(),
@@ -2277,7 +2342,11 @@ pub(crate) fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Ve
     matches
 }
 
-fn match_agent(agent: &Agent, process: &platform::Process) -> (i64, Vec<String>) {
+fn match_agent(
+    agent: &Agent,
+    process: &platform::Process,
+    snapshot: &platform::Snapshot,
+) -> (i64, Vec<String>) {
     let matcher = &agent.matcher;
     if matcher
         .exclude_names
@@ -2286,8 +2355,13 @@ fn match_agent(agent: &Agent, process: &platform::Process) -> (i64, Vec<String>)
     {
         return (0, Vec::new());
     }
-    if any_regex_matches(&matcher.exclude_command_regex, &process.command)
-        || any_regex_matches(&matcher.exclude_parent_regex, &process.command)
+    if any_regex_matches(&matcher.exclude_command_regex, &process.command) {
+        return (0, Vec::new());
+    }
+    if process
+        .ppid
+        .and_then(|pid| snapshot.process(pid))
+        .is_some_and(|parent| any_regex_matches(&matcher.exclude_parent_regex, &parent.command))
     {
         return (0, Vec::new());
     }
@@ -2389,10 +2463,15 @@ fn best_session_for_match<'a>(
         .iter()
         .filter_map(|session| {
             let correlation = correlate(session, std::slice::from_ref(matched));
-            correlation.matched.then_some((correlation.score, session))
+            correlation.matched.then_some((
+                correlation.score,
+                session.last_usage,
+                session.last,
+                session,
+            ))
         })
-        .max_by_key(|(score, _)| *score)
-        .map(|(_, session)| session)
+        .max_by_key(|(score, last_usage, last, _)| (*score, *last_usage, *last))
+        .map(|(_, _, _, session)| session)
 }
 
 fn build_agent_view(
@@ -2410,12 +2489,15 @@ fn build_agent_view(
     } else {
         "matched agent is watch-only"
     };
+    let mut activity_state = "idle";
     let mut usage_state = "quiet";
     let mut action_state = "none";
     let mut actionable = false;
     let mut latest_session_id = None;
     let mut latest_turn_tokens = 0;
+    let mut latest_spent_tokens = 0;
     let mut window_tokens = 0;
+    let mut window_spent_tokens = 0;
     if let Some(session) = session {
         state = if matched.agent.termination_allowed() {
             match session.state.as_str() {
@@ -2426,12 +2508,15 @@ fn build_agent_view(
         } else {
             "watch-only"
         };
+        activity_state = &session.activity_state;
         usage_state = &session.usage_state;
         action_state = &session.action_state;
         actionable = session.actionable;
         latest_session_id = Some(session.id.clone());
         latest_turn_tokens = session.latest_turn_tokens;
+        latest_spent_tokens = session.latest_spent_tokens;
         window_tokens = session.window_tokens;
+        window_spent_tokens = session.window_spent_tokens;
         explanation = if state == "idle" {
             "process is running; correlated session is not currently spending"
         } else {
@@ -2443,6 +2528,7 @@ fn build_agent_view(
         provider: matched.agent.family.clone(),
         label: matched.agent.label.clone(),
         state: state.to_string(),
+        activity_state: activity_state.to_string(),
         process_state: if matched.agent.termination_allowed() {
             "running"
         } else {
@@ -2465,7 +2551,9 @@ fn build_agent_view(
         confidence: matched.confidence,
         latest_session_id,
         latest_turn_tokens,
+        latest_spent_tokens,
         window_tokens,
+        window_spent_tokens,
         explanation: explanation.to_string(),
     }
 }
@@ -2765,6 +2853,32 @@ mod tests {
                 .iter()
                 .all(|session| session.correlated_pid == Some(100))
         );
+    }
+
+    #[test]
+    fn agent_view_uses_newest_matching_session_when_scores_tie() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.scan_interval = HumanDuration::seconds(5);
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let processes = process_snapshot(now, "codex", "/repo");
+        let snapshot = build_snapshot_with_processes(
+            &cfg,
+            Some(&processes),
+            &[
+                event("codex", "stale", now - chrono::Duration::minutes(10), 150),
+                event("codex", "fresh", now, 125),
+            ],
+            Vec::new(),
+            now,
+        );
+
+        assert_eq!(
+            snapshot.agents[0].latest_session_id.as_deref(),
+            Some("fresh")
+        );
+        assert_eq!(snapshot.agents[0].activity_state, "spending");
     }
 
     #[test]
@@ -3113,6 +3227,50 @@ mod tests {
     }
 
     #[test]
+    fn stale_policy_warning_is_not_fresh_activity() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.scan_interval = HumanDuration::seconds(5);
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let stale_but_in_window = now - chrono::Duration::minutes(10);
+        let processes = process_snapshot(now, "codex", "/repo");
+        let snapshot = build_snapshot_with_processes(
+            &cfg,
+            Some(&processes),
+            &[event("codex", "s1", stale_but_in_window, 150)],
+            Vec::new(),
+            now,
+        );
+
+        assert_eq!(snapshot.overview.status, "WATCH");
+        assert_eq!(snapshot.overview.active_sessions, 0);
+        assert_eq!(snapshot.sessions[0].usage_state, "warn");
+        assert_eq!(snapshot.sessions[0].activity_state, "idle");
+        assert_eq!(snapshot.agents[0].activity_state, "idle");
+    }
+
+    #[test]
+    fn process_matching_applies_parent_command_exclusions_to_parent() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.service.min_confidence = 1;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let mut parent = process(now, 100, "codex", "/repo");
+        parent.command =
+            "/Applications/Codex.app/Contents/MacOS/codex app-server --listen stdio://".to_string();
+        let mut child = process(now, 101, "claude", "/repo");
+        child.ppid = Some(parent.pid);
+        child.command = "/usr/local/bin/claude --print worker".to_string();
+        let snapshot = platform::Snapshot::new([parent, child]);
+
+        let matches = process_matches(&cfg, &snapshot);
+
+        assert!(!matches.iter().any(|matched| {
+            matched.agent.id == "claude-code" && matched.process.pid == platform::Pid::new(101)
+        }));
+    }
+
+    #[test]
     fn project_name_handles_unix_and_windows_paths() {
         assert_eq!(
             project_name(Path::new("/Users/me/repo")).as_deref(),
@@ -3280,6 +3438,7 @@ mod tests {
             output_tokens: 0,
             reasoning_output_tokens: 0,
             total_tokens: total,
+            spent_tokens: total,
             cumulative_tokens: total,
             model_context_window: 0,
         }

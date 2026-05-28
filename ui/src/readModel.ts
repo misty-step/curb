@@ -15,9 +15,10 @@ export interface OperatorSummaryModel {
   aliveAgents: AgentView[];
   spendingAgents: AgentView[];
   recentUncorrelated: SessionView[];
-  latestInputTokens: number;
+  latestSpentTokens: number;
   recentUncorrelatedTokens: number;
   aliveRows: AliveAgentGroup[];
+  quietRows: AliveAgentGroup[];
   spendingRows: AgentView[];
   headline: string;
 }
@@ -25,22 +26,24 @@ export interface OperatorSummaryModel {
 export function selectOperatorSummary(snapshot: Snapshot): OperatorSummaryModel {
   const aliveAgents = snapshot.agents.filter(isAliveAgent);
   const spendingAgents = aliveAgents.filter(isSpendingAgent);
+  const spendingRows = uniqueSpendingRows(spendingAgents);
   const recentUncorrelated = snapshot.sessions.filter(isRecentUncorrelatedUsage);
-  const latestInputTokens = spendingAgents.reduce((sum, agent) => sum + (agent.latest_turn_tokens ?? 0), 0);
-  const recentUncorrelatedTokens = recentUncorrelated.reduce((sum, session) => sum + (session.window_tokens ?? 0), 0);
+  const latestSpentTokens = spendingRows.reduce((sum, agent) => sum + (agent.latest_spent_tokens ?? agent.latest_turn_tokens ?? 0), 0);
+  const recentUncorrelatedTokens = recentUncorrelated.reduce((sum, session) => sum + (session.window_spent_tokens ?? session.window_tokens ?? 0), 0);
 
   return {
     aliveAgents,
     spendingAgents,
     recentUncorrelated,
-    latestInputTokens,
+    latestSpentTokens,
     recentUncorrelatedTokens,
     aliveRows: aliveAgentGroups(aliveAgents).slice(0, 6),
-    spendingRows: spendingAgents.slice(0, 5),
+    quietRows: aliveAgentGroups(aliveAgents.filter((agent) => !isSpendingAgent(agent))).slice(0, 4),
+    spendingRows: spendingRows.slice(0, 5),
     headline:
-      spendingAgents.length > 0
-        ? `${spendingAgents.length} agent${spendingAgents.length === 1 ? "" : "s"} actively consuming tokens`
-        : "No agents are actively consuming tokens",
+      spendingRows.length > 0
+        ? `${spendingRows.length} agent${spendingRows.length === 1 ? "" : "s"} with fresh token usage`
+        : "No fresh token usage right now",
   };
 }
 
@@ -49,11 +52,25 @@ export function isAliveAgent(agent: AgentView): boolean {
 }
 
 export function isSpendingAgent(agent: AgentView): boolean {
-  return agent.state === "spending" || agent.state === "warn" || agent.state === "stop";
+  return agent.activity_state === "spending";
+}
+
+function uniqueSpendingRows(agents: AgentView[]): AgentView[] {
+  const rows = new Map<string, AgentView>();
+  for (const agent of agents) {
+    const key = agent.latest_session_id
+      ? `${agent.provider}:${agent.latest_session_id}`
+      : `${agent.provider}:${agent.project || agent.cwd || agent.pid}:${agent.latest_spent_tokens ?? agent.latest_turn_tokens ?? 0}`;
+    const current = rows.get(key);
+    if (!current || (agent.window_spent_tokens ?? agent.window_tokens ?? 0) > (current.window_spent_tokens ?? current.window_tokens ?? 0)) {
+      rows.set(key, agent);
+    }
+  }
+  return Array.from(rows.values());
 }
 
 export function isRecentUncorrelatedUsage(session: SessionView): boolean {
-  return session.state === "uncorrelated" || (session.correlated_pid === undefined && (session.window_tokens ?? 0) > 0);
+  return session.state === "uncorrelated" || (session.correlated_pid === undefined && (session.window_spent_tokens ?? session.window_tokens ?? 0) > 0);
 }
 
 export function sessionForAgent(agent: AgentView, sessions: SessionView[]): SessionView | undefined {

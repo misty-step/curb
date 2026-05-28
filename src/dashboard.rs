@@ -111,7 +111,7 @@ fn render_agents(writer: &mut impl Write, agents: &[AgentView]) -> io::Result<()
     writeln!(
         writer,
         "  {:<7} {:<22} {:<12} {:<12} {:<12} PROJECT",
-        "PID", "AGENT", "STATE", "USAGE", "LATEST_TURN"
+        "PID", "AGENT", "STATE", "USAGE", "LATEST_SPEND"
     )?;
     for agent in agents {
         writeln!(
@@ -121,7 +121,7 @@ fn render_agents(writer: &mut impl Write, agents: &[AgentView]) -> io::Result<()
             agent.id,
             agent.state,
             blank_as_dash(&agent.usage_state),
-            token_or_dash(agent.latest_turn_tokens),
+            token_or_dash(agent.latest_spent_tokens),
             project_label(agent.cwd.as_deref(), agent.project.as_deref())
         )?;
     }
@@ -142,7 +142,7 @@ fn render_sessions(
     writeln!(
         writer,
         "  {:<13} {:<8} {:<8} {:<12} {:<10} {:<7} {:<18} WHY",
-        "STATUS", "AGENT", "LAST", "LATEST_TURN", "TOTAL", "CALLS", "PROJECT"
+        "STATUS", "AGENT", "LAST", "LATEST_SPEND", "TOTAL", "CALLS", "PROJECT"
     )?;
     for session in &sessions[..limit] {
         writeln!(
@@ -151,8 +151,8 @@ fn render_sessions(
             session_status(session),
             session.provider,
             relative_time(session_display_time(session)),
-            token_or_dash(session.latest_turn_tokens),
-            token_count(session.total_tokens),
+            token_or_dash(session.latest_spent_tokens),
+            token_count(session.total_spent_tokens),
             session.calls,
             project_label(session.cwd.as_deref(), session.project.as_deref()),
             session.explanation
