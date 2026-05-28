@@ -1,6 +1,7 @@
 .curb/
 .antigravitycli/
 .spellbook/
+.harness-kit/
 /curb
 /curb.exe
 *.test

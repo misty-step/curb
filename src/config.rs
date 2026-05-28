@@ -622,6 +622,10 @@ fn parse_duration(raw: &str) -> Result<StdDuration, String> {
     Ok(StdDuration::from_secs(total))
 }
 
+pub fn parse_duration_for_cli(raw: &str) -> Result<StdDuration, String> {
+    parse_duration(raw)
+}
+
 fn format_duration(duration: StdDuration) -> String {
     let seconds = duration.as_secs();
     if seconds != 0 && seconds.is_multiple_of(3600) {
