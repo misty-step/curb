@@ -4,6 +4,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
+use curb::cli::{
+    config_command, default_config_path, default_home_dir, init_config, install_binary,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "curb")]
@@ -15,6 +18,29 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Create a user config.
+    Init {
+        /// Config file to create.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Overwrite an existing config.
+        #[arg(long)]
+        force: bool,
+        /// Initial mode: visibility, alert, or enforcement.
+        #[arg(long, default_value = "visibility")]
+        mode: String,
+    },
+    /// Install this binary to a prefix.
+    Install {
+        /// Install prefix. The binary is copied into <prefix>/bin.
+        #[arg(long)]
+        prefix: Option<PathBuf>,
+    },
+    /// Show or update the user config.
+    Config {
+        /// show, path, aggressive, reasonable, or observe.
+        action: Option<String>,
+    },
     /// Validate a Curb YAML config.
     ValidateConfig {
         /// Config file to validate.
@@ -39,8 +65,8 @@ enum Command {
     /// Serve the Rust local API on loopback.
     Serve {
         /// Config file to use.
-        #[arg(long, default_value = "configs/curb.example.yaml")]
-        config: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
         /// Loopback address to bind.
         #[arg(long, default_value = "127.0.0.1:8765")]
         addr: String,
@@ -51,8 +77,8 @@ enum Command {
     /// Serve the Rust dashboard and open it in the browser.
     App {
         /// Config file to use.
-        #[arg(long, default_value = "configs/curb.example.yaml")]
-        config: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
         /// Loopback address to bind.
         #[arg(long, default_value = "127.0.0.1:8765")]
         addr: String,
@@ -63,8 +89,8 @@ enum Command {
     /// Run the Rust usage watcher loop.
     Watch {
         /// Config file to use.
-        #[arg(long, default_value = "configs/curb.example.yaml")]
-        config: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
         /// Home directory containing provider log roots.
         #[arg(long)]
         home: Option<PathBuf>,
@@ -94,6 +120,13 @@ fn run() -> Result<()> {
                 cfg.ledger.path.display()
             );
         }
+        Some(Command::Init {
+            config,
+            force,
+            mode,
+        }) => init_config(config.unwrap_or_else(default_config_path), force, &mode)?,
+        Some(Command::Install { prefix }) => install_binary(prefix)?,
+        Some(Command::Config { action }) => config_command(action)?,
         Some(Command::Usage {
             home,
             json,
@@ -132,9 +165,17 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Some(Command::Serve { config, addr, home }) => serve_dashboard(config, addr, home, false)?,
-        Some(Command::App { config, addr, home }) => serve_dashboard(config, addr, home, true)?,
+        Some(Command::Serve { config, addr, home }) => serve_dashboard(
+            config.unwrap_or_else(default_config_path),
+            addr,
+            home,
+            false,
+        )?,
+        Some(Command::App { config, addr, home }) => {
+            serve_dashboard(config.unwrap_or_else(default_config_path), addr, home, true)?
+        }
         Some(Command::Watch { config, home, once }) => {
+            let config = config.unwrap_or_else(default_config_path);
             let cfg = curb::config::Config::load(&config)?;
             let home = home
                 .or_else(default_home_dir)
@@ -173,12 +214,6 @@ fn run() -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn default_home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
 fn serve_dashboard(

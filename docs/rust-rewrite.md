@@ -17,6 +17,8 @@ thin clients.
 The rewrite keeps deep modules and narrow interfaces:
 
 - `src/main.rs`: CLI composition only.
+- `src/cli.rs`: first-run config path discovery, user config creation, install
+  copy, and small config summary/preset surfaces.
 - `src/config.rs`: strict YAML schema, defaults, validation, policy merge.
 - `src/ledger.rs`: append-only NDJSON event journal, metadata enrichment,
   sensitive-field redaction, hash chaining, append hooks.
@@ -61,13 +63,17 @@ The rewrite keeps deep modules and narrow interfaces:
 6. Serve the existing React UI from the Rust daemon.
    Status: Rust embeds `internal/web/dist`, serves the SPA from loopback, keeps
    `/v1/*` protected, and exposes `curb app` as the browser launch path.
-7. Port warnings, notification delivery, grace policy, and automatic
+7. Port first-run CLI ergonomics.
+   Status: Rust now supports `init`, `install`, `config`, config path discovery
+   via `CURB_CONFIG`/local/user defaults, and preset updates backed by Rust
+   config primitives.
+8. Port warnings, notification delivery, grace policy, and automatic
    usage enforcement.
    Status: Rust now has automatic usage scan ticks and `curb serve` starts the
    watcher in-process. Remaining daemon work includes graceful shutdown and
    full CLI ergonomics.
-8. Port the safe synthetic demo to use the Rust binary.
-9. Remove Go only after Rust passes the behavior oracle and the product demo.
+9. Port the safe synthetic demo to use the Rust binary.
+10. Remove Go only after Rust passes the behavior oracle and the product demo.
 
 ## Validation
 

@@ -5,6 +5,7 @@
 //! those modules instead of reimplementing their internals.
 
 pub mod api;
+pub mod cli;
 pub mod config;
 pub mod http;
 pub mod ledger;

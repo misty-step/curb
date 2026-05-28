@@ -3,6 +3,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration as StdDuration;
 
 use regex::Regex;
@@ -36,6 +37,8 @@ pub enum ConfigError {
     Version(i64),
     #[error("invalid mode {0:?}")]
     Mode(String),
+    #[error("invalid preset {0:?}")]
+    Preset(String),
     #[error("defaults.warn_after must be less than defaults.kill_after")]
     InvalidDefaultThresholds,
     #[error("ledger.include_prompt_content is not supported by launch implementation")]
@@ -94,6 +97,36 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn local_default(mode: Mode, state_dir: PathBuf) -> Self {
+        let mut cfg = Self {
+            version: 1,
+            profile: "local-default".to_string(),
+            mode,
+            service: ServiceConfig {
+                state_dir: state_dir.clone(),
+                min_confidence: 50,
+                ..ServiceConfig::default()
+            },
+            usage: UsageConfig {
+                enabled: Some(true),
+                ..UsageConfig::default()
+            },
+            defaults: Policy::default(),
+            agents: default_process_agents(),
+            alerts: AlertConfig {
+                local_notifications: true,
+                ..AlertConfig::default()
+            },
+            ledger: LedgerConfig {
+                path: state_dir.join("runs.ndjson"),
+                ..LedgerConfig::default()
+            },
+        };
+        cfg.set_defaults();
+        cfg.apply_policy_to_agents();
+        cfg
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let raw = fs::read_to_string(path).map_err(|source| ConfigError::Read {
@@ -227,6 +260,121 @@ impl Config {
         }
         policy
     }
+
+    pub fn apply_preset(&mut self, preset: Preset) {
+        self.keep_process_agents();
+        self.service.min_confidence = 50;
+        match preset {
+            Preset::Aggressive => {
+                self.mode = Mode::Enforcement;
+                self.service.scan_interval = HumanDuration::seconds(1);
+                self.service.heartbeat_interval = HumanDuration::seconds(5);
+                self.usage.enabled = Some(true);
+                self.usage.scan_interval = HumanDuration::seconds(1);
+                self.usage.window = HumanDuration::minutes(1);
+                self.usage.warn_turn_tokens = 250_000;
+                self.usage.kill_turn_tokens = 750_000;
+                self.usage.grace_period = HumanDuration::seconds(10);
+                self.defaults.warn_after = HumanDuration::seconds(30);
+                self.defaults.kill_after = HumanDuration::seconds(60);
+                self.defaults.kill_grace_period = HumanDuration::seconds(10);
+                self.defaults.ack_extension = HumanDuration::seconds(30);
+                self.defaults.max_extensions = 1;
+                self.defaults.min_lifetime = HumanDuration::seconds(1);
+                self.defaults.max_run_gap = HumanDuration::seconds(2);
+            }
+            Preset::Reasonable => {
+                self.mode = Mode::Alert;
+                self.service.scan_interval = HumanDuration::seconds(15);
+                self.service.heartbeat_interval = HumanDuration::minutes(1);
+                self.usage.enabled = Some(true);
+                self.usage.scan_interval = HumanDuration::seconds(5);
+                self.usage.window = HumanDuration::minutes(15);
+                self.usage.warn_turn_tokens = 1_000_000;
+                self.usage.kill_turn_tokens = 3_000_000;
+                self.usage.grace_period = HumanDuration::minutes(1);
+                self.defaults.warn_after = HumanDuration::minutes(90);
+                self.defaults.kill_after = HumanDuration::hours(2);
+                self.defaults.kill_grace_period = HumanDuration::minutes(1);
+                self.defaults.ack_extension = HumanDuration::minutes(30);
+                self.defaults.max_extensions = 2;
+            }
+            Preset::Observe => {
+                self.mode = Mode::Visibility;
+                self.service.scan_interval = HumanDuration::seconds(15);
+                self.usage.enabled = Some(true);
+                self.usage.scan_interval = HumanDuration::seconds(10);
+                self.usage.window = HumanDuration::minutes(15);
+                self.usage.warn_turn_tokens = 5_000_000;
+                self.usage.kill_turn_tokens = 10_000_000;
+                self.usage.grace_period = HumanDuration::minutes(1);
+                self.defaults.warn_after = HumanDuration::hours(24);
+                self.defaults.kill_after = HumanDuration::hours(48);
+                self.defaults.kill_grace_period = HumanDuration::minutes(1);
+                self.defaults.ack_extension = HumanDuration::minutes(30);
+                self.defaults.max_extensions = 2;
+            }
+        }
+        self.apply_policy_to_agents();
+    }
+
+    fn apply_policy_to_agents(&mut self) {
+        for agent in &mut self.agents {
+            let mut policy = self.defaults.clone();
+            policy.allow_app_root_kill = false;
+            agent.policy = Some(policy);
+        }
+    }
+
+    fn keep_process_agents(&mut self) {
+        let mut agents = default_process_agents();
+        let mut seen = agents
+            .iter()
+            .map(|agent| agent.id.clone())
+            .collect::<HashSet<_>>();
+        for agent in &self.agents {
+            if seen.contains(&agent.id) || !agent.termination_allowed() {
+                continue;
+            }
+            let mut agent = agent.clone();
+            if agent.kind == AgentKind::Unspecified {
+                agent.kind = AgentKind::Process;
+            }
+            seen.insert(agent.id.clone());
+            agents.push(agent);
+        }
+        self.agents = agents;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Preset {
+    Aggressive,
+    Reasonable,
+    Observe,
+}
+
+impl FromStr for Preset {
+    type Err = ConfigError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "aggressive" => Ok(Self::Aggressive),
+            "reasonable" => Ok(Self::Reasonable),
+            "observe" => Ok(Self::Observe),
+            other => Err(ConfigError::Preset(other.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for Preset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Preset::Aggressive => "aggressive",
+            Preset::Reasonable => "reasonable",
+            Preset::Observe => "observe",
+        })
+    }
 }
 
 fn write_private_file(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
@@ -344,6 +492,19 @@ impl<'de> Deserialize<'de> for Mode {
             "alert" => Ok(Self::Alert),
             "enforcement" => Ok(Self::Enforcement),
             other => Err(serde::de::Error::custom(format!("invalid mode {other:?}"))),
+        }
+    }
+}
+
+impl FromStr for Mode {
+    type Err = ConfigError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "visibility" => Ok(Self::Visibility),
+            "alert" => Ok(Self::Alert),
+            "enforcement" => Ok(Self::Enforcement),
+            other => Err(ConfigError::Mode(other.to_string())),
         }
     }
 }
@@ -761,6 +922,71 @@ fn default_state_dir() -> PathBuf {
     PathBuf::from(".curb")
 }
 
+fn default_process_agents() -> Vec<Agent> {
+    vec![
+        Agent {
+            id: "codex-desktop-worker".to_string(),
+            label: "Codex Desktop Worker".to_string(),
+            family: "codex".to_string(),
+            kind: AgentKind::Process,
+            matcher: Match {
+                process_names: vec!["codex".to_string()],
+                require_command_regex: vec![
+                    "\\bapp-server\\b".to_string(),
+                    "--listen\\s+stdio://".to_string(),
+                ],
+                command_regex: vec![
+                    "\\bapp-server\\b".to_string(),
+                    "--listen\\s+stdio://".to_string(),
+                ],
+                ..Match::default()
+            },
+            policy: None,
+        },
+        Agent {
+            id: "codex-cli".to_string(),
+            label: "Codex CLI".to_string(),
+            family: "codex".to_string(),
+            kind: AgentKind::Process,
+            matcher: Match {
+                process_names: vec!["codex".to_string()],
+                command_regex: vec!["(^|/|\\\\)codex(\\.js|\\.cmd|\\.exe)?(\\s|$)".to_string()],
+                exclude_command_regex: vec!["/Applications/Codex.app".to_string()],
+                ..Match::default()
+            },
+            policy: None,
+        },
+        Agent {
+            id: "claude-code".to_string(),
+            label: "Claude Code".to_string(),
+            family: "claude".to_string(),
+            kind: AgentKind::Process,
+            matcher: Match {
+                process_names: vec!["claude".to_string(), "claude-code".to_string()],
+                command_regex: vec!["(^|/|\\\\)claude(-code)?(\\.cmd|\\.exe)?(\\s|$)".to_string()],
+                exclude_command_regex: vec!["/Applications/Claude.app".to_string()],
+                exclude_parent_regex: vec![
+                    "/Applications/Codex\\.app/.+\\bapp-server\\b".to_string(),
+                ],
+                ..Match::default()
+            },
+            policy: None,
+        },
+        Agent {
+            id: "antigravity-cli".to_string(),
+            label: "Anti-Gravity CLI".to_string(),
+            family: "antigravity".to_string(),
+            kind: AgentKind::Process,
+            matcher: Match {
+                process_names: vec!["agy".to_string()],
+                command_regex: vec!["(^|/|\\\\)agy(\\.cmd|\\.exe)?(\\s|$)".to_string()],
+                ..Match::default()
+            },
+            policy: None,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +1023,62 @@ mod tests {
         assert_eq!(reloaded.usage.kill_turn_tokens, 4_000);
         assert_eq!(reloaded.agents.len(), cfg.agents.len());
         assert_eq!(reloaded.ledger.path, cfg.ledger.path);
+    }
+
+    #[test]
+    fn local_default_builds_private_process_agent_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::local_default(Mode::Alert, dir.path().join("state"));
+
+        assert_eq!(cfg.version, 1);
+        assert_eq!(cfg.profile, "local-default");
+        assert_eq!(cfg.mode, Mode::Alert);
+        assert_eq!(cfg.agents.len(), 4);
+        assert!(cfg.agents.iter().all(Agent::termination_allowed));
+        assert_eq!(
+            cfg.ledger.path,
+            dir.path().join("state").join("runs.ndjson")
+        );
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn presets_keep_custom_process_agents_and_drop_watch_only_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::local_default(Mode::Visibility, dir.path().join("state"));
+        cfg.agents.push(Agent {
+            id: "custom-worker".to_string(),
+            label: "Custom Worker".to_string(),
+            kind: AgentKind::Process,
+            matcher: Match {
+                process_names: vec!["custom".to_string()],
+                ..Match::default()
+            },
+            ..Agent::default()
+        });
+        cfg.agents.push(Agent {
+            id: "custom-app".to_string(),
+            label: "Custom App".to_string(),
+            kind: AgentKind::App,
+            matcher: Match {
+                app_paths: vec!["/Applications/Custom.app".to_string()],
+                ..Match::default()
+            },
+            ..Agent::default()
+        });
+
+        cfg.apply_preset(Preset::Aggressive);
+
+        assert_eq!(cfg.mode, Mode::Enforcement);
+        assert_eq!(cfg.usage.warn_turn_tokens, 250_000);
+        assert!(cfg.agents.iter().any(|agent| agent.id == "custom-worker"));
+        assert!(!cfg.agents.iter().any(|agent| agent.id == "custom-app"));
+        assert!(cfg.agents.iter().all(|agent| {
+            agent
+                .policy
+                .as_ref()
+                .is_some_and(|policy| !policy.allow_app_root_kill)
+        }));
     }
 
     #[test]

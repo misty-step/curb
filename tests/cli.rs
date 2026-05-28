@@ -3,6 +3,84 @@ use predicates::prelude::*;
 use tempfile::tempdir;
 
 #[test]
+fn init_creates_default_user_config_without_synthetic_demo_agent() {
+    let dir = tempdir().expect("dir");
+    let config = dir.path().join("config.yaml");
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["init", "--config"])
+        .arg(&config)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("created config:"))
+        .stdout(predicate::str::contains("next: curb app"));
+
+    let cfg = curb::config::Config::load(&config).expect("config");
+    assert_eq!(cfg.mode, curb::config::Mode::Visibility);
+    assert_eq!(cfg.agents.len(), 4);
+    assert!(cfg.agents.iter().all(|agent| agent.termination_allowed()));
+    assert_eq!(
+        cfg.ledger.path,
+        config.parent().unwrap().join("runs.ndjson")
+    );
+}
+
+#[test]
+fn config_presets_update_default_config_path() {
+    let dir = tempdir().expect("dir");
+    let config = dir.path().join("curb.yaml");
+    let mut init = Command::cargo_bin("curb").expect("curb binary");
+    init.args(["init", "--config"])
+        .arg(&config)
+        .assert()
+        .success();
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.env("CURB_CONFIG", &config)
+        .args(["config", "aggressive"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mode: enforcement"))
+        .stdout(predicate::str::contains("warn: 250k tokens per turn"))
+        .stdout(predicate::str::contains("Codex Desktop Worker"));
+
+    let cfg = curb::config::Config::load(&config).expect("config");
+    assert_eq!(cfg.mode, curb::config::Mode::Enforcement);
+    assert_eq!(cfg.usage.warn_turn_tokens, 250_000);
+    assert_eq!(cfg.usage.kill_turn_tokens, 750_000);
+    assert_eq!(cfg.usage.scan_interval.as_std().as_secs(), 1);
+}
+
+#[test]
+fn config_path_uses_curb_config_environment() {
+    let dir = tempdir().expect("dir");
+    let config = dir.path().join("curb.yaml");
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.env("CURB_CONFIG", &config)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(config.display().to_string()));
+}
+
+#[test]
+fn install_copies_current_binary_to_prefix_bin() {
+    let dir = tempdir().expect("dir");
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["install", "--prefix"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed:"))
+        .stdout(predicate::str::contains("next: add"));
+
+    let name = if cfg!(windows) { "curb.exe" } else { "curb" };
+    assert!(dir.path().join("bin").join(name).is_file());
+}
+
+#[test]
 fn validate_config_matches_go_oracle_shape() {
     let mut cmd = Command::cargo_bin("curb").expect("curb binary");
 
