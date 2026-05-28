@@ -1,0 +1,60 @@
+# Rust Rewrite Plan
+
+Status: active rewrite branch
+Date: 2026-05-28
+
+## Intent
+
+Rewrite Curb in Rust without flattening the design into adapters around the Go
+code. The current Go implementation is the executable oracle until Rust reaches
+feature parity. The Rust implementation should preserve the launch product:
+one local endpoint agent owns usage ingestion, process correlation, policy,
+notifications, enforcement, and the append-only ledger; CLI and UI surfaces are
+thin clients.
+
+## Strategic Shape
+
+The rewrite keeps deep modules and narrow interfaces:
+
+- `src/main.rs`: CLI composition only.
+- `src/config.rs`: strict YAML schema, defaults, validation, policy merge.
+- `src/ledger.rs`: append-only NDJSON event journal, metadata enrichment,
+  sensitive-field redaction, hash chaining, append hooks.
+- `src/platform.rs`: process identity, process-tree scope, and sealed
+  `TerminationTarget` construction.
+- future `src/usage.rs`: provider metadata readers and durable parse cache.
+- future `src/service.rs`: daemon orchestration, read models, correlation,
+  policy, acknowledgement, grace, and actions.
+- future `src/api.rs`: loopback HTTP adapter only.
+- future `src/web.rs`: embedded UI assets only.
+
+## Load-Bearing Type Invariants
+
+- Termination must never be represented as a raw PID. Rust platform adapters
+  accept only a `TerminationTarget` produced by revalidating a live process
+  snapshot.
+- A termination target binds PID, process start time, owner, executable/app
+  identity, and child-first process-tree scope.
+- Visibility and alert mode must not be able to call the terminator.
+- Desktop app roots remain watch-only unless configuration explicitly allows
+  app-root termination.
+- Prompt, response, screenshot, keystroke, and file-content capture are rejected
+  by config and redacted from ledger data.
+
+## Migration Sequence
+
+1. Port config, ledger, and platform identity primitives with unit tests.
+2. Port provider usage readers for Codex and Claude using existing log fixtures.
+3. Port service read models and session/process correlation.
+4. Serve the existing React UI from the Rust daemon.
+5. Port warnings, acknowledgement, notification, and usage enforcement.
+6. Port the safe synthetic demo to use the Rust binary.
+7. Remove Go only after Rust passes the behavior oracle and the product demo.
+
+## Validation
+
+`scripts/validate.sh` now runs Rust formatting, clippy, and tests before the Go
+and UI oracle checks. Full completion requires the same safe demo guarantees:
+alert mode emits `usage_would_terminate` without stopping the synthetic worker,
+and enforcement mode emits `usage_termination_completed` after stopping only
+that synthetic worker.

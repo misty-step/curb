@@ -7,6 +7,7 @@
 *.out
 node_modules/
 dist/
+target/
 !internal/web/dist/
 !internal/web/dist/**
 artifacts/qa/

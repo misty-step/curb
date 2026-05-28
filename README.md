@@ -18,6 +18,28 @@ The implementation is active. The most useful entry points are:
 - [docs/local-agent-watchdog-spec.md](docs/local-agent-watchdog-spec.md) - watchdog product spec.
 - [SPEC.md](SPEC.md) - launch implementation specification.
 
+## Rust Rewrite
+
+The Rust rewrite is active on top of the existing Go behavior oracle. The first
+ported modules are intentionally deep: strict config loading, append-only
+ledger handling, and platform process identity/termination-target safety.
+
+```sh
+cargo test
+cargo run -- validate-config configs/curb.example.yaml
+```
+
+Rust gates are part of `scripts/validate.sh`:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+Until the Rust daemon reaches feature parity, the Go implementation remains the
+oracle for product behavior and the embedded UI remains the thin client.
+
 ## Go Implementation
 
 Build and run:
