@@ -82,6 +82,9 @@ The rewrite keeps deep modules and narrow interfaces:
    watcher in-process. Remaining daemon work includes graceful shutdown and
    full CLI ergonomics.
 10. Port the safe synthetic demo to use the Rust binary.
+    Status: `demo/006/script/run-backlog-006-demo.sh` now builds the Rust
+    binary, passes isolated `--home`/`--config` paths to every usage-scanning
+    command, and verifies alert/enforcement outcomes through Rust ledger events.
 11. Remove Go only after Rust passes the behavior oracle and the product demo.
 
 ## Validation

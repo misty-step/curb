@@ -5,8 +5,8 @@ safe enforcement without exposing private work.
 
 ## 1. Observe
 
-The operator starts Curb against an isolated demo config. Curb shows the
-configured policy, platform capability, and an empty ledger.
+The operator starts the Rust Curb binary against an isolated demo config. Curb
+shows the configured policy, platform capability, and an empty ledger.
 
 Evidence:
 

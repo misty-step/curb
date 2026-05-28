@@ -182,7 +182,7 @@ run_watch_until() {
   local ledger="$2"
   local event="$3"
   local outfile="$4"
-  env HOME="$home_dir" "$curb_bin" watch --config "$config" >"$outfile" 2>&1 &
+  env HOME="$home_dir" "$curb_bin" watch --config "$config" --home "$home_dir" >"$outfile" 2>&1 &
   local pid=$!
   watchers+=("$pid")
   if ! wait_for_ledger_event "$ledger" "$event" 25; then
@@ -199,10 +199,20 @@ run_watch_until() {
   wait "$pid" >/dev/null 2>&1 || true
 }
 
+require_ledger_text() {
+  local ledger="$1"
+  local pattern="$2"
+  if ! grep -q "$pattern" "$ledger"; then
+    echo "ledger $ledger is missing required pattern: $pattern" >&2
+    cat "$ledger" >&2 2>/dev/null || true
+    return 1
+  fi
+}
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
   cat <<EOF
 dry-run: would create $run_dir
-dry-run: would build $curb_bin
+dry-run: would build Rust curb and copy it to $curb_bin
 dry-run: would run alert-mode would-stop and enforcement termination demos
 dry-run: only target process would be a synthetic sleep worker launched from $work_dir
 EOF
@@ -212,7 +222,9 @@ fi
 mkdir -p "$run_dir" "$home_dir/.codex/archived_sessions" "$work_dir" "$state_dir"
 ln -sfn "$run_dir" "$ARTIFACT_ROOT/latest"
 
-run_cmd "$run_dir/00-build.txt" go build -o "$curb_bin" "$ROOT/cmd/curb"
+run_cmd "$run_dir/00-build.txt" cargo build --bin curb --manifest-path "$ROOT/Cargo.toml"
+cp "$ROOT/target/debug/curb" "$curb_bin"
+chmod 755 "$curb_bin"
 ln -sf /bin/sleep "$worker_exe"
 
 if [[ "$MODE" == "alert" || "$MODE" == "all" ]]; then
@@ -222,8 +234,14 @@ if [[ "$MODE" == "alert" || "$MODE" == "all" ]]; then
   write_config "$alert_config" "$alert_ledger" alert
   alert_worker="$(start_worker)"
   run_cmd "$run_dir/01-alert-config.txt" env HOME="$home_dir" "$curb_bin" validate-config "$alert_config"
-  run_cmd "$run_dir/02-alert-dashboard.json" env HOME="$home_dir" "$curb_bin" dashboard --config "$alert_config" --json
+  run_cmd "$run_dir/02-alert-dashboard.json" env HOME="$home_dir" "$curb_bin" dashboard --config "$alert_config" --home "$home_dir" --json
+  run_cmd "$run_dir/02b-alert-status.txt" env HOME="$home_dir" "$curb_bin" status --config "$alert_config" --home "$home_dir"
+  run_cmd "$run_dir/02c-alert-runs.txt" env HOME="$home_dir" "$curb_bin" runs --config "$alert_config" --home "$home_dir" --state attention
   run_watch_until "$alert_config" "$alert_ledger" usage_would_terminate "$run_dir/03-alert-watch.txt"
+  require_ledger_text "$alert_ledger" '"type":"usage_would_terminate"'
+  require_ledger_text "$alert_ledger" '"session_key":"codex:curb-demo-alert"'
+  require_ledger_text "$alert_ledger" '"turn_tokens":2000'
+  require_ledger_text "$alert_ledger" '"correlation_score"'
   if process_running "$alert_worker"; then
     echo "alert worker still alive as expected" >"$run_dir/04-alert-result.txt"
     kill "$alert_worker" >/dev/null 2>&1 || true
@@ -243,6 +261,10 @@ if [[ "$MODE" == "enforce" || "$MODE" == "all" ]]; then
   enforce_worker="$(start_worker)"
   run_cmd "$run_dir/05-enforce-config.txt" env HOME="$home_dir" "$curb_bin" validate-config "$enforce_config"
   run_watch_until "$enforce_config" "$enforce_ledger" usage_termination_completed "$run_dir/06-enforce-watch.txt"
+  require_ledger_text "$enforce_ledger" '"type":"usage_termination_completed"'
+  require_ledger_text "$enforce_ledger" '"session_key":"codex:curb-demo-enforce"'
+  require_ledger_text "$enforce_ledger" '"turn_tokens":2000'
+  require_ledger_text "$enforce_ledger" '"result"'
   if process_running "$enforce_worker"; then
     echo "enforcement worker is still alive unexpectedly" >"$run_dir/07-enforce-result.txt"
     exit 1
@@ -269,6 +291,8 @@ $(if [[ -f "$run_dir/07-enforce-result.txt" ]]; then cat "$run_dir/07-enforce-re
 ## Evidence
 
 - Alert watch output: \`03-alert-watch.txt\`
+- Alert status output: \`02b-alert-status.txt\`
+- Alert sessions output: \`02c-alert-runs.txt\`
 - Alert ledger: \`alert.ndjson\`
 - Enforcement watch output: \`06-enforce-watch.txt\`
 - Enforcement ledger: \`enforcement.ndjson\`

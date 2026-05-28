@@ -8,6 +8,7 @@ cd "$ROOT"
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+bash demo/006/script/run-backlog-006-demo.sh --dry-run
 go test ./...
 go vet ./...
 (cd ui && npm run typecheck)

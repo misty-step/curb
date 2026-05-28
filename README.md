@@ -1,6 +1,6 @@
 # Curb
 
-Curb is a local endpoint agent for AI-assisted engineering work. One Go service
+Curb is a local endpoint agent for AI-assisted engineering work. One local service
 on the machine owns usage ingestion, process correlation, notifications,
 policy, enforcement, and the audit ledger; the CLI and embedded UI are thin
 clients of that local service.

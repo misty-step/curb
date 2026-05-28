@@ -17,8 +17,9 @@ Run the live synthetic demo:
 bash demo/006/script/run-backlog-006-demo.sh --mode all
 ```
 
-The script creates an isolated `HOME`, isolated state directory, synthetic
-Codex usage log, and a harmless `sleep` process. Alert mode must produce a
+The script builds and runs the Rust `curb` binary, then creates an isolated
+`HOME`, isolated state directory, synthetic Codex usage log, and a harmless
+`sleep` process. Alert mode must produce a
 `usage_would_terminate` event while leaving the worker alive. Enforcement mode
 must produce `usage_termination_completed` and stop only the synthetic worker.
 Artifacts are written under `demo/006/artifacts/live-*`, with
