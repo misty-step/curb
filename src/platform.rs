@@ -145,6 +145,25 @@ pub trait Platform {
     fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError>;
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EmptyPlatform;
+
+impl Platform for EmptyPlatform {
+    fn capture(&self) -> Result<Snapshot, PlatformError> {
+        Ok(Snapshot::default())
+    }
+
+    fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn terminate(&self, _target: &TerminationTarget) -> Result<(), PlatformError> {
+        Err(PlatformError::Terminate(
+            "empty platform cannot terminate processes".to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;

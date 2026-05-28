@@ -1,4 +1,7 @@
 use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -14,6 +17,33 @@ use crate::service::{
 };
 
 pub const TOKEN_COOKIE: &str = "curb_token";
+
+pub fn load_or_create_token(state_dir: impl AsRef<Path>) -> Result<(String, PathBuf), ApiError> {
+    let state_dir = state_dir.as_ref();
+    let path = state_dir.join("api.token");
+    match fs::read_to_string(&path) {
+        Ok(content) => {
+            set_file_private(&path)?;
+            let token = content.trim().to_string();
+            if token.is_empty() {
+                return Err(ApiError::Config("api token file is empty".to_string()));
+            }
+            Ok((token, path))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(state_dir)
+                .map_err(|source| ApiError::Internal(format!("create state dir: {source}")))?;
+            set_dir_private(state_dir)?;
+            let mut raw = [0u8; 32];
+            getrandom::fill(&mut raw)
+                .map_err(|source| ApiError::Internal(format!("generate api token: {source}")))?;
+            let token = hex::encode(raw);
+            write_new_private_file(&path, format!("{token}\n").as_bytes())?;
+            Ok((token, path))
+        }
+        Err(error) => Err(ApiError::Internal(format!("read api token: {error}"))),
+    }
+}
 
 pub trait Backend {
     fn snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, ApiError>;
@@ -314,6 +344,15 @@ impl Response {
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).to_string()
     }
+
+    #[cfg(test)]
+    pub(crate) fn empty_for_test(status: u16, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            headers: HeaderMap::default(),
+            body,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -327,6 +366,12 @@ impl HeaderMap {
 
     pub fn get(&self, name: &str) -> Option<&str> {
         self.0.get(&name.to_ascii_lowercase()).map(String::as_str)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
     }
 
     fn append(&mut self, other: &mut HeaderMap) {
@@ -464,13 +509,16 @@ fn bearer_token(value: Option<&str>) -> &str {
 }
 
 fn constant_time_eq(left: &str, right: &str) -> bool {
-    if left.len() != right.len() {
-        return false;
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let max = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+    for index in 0..max {
+        let left_byte = left.get(index).copied().unwrap_or_default();
+        let right_byte = right.get(index).copied().unwrap_or_default();
+        diff |= usize::from(left_byte ^ right_byte);
     }
-    left.bytes()
-        .zip(right.bytes())
-        .fold(0u8, |diff, (left, right)| diff | (left ^ right))
-        == 0
+    diff == 0
 }
 
 fn split_target(target: &str) -> (String, String) {
@@ -557,6 +605,42 @@ fn since_param(raw: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(raw)
         .ok()
         .map(|time| time.with_timezone(&Utc))
+}
+
+fn set_dir_private(path: &Path) -> Result<(), ApiError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|source| ApiError::Internal(format!("chmod state dir: {source}")))?;
+    }
+    Ok(())
+}
+
+fn set_file_private(path: &Path) -> Result<(), ApiError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|source| ApiError::Internal(format!("chmod api token: {source}")))?;
+    }
+    Ok(())
+}
+
+fn write_new_private_file(path: &Path, content: &[u8]) -> Result<(), ApiError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|source| ApiError::Internal(format!("create api token: {source}")))?;
+    file.write_all(content)
+        .map_err(|source| ApiError::Internal(format!("write api token: {source}")))?;
+    set_file_private(path)
 }
 
 #[cfg(test)]
@@ -772,6 +856,58 @@ mod tests {
             now,
         );
         assert_eq!(stop.status, 400);
+    }
+
+    #[test]
+    fn load_or_create_token_persists_and_reuses_private_token() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let (token, path) = load_or_create_token(dir.path()).unwrap();
+        let (again, same_path) = load_or_create_token(dir.path()).unwrap();
+
+        assert_eq!(token.len(), 64);
+        assert_eq!(again, token);
+        assert_eq!(same_path, path);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+
+    #[test]
+    fn load_or_create_token_rejects_empty_and_repairs_existing_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api.token");
+        fs::write(&path, "\n").unwrap();
+        assert!(matches!(
+            load_or_create_token(dir.path()),
+            Err(ApiError::Config(message)) if message.contains("empty")
+        ));
+
+        fs::write(&path, "existing-token\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let (token, _) = load_or_create_token(dir.path()).unwrap();
+        assert_eq!(token, "existing-token");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 
     fn authed(method: &str, target: &str) -> Request {

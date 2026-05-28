@@ -238,6 +238,7 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "getrandom",
  "hex",
  "predicates",
  "regex",

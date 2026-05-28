@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod config;
+pub mod http;
 pub mod ledger;
 pub mod platform;
 pub mod runtime;

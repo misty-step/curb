@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -34,6 +34,18 @@ enum Command {
         /// Scan all known local logs.
         #[arg(long)]
         all: bool,
+    },
+    /// Serve the Rust local API on loopback.
+    Serve {
+        /// Config file to use.
+        #[arg(long, default_value = "configs/curb.example.yaml")]
+        config: PathBuf,
+        /// Loopback address to bind.
+        #[arg(long, default_value = "127.0.0.1:8765")]
+        addr: String,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
     },
 }
 
@@ -95,10 +107,36 @@ fn run() -> Result<()> {
                 }
             }
         }
+        Some(Command::Serve { config, addr, home }) => {
+            if !curb::http::is_loopback_host(&addr) {
+                bail!("serve address must be loopback, got {addr:?}");
+            }
+            let cfg = curb::config::Config::load(&config)?;
+            let (token, token_path) = curb::api::load_or_create_token(&cfg.service.state_dir)
+                .map_err(anyhow::Error::msg)?;
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            let runtime = curb::runtime::Runtime::new(cfg, home, curb::platform::EmptyPlatform);
+            runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
+            let server = curb::api::Server::new(token, runtime).map_err(anyhow::Error::msg)?;
+            let listener = curb::http::bind_loopback(&addr).map_err(anyhow::Error::msg)?;
+            println!("curb rust api");
+            println!("  listening: http://{}", listener.local_addr()?);
+            println!("  token: {}", token_path.display());
+            println!("  auth: Authorization: Bearer $(cat token-file)");
+            curb::http::serve_blocking(listener, &server).map_err(anyhow::Error::msg)?;
+        }
         None => {
             Cli::command().print_help()?;
             println!();
         }
     }
     Ok(())
+}
+
+fn default_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
 }

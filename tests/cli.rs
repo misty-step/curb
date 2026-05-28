@@ -38,3 +38,13 @@ fn usage_reads_synthetic_provider_metadata() {
         .stdout(predicate::str::contains("session_codex"))
         .stdout(predicate::str::contains("total=107"));
 }
+
+#[test]
+fn serve_rejects_non_loopback_address_before_binding() {
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["serve", "--addr", "0.0.0.0:0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("serve address must be loopback"));
+}
