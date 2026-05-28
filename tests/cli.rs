@@ -52,6 +52,70 @@ fn config_presets_update_default_config_path() {
 }
 
 #[test]
+fn config_set_updates_first_class_policy_fields() {
+    let dir = tempdir().expect("dir");
+    let config = dir.path().join("curb.yaml");
+    let mut init = Command::cargo_bin("curb").expect("curb binary");
+    init.args(["init", "--config"])
+        .arg(&config)
+        .assert()
+        .success();
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.env("CURB_CONFIG", &config)
+        .args([
+            "config",
+            "set",
+            "--mode",
+            "enforcement",
+            "--warn-after",
+            "2m",
+            "--kill-after",
+            "4m",
+            "--grace",
+            "30s",
+            "--scan",
+            "5s",
+            "--usage",
+            "true",
+            "--warn-turn-tokens",
+            "1000",
+            "--kill-turn-tokens",
+            "2000",
+            "--usage-window",
+            "10m",
+            "--usage-scan",
+            "2s",
+            "--ledger-forward-url",
+            "off",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mode: enforcement"))
+        .stdout(predicate::str::contains("warn: 1k tokens per turn"))
+        .stdout(predicate::str::contains("stop: 2k tokens per turn"));
+
+    let cfg = curb::config::Config::load(&config).expect("config");
+    assert_eq!(cfg.mode, curb::config::Mode::Enforcement);
+    assert_eq!(cfg.defaults.warn_after.as_std().as_secs(), 120);
+    assert_eq!(cfg.defaults.kill_after.as_std().as_secs(), 240);
+    assert_eq!(cfg.defaults.kill_grace_period.as_std().as_secs(), 30);
+    assert_eq!(cfg.usage.grace_period.as_std().as_secs(), 30);
+    assert_eq!(cfg.service.scan_interval.as_std().as_secs(), 5);
+    assert_eq!(cfg.usage.warn_turn_tokens, 1000);
+    assert_eq!(cfg.usage.kill_turn_tokens, 2000);
+    assert_eq!(cfg.usage.window.as_std().as_secs(), 600);
+    assert_eq!(cfg.usage.scan_interval.as_std().as_secs(), 2);
+    assert!(cfg.ledger.forward_url.is_empty());
+    assert!(cfg.agents.iter().all(|agent| {
+        agent
+            .policy
+            .as_ref()
+            .is_some_and(|policy| policy.kill_grace_period.as_std().as_secs() == 30)
+    }));
+}
+
+#[test]
 fn config_path_uses_curb_config_environment() {
     let dir = tempdir().expect("dir");
     let config = dir.path().join("curb.yaml");
@@ -251,6 +315,69 @@ fn app_rejects_non_loopback_address_before_opening() {
 }
 
 #[test]
+fn daemon_and_api_aliases_route_to_serve_command() {
+    let mut daemon = Command::cargo_bin("curb").expect("curb binary");
+    daemon
+        .args(["daemon", "--addr", "0.0.0.0:0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("serve address must be loopback"));
+
+    let mut api = Command::cargo_bin("curb").expect("curb binary");
+    api.args(["api", "--addr", "0.0.0.0:0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("serve address must be loopback"));
+}
+
+#[test]
+fn help_advanced_lists_compatibility_aliases() {
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["help", "advanced"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("serve|daemon|api"))
+        .stdout(predicate::str::contains("run|start|watch"))
+        .stdout(predicate::str::contains("scan"));
+}
+
+#[test]
+fn scan_reports_no_matches_for_unmatched_config() {
+    let home = tempdir().expect("home");
+    let state = tempdir().expect("state");
+    let config_path = state.path().join("curb.yaml");
+    let mut cfg = curb::config::Config::local_default(
+        curb::config::Mode::Visibility,
+        state.path().join("state"),
+    );
+    cfg.agents = vec![curb::config::Agent {
+        id: "impossible-agent".to_string(),
+        label: "Impossible Agent".to_string(),
+        family: "test".to_string(),
+        kind: curb::config::AgentKind::Process,
+        matcher: curb::config::Match {
+            process_names: vec!["curb-test-process-that-does-not-exist".to_string()],
+            ..curb::config::Match::default()
+        },
+        policy: None,
+    }];
+    cfg.save(&config_path).expect("save config");
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["scan", "--config"])
+        .arg(&config_path)
+        .arg("--home")
+        .arg(home.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("curb scan"))
+        .stdout(predicate::str::contains(
+            "no configured agent workers matched",
+        ));
+}
+
+#[test]
 fn watch_once_runs_a_single_usage_policy_scan() {
     let home = tempdir().expect("home");
     let state = tempdir().expect("state");
@@ -267,7 +394,7 @@ fn watch_once_runs_a_single_usage_policy_scan() {
         .arg(home.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("curb rust watcher"))
+        .stdout(predicate::str::contains("curb watcher"))
         .stdout(predicate::str::contains("scan: status="));
 }
 

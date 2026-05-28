@@ -59,12 +59,14 @@ local app or watcher.
 curb config
 curb app
 curb watch
+curb scan
 curb dashboard
 curb usage --since 24h
 curb tail
 curb status
 curb runs --state attention
 curb ack codex:session-id --extend 30m
+curb config set --mode alert --warn-turn-tokens 1000000 --kill-turn-tokens 3000000
 ```
 
 The default pre-merge gate is Rust-primary:

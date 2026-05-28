@@ -4,10 +4,11 @@ use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use curb::cli::{
-    ack_command, config_command, dashboard_command, default_config_path, default_home_dir,
-    doctor_command, init_config, install_binary, runs_command, status_command,
+    ack_command, config_command, config_set_command, dashboard_command, default_config_path,
+    default_home_dir, doctor_command, init_config, install_binary, load_or_default_config,
+    runs_command, scan_command, status_command,
 };
 
 #[derive(Debug, Parser)]
@@ -40,8 +41,11 @@ enum Command {
     },
     /// Show or update the user config.
     Config {
-        /// show, path, aggressive, reasonable, or observe.
+        /// show, path, aggressive, reasonable, observe, or set.
         action: Option<String>,
+        /// Arguments for `curb config set`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Show live agents and usage from the Rust read model.
     #[command(alias = "dash")]
@@ -116,6 +120,18 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print current configured process matches once.
+    Scan {
+        /// Config file to use.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show sessions tracked by local provider metadata.
     #[command(alias = "sessions")]
     Runs {
@@ -159,6 +175,7 @@ enum Command {
         reason: String,
     },
     /// Serve the Rust local API on loopback.
+    #[command(aliases = ["daemon", "api"])]
     Serve {
         /// Config file to use.
         #[arg(long)]
@@ -183,6 +200,7 @@ enum Command {
         home: Option<PathBuf>,
     },
     /// Run the Rust usage watcher loop.
+    #[command(aliases = ["run", "start", "curb"])]
     Watch {
         /// Config file to use.
         #[arg(long)]
@@ -204,6 +222,13 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    let args = std::env::args().collect::<Vec<_>>();
+    if args.get(1).map(String::as_str) == Some("help")
+        && args.get(2).map(String::as_str) == Some("advanced")
+    {
+        print_advanced_help();
+        return Ok(());
+    }
     let cli = Cli::parse();
     match cli.command {
         Some(Command::ValidateConfig { path }) => {
@@ -222,7 +247,15 @@ fn run() -> Result<()> {
             mode,
         }) => init_config(config.unwrap_or_else(default_config_path), force, &mode)?,
         Some(Command::Install { prefix }) => install_binary(prefix)?,
-        Some(Command::Config { action }) => config_command(action)?,
+        Some(Command::Config { action, args }) => {
+            if action.as_deref() == Some("set") {
+                config_set_command(args)?;
+            } else if !args.is_empty() {
+                bail!("unexpected config arguments after {:?}", action);
+            } else {
+                config_command(action)?;
+            }
+        }
         Some(Command::Dashboard {
             config,
             home,
@@ -304,6 +337,12 @@ fn run() -> Result<()> {
                 .context("home directory is required for usage log discovery")?;
             status_command(config.unwrap_or_else(default_config_path), home, json)?;
         }
+        Some(Command::Scan { config, home, json }) => {
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for process and usage correlation")?;
+            scan_command(config.unwrap_or_else(default_config_path), home, json)?;
+        }
         Some(Command::Runs {
             config,
             home,
@@ -353,44 +392,63 @@ fn run() -> Result<()> {
         Some(Command::App { config, addr, home }) => {
             serve_dashboard(config.unwrap_or_else(default_config_path), addr, home, true)?
         }
-        Some(Command::Watch { config, home, once }) => {
-            let config = config.unwrap_or_else(default_config_path);
-            let cfg = curb::config::Config::load(&config)?;
-            let home = home
-                .or_else(default_home_dir)
-                .context("home directory is required for usage log discovery")?;
-            let interval = cfg.usage.scan_interval.as_std();
-            let runtime =
-                curb::runtime::Runtime::new(cfg.clone(), home, curb::platform::SystemPlatform)
-                    .with_config_path(config);
-            println!("curb rust watcher");
-            println!("  mode: {}", cfg.mode);
-            println!(
-                "  usage: warn {} tokens/turn, stop {} tokens/turn, window {}s",
-                cfg.usage.warn_turn_tokens,
-                cfg.usage.kill_turn_tokens,
-                cfg.usage.window.as_std().as_secs()
-            );
-            println!("  ledger: {}", cfg.ledger.path.display());
-            loop {
-                let snapshot = runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
-                println!(
-                    "scan: status={} active={} warn={} stop={}",
-                    snapshot.overview.status,
-                    snapshot.overview.active_sessions,
-                    snapshot.overview.warning_sessions,
-                    snapshot.overview.stop_sessions
-                );
-                if once {
-                    break;
-                }
-                std::thread::sleep(interval);
-            }
+        Some(Command::Watch { config, home, once }) => watch_command(config, home, once)?,
+        None => watch_command(None, None, false)?,
+    }
+    Ok(())
+}
+
+fn print_advanced_help() {
+    println!("curb advanced commands:");
+    println!("  init              create a user config");
+    println!("  install           install this binary to ~/.local/bin/curb");
+    println!("  config            show or update config");
+    println!("  config set        update first-class policy fields");
+    println!("  dashboard         show live agents plus recent usage");
+    println!("  app               serve and open the local dashboard");
+    println!("  serve|daemon|api  serve token-gated local API");
+    println!("  usage             summarize local Codex and Claude usage logs");
+    println!("  tail              stream new usage events");
+    println!("  run|start|watch   run the usage policy loop");
+    println!("  scan              print current process matches once");
+    println!("  validate-config   validate config");
+    println!("  status            print config and session status");
+    println!("  runs|sessions     summarize usage sessions");
+    println!("  ack               acknowledge a usage session");
+    println!("  doctor            check local capabilities");
+}
+
+fn watch_command(config: Option<PathBuf>, home: Option<PathBuf>, once: bool) -> Result<()> {
+    let config = config.unwrap_or_else(default_config_path);
+    let cfg = load_or_default_config(&config)?;
+    let home = home
+        .or_else(default_home_dir)
+        .context("home directory is required for usage log discovery")?;
+    let interval = cfg.usage.scan_interval.as_std();
+    let runtime = curb::runtime::Runtime::new(cfg.clone(), home, curb::platform::SystemPlatform)
+        .with_config_path(config.clone());
+    println!("curb watcher");
+    println!("  mode: {}", cfg.mode);
+    println!(
+        "  usage: warn {} tokens/turn, stop {} tokens/turn, window {}s",
+        cfg.usage.warn_turn_tokens,
+        cfg.usage.kill_turn_tokens,
+        cfg.usage.window.as_std().as_secs()
+    );
+    println!("  ledger: {}", cfg.ledger.path.display());
+    loop {
+        let snapshot = runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
+        println!(
+            "scan: status={} active={} warn={} stop={}",
+            snapshot.overview.status,
+            snapshot.overview.active_sessions,
+            snapshot.overview.warning_sessions,
+            snapshot.overview.stop_sessions
+        );
+        if once {
+            break;
         }
-        None => {
-            Cli::command().print_help()?;
-            println!();
-        }
+        std::thread::sleep(interval);
     }
     Ok(())
 }

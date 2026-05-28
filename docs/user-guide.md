@@ -84,9 +84,18 @@ Use presets for the common flows:
 - `curb config aggressive` - enforcement, warn after 30 seconds and kill
   after 60 seconds. This is for deliberate local testing.
 
-Use the local app policy panel for custom thresholds. For automation or managed
-devices, edit the YAML config directly and run `curb validate-config` before
-starting the watcher.
+For custom thresholds:
+
+```sh
+curb config set --mode enforcement --warn-after 2m --kill-after 4m --grace 30s --scan 5s
+curb config set --warn-turn-tokens 1000000 --kill-turn-tokens 3000000 --usage-window 15m
+curb config set --ledger-forward-url https://example.invalid/curb/events
+curb config set --ledger-forward-url off
+```
+
+The local app policy panel edits the same first-class policy fields. For
+managed devices, edit the YAML config directly and run `curb validate-config`
+before starting the watcher.
 
 `curb config` shows the active config path, action, scan interval, policy,
 configured agents, and whether the ledger is local-only or forwarding events.

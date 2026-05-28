@@ -318,6 +318,10 @@ impl Config {
         self.apply_policy_to_agents();
     }
 
+    pub fn refresh_agent_policies(&mut self) {
+        self.apply_policy_to_agents();
+    }
+
     fn apply_policy_to_agents(&mut self) {
         for agent in &mut self.agents {
             let mut policy = self.defaults.clone();
@@ -811,6 +815,10 @@ impl HumanDuration {
 
     pub fn as_std(self) -> StdDuration {
         self.0
+    }
+
+    pub fn from_std(duration: StdDuration) -> Self {
+        Self(duration)
     }
 
     fn default_to(&mut self, value: Self) {

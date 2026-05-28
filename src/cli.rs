@@ -7,7 +7,7 @@ use std::time::Duration as StdDuration;
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
-use crate::config::{Config, Mode, Preset};
+use crate::config::{Config, HumanDuration, Mode, Preset};
 use crate::ledger::{Event, Ledger};
 use crate::platform::SystemPlatform;
 use crate::platform::{NotificationCapability, PlatformError};
@@ -72,6 +72,55 @@ pub fn config_command(action: Option<String>) -> Result<()> {
     }
 }
 
+pub fn config_set_command(args: Vec<String>) -> Result<()> {
+    let mut path = default_config_path();
+    let mut updates = ConfigUpdates::default();
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--config" => path = PathBuf::from(next_value(&mut iter, "--config")?),
+            "--mode" => updates.mode = Some(next_value(&mut iter, "--mode")?),
+            "--warn-after" => updates.warn_after = Some(next_duration(&mut iter, "--warn-after")?),
+            "--kill-after" => updates.kill_after = Some(next_duration(&mut iter, "--kill-after")?),
+            "--grace" => updates.grace = Some(next_duration(&mut iter, "--grace")?),
+            "--scan" => updates.scan = Some(next_duration(&mut iter, "--scan")?),
+            "--usage" => updates.usage = Some(next_bool(&mut iter, "--usage")?),
+            "--warn-turn-tokens" => {
+                updates.warn_turn_tokens = Some(next_i64(&mut iter, "--warn-turn-tokens")?)
+            }
+            "--kill-turn-tokens" => {
+                updates.kill_turn_tokens = Some(next_i64(&mut iter, "--kill-turn-tokens")?)
+            }
+            "--usage-window" => {
+                updates.usage_window = Some(next_duration(&mut iter, "--usage-window")?)
+            }
+            "--usage-scan" => updates.usage_scan = Some(next_duration(&mut iter, "--usage-scan")?),
+            "--ledger-forward-url" => {
+                let value = next_value(&mut iter, "--ledger-forward-url")?;
+                updates.ledger_forward_url = Some(if matches!(value.as_str(), "off" | "none") {
+                    String::new()
+                } else {
+                    value
+                });
+            }
+            "-h" | "--help" => {
+                print_config_set_usage();
+                return Ok(());
+            }
+            other => bail!("unknown config set option {other:?}"),
+        }
+    }
+    if updates.is_empty() {
+        print_config_set_usage();
+        return Ok(());
+    }
+    let mut cfg = load_or_default_config(&path)?;
+    apply_config_updates(&mut cfg, updates)?;
+    cfg.save(&path)?;
+    print_config_summary(&path, &cfg);
+    Ok(())
+}
+
 pub fn dashboard_command(
     config_path: PathBuf,
     home: PathBuf,
@@ -88,6 +137,46 @@ pub fn dashboard_command(
         return Ok(());
     }
     crate::dashboard::render(std::io::stdout(), &config_path, &cfg, &snapshot, limit)?;
+    Ok(())
+}
+
+pub fn scan_command(config_path: PathBuf, home: PathBuf, json: bool) -> Result<()> {
+    let cfg = Config::load(&config_path)?;
+    let runtime = Runtime::new(cfg, home, SystemPlatform).with_config_path(config_path.as_path());
+    let snapshot = runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
+    if json {
+        serde_json::to_writer_pretty(std::io::stdout(), &snapshot.agents)?;
+        println!();
+        return Ok(());
+    }
+    println!("curb scan");
+    if snapshot.agents.is_empty() {
+        println!("  no configured agent workers matched");
+        return Ok(());
+    }
+    println!(
+        "  {:<22} {:<7} {:<11} {:<10} {:<7} EVIDENCE",
+        "AGENT", "PID", "TARGET", "STATE", "SCORE"
+    );
+    for agent in &snapshot.agents {
+        let target = if agent.state == "watch-only" {
+            "watch-only"
+        } else {
+            "enforceable"
+        };
+        let evidence = if agent.matched_by.is_empty() {
+            "-".to_string()
+        } else {
+            agent.matched_by.join(", ")
+        };
+        println!(
+            "  {:<22} {:<7} {:<11} {:<10} {:<7} {}",
+            agent.id, agent.pid, target, agent.process_state, agent.confidence, evidence
+        );
+        if let Some(cwd) = &agent.cwd {
+            println!("    cwd: {}", compact_home(cwd));
+        }
+    }
     Ok(())
 }
 
@@ -291,6 +380,112 @@ pub fn load_or_default_config(path: &Path) -> Result<Config> {
     let cfg = Config::local_default(Mode::Visibility, state_dir_for_config(path));
     cfg.save(path)?;
     Ok(cfg)
+}
+
+#[derive(Default)]
+struct ConfigUpdates {
+    mode: Option<String>,
+    warn_after: Option<StdDuration>,
+    kill_after: Option<StdDuration>,
+    grace: Option<StdDuration>,
+    scan: Option<StdDuration>,
+    usage: Option<bool>,
+    warn_turn_tokens: Option<i64>,
+    kill_turn_tokens: Option<i64>,
+    usage_window: Option<StdDuration>,
+    usage_scan: Option<StdDuration>,
+    ledger_forward_url: Option<String>,
+}
+
+impl ConfigUpdates {
+    fn is_empty(&self) -> bool {
+        self.mode.is_none()
+            && self.warn_after.is_none()
+            && self.kill_after.is_none()
+            && self.grace.is_none()
+            && self.scan.is_none()
+            && self.usage.is_none()
+            && self.warn_turn_tokens.is_none()
+            && self.kill_turn_tokens.is_none()
+            && self.usage_window.is_none()
+            && self.usage_scan.is_none()
+            && self.ledger_forward_url.is_none()
+    }
+}
+
+fn apply_config_updates(cfg: &mut Config, updates: ConfigUpdates) -> Result<()> {
+    if let Some(mode) = updates.mode {
+        cfg.mode = Mode::from_str(&mode).map_err(anyhow::Error::msg)?;
+    }
+    if let Some(duration) = updates.warn_after {
+        cfg.defaults.warn_after = HumanDuration::from_std(duration);
+    }
+    if let Some(duration) = updates.kill_after {
+        cfg.defaults.kill_after = HumanDuration::from_std(duration);
+    }
+    if let Some(duration) = updates.grace {
+        cfg.defaults.kill_grace_period = HumanDuration::from_std(duration);
+        cfg.usage.grace_period = HumanDuration::from_std(duration);
+    }
+    if let Some(duration) = updates.scan {
+        cfg.service.scan_interval = HumanDuration::from_std(duration);
+    }
+    if let Some(enabled) = updates.usage {
+        cfg.usage.enabled = Some(enabled);
+    }
+    if let Some(tokens) = updates.warn_turn_tokens {
+        cfg.usage.warn_turn_tokens = tokens;
+    }
+    if let Some(tokens) = updates.kill_turn_tokens {
+        cfg.usage.kill_turn_tokens = tokens;
+    }
+    if let Some(duration) = updates.usage_window {
+        cfg.usage.window = HumanDuration::from_std(duration);
+    }
+    if let Some(duration) = updates.usage_scan {
+        cfg.usage.scan_interval = HumanDuration::from_std(duration);
+    }
+    if let Some(url) = updates.ledger_forward_url {
+        cfg.ledger.forward_url = url;
+    }
+    cfg.refresh_agent_policies();
+    Ok(())
+}
+
+fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {
+    iter.next()
+        .with_context(|| format!("{flag} requires a value"))
+}
+
+fn next_duration(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<StdDuration> {
+    let value = next_value(iter, flag)?;
+    crate::config::parse_duration_for_cli(&value).map_err(anyhow::Error::msg)
+}
+
+fn next_bool(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<bool> {
+    let value = next_value(iter, flag)?;
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Ok(true),
+        "false" | "no" | "off" | "0" => Ok(false),
+        _ => bail!("{flag} must be true or false"),
+    }
+}
+
+fn next_i64(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<i64> {
+    let value = next_value(iter, flag)?;
+    value
+        .parse::<i64>()
+        .with_context(|| format!("{flag} must be an integer"))
+}
+
+fn print_config_set_usage() {
+    println!("curb config set");
+    println!("  --mode visibility|alert|enforcement");
+    println!("  --warn-after 90m --kill-after 120m --grace 60s --scan 15s");
+    println!("  --usage true --warn-turn-tokens 1000000 --kill-turn-tokens 3000000");
+    println!("  --usage-window 15m --usage-scan 5s");
+    println!("  --ledger-forward-url https://example.invalid/curb/events");
+    println!("  --ledger-forward-url off");
 }
 
 fn set_private_dir(path: &Path) -> Result<()> {
