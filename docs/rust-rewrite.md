@@ -25,8 +25,9 @@ The rewrite keeps deep modules and narrow interfaces:
 - `src/usage.rs`: provider metadata readers, durable parse cache, append-only
   tail reads, replacement detection, per-provider scan errors, and session
   summaries.
-- `src/service.rs`: usage-derived snapshot/read-model vocabulary. Process
-  correlation, acknowledgement, grace, and actions are still to port.
+- `src/service.rs`: usage-derived snapshot/read-model vocabulary, live worker
+  matching, session/process correlation, watch-only classification, and
+  actionability safety. Acknowledgement, grace, and actions are still to port.
 - future `src/api.rs`: loopback HTTP adapter only.
 - future `src/web.rs`: embedded UI assets only.
 

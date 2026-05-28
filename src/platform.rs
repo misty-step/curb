@@ -64,6 +64,10 @@ impl Snapshot {
         self.processes.get(&pid)
     }
 
+    pub fn processes(&self) -> impl Iterator<Item = &Process> {
+        self.processes.values()
+    }
+
     pub fn termination_target(&self, expected: &Process) -> Option<TerminationTarget> {
         let current = self.processes.get(&expected.pid)?;
         if !same_process_identity(expected, current) {
