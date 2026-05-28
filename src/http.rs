@@ -172,7 +172,8 @@ mod tests {
     use crate::api::{ApiError, Backend, Server};
     use crate::runtime::TurnQuery;
     use crate::service::{
-        AckRequest, AckView, Overview, SessionView, Snapshot, StopRequest, StopView, TurnView,
+        AckRequest, AckView, NotificationView, Overview, SessionView, Snapshot, StopRequest,
+        StopView, TurnView,
     };
 
     #[test]
@@ -305,6 +306,25 @@ mod tests {
             _now: DateTime<Utc>,
         ) -> Result<StopView, ApiError> {
             Err(ApiError::StopConflict("not actionable".to_string()))
+        }
+
+        fn notification_health(&self) -> Result<NotificationView, ApiError> {
+            Ok(notification_view("ready"))
+        }
+
+        fn test_notification(&self, _now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
+            Ok(notification_view("delivered"))
+        }
+    }
+
+    fn notification_view(status: &str) -> NotificationView {
+        NotificationView {
+            enabled: true,
+            available: true,
+            status: status.to_string(),
+            message: status.to_string(),
+            last_test_at: None,
+            last_error: None,
         }
     }
 

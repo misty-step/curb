@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::process::Command;
 
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -166,8 +167,16 @@ pub enum PlatformError {
     Terminate(String),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationCapability {
+    pub supported: bool,
+    pub status: String,
+    pub message: String,
+}
+
 pub trait Platform {
     fn capture(&self) -> Result<Snapshot, PlatformError>;
+    fn notification_capability(&self) -> NotificationCapability;
     fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError>;
     fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError>;
 }
@@ -195,8 +204,12 @@ impl Platform for SystemPlatform {
         Ok(Snapshot::new(processes))
     }
 
-    fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
-        Ok(())
+    fn notification_capability(&self) -> NotificationCapability {
+        notification_capability_for(std::env::consts::OS, command_exists)
+    }
+
+    fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {
+        run_notification(notification_command(std::env::consts::OS, title, body)?)
     }
 
     fn terminate(&self, _target: &TerminationTarget) -> Result<(), PlatformError> {
@@ -204,6 +217,116 @@ impl Platform for SystemPlatform {
             "rust live platform has not ported termination yet".to_string(),
         ))
     }
+}
+
+fn notification_capability_for(os: &str, exists: impl Fn(&str) -> bool) -> NotificationCapability {
+    match os {
+        "macos" => {
+            if exists("osascript") {
+                NotificationCapability {
+                    supported: true,
+                    status: "available".to_string(),
+                    message: "macOS user notifications available through osascript".to_string(),
+                }
+            } else {
+                NotificationCapability {
+                    supported: false,
+                    status: "unavailable".to_string(),
+                    message: "osascript not found".to_string(),
+                }
+            }
+        }
+        "linux" => {
+            if exists("notify-send") {
+                NotificationCapability {
+                    supported: true,
+                    status: "available".to_string(),
+                    message: "Desktop notification command found".to_string(),
+                }
+            } else {
+                NotificationCapability {
+                    supported: false,
+                    status: "unavailable".to_string(),
+                    message: "notify-send not found".to_string(),
+                }
+            }
+        }
+        "windows" => NotificationCapability {
+            supported: false,
+            status: "unsupported".to_string(),
+            message: "Windows toast notifications are not implemented".to_string(),
+        },
+        other => NotificationCapability {
+            supported: false,
+            status: "unsupported".to_string(),
+            message: format!("notifications unsupported on {other}"),
+        },
+    }
+}
+
+fn notification_command(os: &str, title: &str, body: &str) -> Result<CommandSpec, PlatformError> {
+    match os {
+        "macos" => Ok(CommandSpec {
+            program: "osascript".to_string(),
+            args: vec![
+                "-e".to_string(),
+                format!(
+                    "display notification {} with title {}",
+                    apple_script_string(body),
+                    apple_script_string(title)
+                ),
+            ],
+        }),
+        "linux" => Ok(CommandSpec {
+            program: "notify-send".to_string(),
+            args: vec![title.to_string(), body.to_string()],
+        }),
+        "windows" => Err(PlatformError::Notify(
+            "Windows toast notifications are not implemented".to_string(),
+        )),
+        other => Err(PlatformError::Notify(format!(
+            "notifications unsupported on {other}"
+        ))),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CommandSpec {
+    program: String,
+    args: Vec<String>,
+}
+
+fn run_notification(spec: CommandSpec) -> Result<(), PlatformError> {
+    let status = Command::new(&spec.program)
+        .args(&spec.args)
+        .status()
+        .map_err(|source| PlatformError::Notify(source.to_string()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(PlatformError::Notify(format!(
+            "{} exited with {status}",
+            spec.program
+        )))
+    }
+}
+
+fn command_exists(program: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
+}
+
+fn apple_script_string(value: &str) -> String {
+    let escaped = value
+        .chars()
+        .flat_map(|ch| match ch {
+            '"' | '\\' => vec!['\\', ch],
+            _ => vec![ch],
+        })
+        .collect::<String>();
+    format!("\"{escaped}\"")
 }
 
 fn observed_process(process: &sysinfo::Process, users: &Users) -> Option<Process> {
@@ -275,8 +398,18 @@ impl Platform for EmptyPlatform {
         Ok(Snapshot::default())
     }
 
+    fn notification_capability(&self) -> NotificationCapability {
+        NotificationCapability {
+            supported: false,
+            status: "unsupported".to_string(),
+            message: "empty platform cannot deliver notifications".to_string(),
+        }
+    }
+
     fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
-        Ok(())
+        Err(PlatformError::Notify(
+            "empty platform cannot deliver notifications".to_string(),
+        ))
     }
 
     fn terminate(&self, _target: &TerminationTarget) -> Result<(), PlatformError> {
@@ -412,6 +545,40 @@ mod tests {
         child.wait().ok();
     }
 
+    #[test]
+    fn notification_capability_reports_platform_support() {
+        assert_eq!(
+            notification_capability_for("macos", always_exists).status,
+            "available"
+        );
+        assert_eq!(
+            notification_capability_for("linux", never_exists).status,
+            "unavailable"
+        );
+        assert_eq!(
+            notification_capability_for("windows", always_exists).status,
+            "unsupported"
+        );
+    }
+
+    #[test]
+    fn notification_command_uses_argument_boundaries_and_escapes_applescript() {
+        let linux = notification_command("linux", "Curb title", "body; rm -rf /").unwrap();
+        assert_eq!(linux.program, "notify-send");
+        assert_eq!(linux.args, vec!["Curb title", "body; rm -rf /"]);
+
+        let macos = notification_command("macos", "Curb \"title\"", "body \\ text").unwrap();
+        assert_eq!(macos.program, "osascript");
+        assert_eq!(
+            macos.args,
+            vec![
+                "-e".to_string(),
+                "display notification \"body \\\\ text\" with title \"Curb \\\"title\\\"\""
+                    .to_string()
+            ]
+        );
+    }
+
     fn process(pid: i32, ppid: Option<Pid>) -> Process {
         Process {
             pid: Pid::new(pid),
@@ -425,6 +592,14 @@ mod tests {
             bundle_id: None,
             team_id: None,
         }
+    }
+
+    fn always_exists(_: &str) -> bool {
+        true
+    }
+
+    fn never_exists(_: &str) -> bool {
+        false
     }
 
     #[cfg(unix)]

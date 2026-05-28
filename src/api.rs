@@ -13,7 +13,8 @@ use crate::config::parse_duration_for_cli;
 use crate::platform::Platform;
 use crate::runtime::{Runtime, RuntimeError, TurnQuery};
 use crate::service::{
-    AckRequest, AckView, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
+    AckRequest, AckView, NotificationView, ServiceError, SessionView, Snapshot, StopRequest,
+    StopView, TurnView,
 };
 
 pub const TOKEN_COOKIE: &str = "curb_token";
@@ -67,6 +68,8 @@ pub trait Backend {
         request: StopRequest,
         now: DateTime<Utc>,
     ) -> Result<StopView, ApiError>;
+    fn notification_health(&self) -> Result<NotificationView, ApiError>;
+    fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, ApiError>;
 }
 
 impl<P: Platform> Backend for Runtime<P> {
@@ -108,6 +111,14 @@ impl<P: Platform> Backend for Runtime<P> {
         now: DateTime<Utc>,
     ) -> Result<StopView, ApiError> {
         self.stop_session(key, request, now).map_err(ApiError::from)
+    }
+
+    fn notification_health(&self) -> Result<NotificationView, ApiError> {
+        self.notification_health().map_err(ApiError::from)
+    }
+
+    fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
+        self.test_notification(now).map_err(ApiError::from)
     }
 }
 
@@ -185,10 +196,20 @@ impl<B: Backend> Server<B> {
             (_, "/v1/service/rescan") => error_response(405, "method not allowed"),
             _ if request.path.starts_with("/v1/sessions/") => self.handle_session(request, now),
             ("GET", "/v1/events") | ("GET", "/v1/alerts") => json_response(200, json!([])),
+            ("GET", "/v1/notifications/health") => self
+                .backend
+                .notification_health()
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/notifications/health") => error_response(405, "method not allowed"),
+            ("POST", "/v1/notifications/test") => self
+                .backend
+                .test_notification(now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/notifications/test") => error_response(405, "method not allowed"),
             ("GET", "/v1/config")
             | ("PUT", "/v1/config")
-            | ("GET", "/v1/notifications/health")
-            | ("POST", "/v1/notifications/test")
             | ("GET", "/v1/onboarding")
             | ("POST", "/v1/onboarding/complete") => {
                 error_response(501, "endpoint not implemented by rust api")
@@ -391,6 +412,10 @@ pub enum ApiError {
     InvalidStop(String),
     #[error("session cannot be stopped safely: {0}")]
     StopConflict(String),
+    #[error("local notifications are disabled")]
+    NotificationsDisabled(NotificationView),
+    #[error("local notifications are unavailable")]
+    NotificationsUnavailable(NotificationView),
     #[error("{0}")]
     Internal(String),
 }
@@ -404,6 +429,8 @@ impl From<RuntimeError> for ApiError {
             RuntimeError::Service(ServiceError::StopConflict(message)) => {
                 Self::StopConflict(message)
             }
+            RuntimeError::NotificationsDisabled(view) => Self::NotificationsDisabled(view),
+            RuntimeError::NotificationsUnavailable(view) => Self::NotificationsUnavailable(view),
             other => Self::Internal(other.to_string()),
         }
     }
@@ -444,6 +471,12 @@ fn api_error_response(error: ApiError) -> Response {
         ApiError::InvalidAck(message) => error_response(400, &message),
         ApiError::InvalidStop(message) => error_response(400, &message),
         ApiError::StopConflict(message) => error_response(409, &message),
+        ApiError::NotificationsDisabled(view) => {
+            json_response(409, serde_json::to_value(view).unwrap())
+        }
+        ApiError::NotificationsUnavailable(view) => {
+            json_response(503, serde_json::to_value(view).unwrap())
+        }
         ApiError::Config(message) => error_response(500, &message),
         ApiError::Internal(message) => error_response(500, &message),
     }
@@ -830,6 +863,68 @@ mod tests {
     }
 
     #[test]
+    fn serves_notification_health_and_test_with_conflict_shapes() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let health = server.handle(authed("GET", "/v1/notifications/health"), now);
+        assert_eq!(health.status, 200);
+        assert!(health.text().contains("\"status\":\"ready\""));
+
+        let tested = server.handle(authed("POST", "/v1/notifications/test"), now);
+        assert_eq!(tested.status, 200);
+        assert!(tested.text().contains("\"status\":\"delivered\""));
+        assert!(
+            tested
+                .text()
+                .contains("\"last_test_at\":\"2026-05-28T16:00:00Z\"")
+        );
+
+        assert_eq!(
+            server
+                .handle(authed("POST", "/v1/notifications/health"), now)
+                .status,
+            405
+        );
+        assert_eq!(
+            server
+                .handle(authed("GET", "/v1/notifications/test"), now)
+                .status,
+            405
+        );
+
+        server
+            .backend
+            .next_error
+            .replace(Some(ApiError::NotificationsDisabled(notification_view(
+                false, false, "disabled",
+            ))));
+        let disabled = server.handle(authed("POST", "/v1/notifications/test"), now);
+        assert_eq!(disabled.status, 409);
+        assert!(disabled.text().contains("\"enabled\":false"));
+
+        server
+            .backend
+            .next_error
+            .replace(Some(ApiError::NotificationsUnavailable(notification_view(
+                true,
+                false,
+                "unavailable",
+            ))));
+        let unavailable = server.handle(authed("POST", "/v1/notifications/test"), now);
+        assert_eq!(unavailable.status, 503);
+        assert!(unavailable.text().contains("\"available\":false"));
+
+        let cross_origin_cookie = server.handle(
+            Request::new("POST", "/v1/notifications/test")
+                .cookie("curb_token=test-token")
+                .origin("http://evil.example"),
+            now,
+        );
+        assert_eq!(cross_origin_cookie.status, 403);
+    }
+
+    #[test]
     fn invalid_encoded_session_key_returns_bad_request_shape() {
         let server = Server::new("test-token", FakeBackend::default()).unwrap();
         let now = fixed_now();
@@ -1017,6 +1112,29 @@ mod tests {
                 scope_pids: vec![4242],
                 result: "terminated".to_string(),
             })
+        }
+
+        fn notification_health(&self) -> Result<NotificationView, ApiError> {
+            self.maybe_error()?;
+            Ok(notification_view(true, true, "ready"))
+        }
+
+        fn test_notification(&self, _now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
+            self.maybe_error()?;
+            let mut view = notification_view(true, true, "delivered");
+            view.last_test_at = Some(fixed_now());
+            Ok(view)
+        }
+    }
+
+    fn notification_view(enabled: bool, available: bool, status: &str) -> NotificationView {
+        NotificationView {
+            enabled,
+            available,
+            status: status.to_string(),
+            message: status.to_string(),
+            last_test_at: None,
+            last_error: None,
         }
     }
 

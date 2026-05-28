@@ -7,8 +7,8 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
-    self, AckRequest, AckView, Service, ServiceError, SessionView, Snapshot, StopRequest, StopView,
-    TurnView,
+    self, AckRequest, AckView, NotificationView, Service, ServiceError, SessionView, Snapshot,
+    StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
 
@@ -20,6 +20,10 @@ pub enum RuntimeError {
     Usage(#[from] UsageError),
     #[error(transparent)]
     Service(#[from] ServiceError),
+    #[error("local notifications are disabled")]
+    NotificationsDisabled(NotificationView),
+    #[error("local notifications are unavailable")]
+    NotificationsUnavailable(NotificationView),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -33,6 +37,7 @@ pub struct Runtime<P: Platform> {
     reader: Reader,
     platform: P,
     cache: Mutex<Option<Snapshot>>,
+    notification: Mutex<Option<NotificationView>>,
 }
 
 impl<P: Platform> Runtime<P> {
@@ -43,6 +48,7 @@ impl<P: Platform> Runtime<P> {
             reader: Reader::with_state(home, state_dir),
             platform,
             cache: Mutex::new(None),
+            notification: Mutex::new(None),
         }
     }
 
@@ -52,6 +58,7 @@ impl<P: Platform> Runtime<P> {
             reader,
             platform,
             cache: Mutex::new(None),
+            notification: Mutex::new(None),
         }
     }
 
@@ -131,6 +138,58 @@ impl<P: Platform> Runtime<P> {
         Ok(stop)
     }
 
+    pub fn notification_health(&self) -> Result<NotificationView, RuntimeError> {
+        Ok(service::notification_view(
+            self.cfg.alerts.local_notifications,
+            self.platform.notification_capability(),
+            self.notification
+                .lock()
+                .expect("notification mutex poisoned")
+                .clone(),
+        ))
+    }
+
+    pub fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, RuntimeError> {
+        let mut view = service::notification_view(
+            self.cfg.alerts.local_notifications,
+            self.platform.notification_capability(),
+            self.notification
+                .lock()
+                .expect("notification mutex poisoned")
+                .clone(),
+        );
+        if !view.enabled {
+            self.record_notification(view.clone());
+            return Err(RuntimeError::NotificationsDisabled(view));
+        }
+        if !view.available {
+            self.record_notification(view.clone());
+            return Err(RuntimeError::NotificationsUnavailable(view));
+        }
+        match self.platform.notify(
+            "Curb notification test",
+            "Curb can deliver local agent alerts.",
+        ) {
+            Ok(()) => {
+                view.status = "delivered".to_string();
+                view.message = "test notification delivered".to_string();
+                view.last_test_at = Some(now);
+                self.record_notification(view.clone());
+                Ok(view)
+            }
+            Err(error) => {
+                let message = error.to_string();
+                view.status = "error".to_string();
+                view.message = message.clone();
+                view.available = false;
+                view.last_error = Some(message);
+                view.last_test_at = Some(now);
+                self.record_notification(view.clone());
+                Err(RuntimeError::NotificationsUnavailable(view))
+            }
+        }
+    }
+
     fn build_snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
         let scan = self.reader.scan_since(Some(self.lookback_start(now)))?;
         let mut sources = scan.sources;
@@ -159,6 +218,13 @@ impl<P: Platform> Runtime<P> {
 
     fn lookback_start(&self, now: DateTime<Utc>) -> DateTime<Utc> {
         now - chrono::Duration::from_std(self.cfg.usage.lookback.as_std()).unwrap()
+    }
+
+    fn record_notification(&self, view: NotificationView) {
+        *self
+            .notification
+            .lock()
+            .expect("notification mutex poisoned") = Some(view);
     }
 }
 
@@ -342,6 +408,98 @@ mod tests {
     }
 
     #[test]
+    fn notification_health_and_test_record_delivery_state() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        let runtime = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::default())),
+        );
+
+        let health = runtime.notification_health().unwrap();
+        assert!(health.enabled);
+        assert!(health.available);
+        assert_eq!(health.status, "ready");
+
+        let tested = runtime.test_notification(now).unwrap();
+        assert_eq!(tested.status, "delivered");
+        assert_eq!(tested.last_test_at, Some(now));
+        assert_eq!(
+            runtime.platform.notifications.lock().unwrap().as_slice(),
+            &[(
+                "Curb notification test".to_string(),
+                "Curb can deliver local agent alerts.".to_string()
+            )]
+        );
+
+        let health = runtime.notification_health().unwrap();
+        assert_eq!(health.status, "delivered");
+        assert_eq!(health.last_test_at, Some(now));
+    }
+
+    #[test]
+    fn notification_health_keeps_last_test_but_respects_current_capability() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        let mut runtime = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::default())),
+        );
+        runtime.test_notification(now).unwrap();
+
+        runtime.platform.capability = platform::NotificationCapability {
+            supported: false,
+            status: "unavailable".to_string(),
+            message: "notify-send not found".to_string(),
+        };
+
+        let health = runtime.notification_health().unwrap();
+        assert!(!health.available);
+        assert_eq!(health.status, "unavailable");
+        assert_eq!(health.last_test_at, Some(now));
+    }
+
+    #[test]
+    fn notification_test_reports_disabled_unavailable_and_delivery_errors() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        let mut disabled_cfg = test_config(home.path(), Mode::Alert);
+        disabled_cfg.alerts.local_notifications = false;
+        let disabled = Runtime::new(
+            disabled_cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::default())),
+        );
+        let err = disabled.test_notification(now).unwrap_err();
+        assert!(matches!(err, RuntimeError::NotificationsDisabled(_)));
+
+        let unavailable = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::default())).with_notifications_disabled(),
+        );
+        let err = unavailable.test_notification(now).unwrap_err();
+        assert!(matches!(err, RuntimeError::NotificationsUnavailable(_)));
+
+        let failing = Runtime::new(
+            test_config(home.path(), Mode::Alert),
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::default())).with_notify_error("denied"),
+        );
+        let err = failing.test_notification(now).unwrap_err();
+        let RuntimeError::NotificationsUnavailable(view) = err else {
+            panic!("unexpected error");
+        };
+        assert_eq!(view.status, "error");
+        assert_eq!(
+            view.last_error.as_deref(),
+            Some("notification failed: denied")
+        );
+    }
+
+    #[test]
     fn acknowledge_rolls_back_ack_file_when_ledger_append_fails() {
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
         let home = temp_home();
@@ -510,6 +668,9 @@ mod tests {
 
     struct FakePlatform {
         capture: Result<platform::Snapshot, PlatformError>,
+        capability: platform::NotificationCapability,
+        notifications: Mutex<Vec<(String, String)>>,
+        notify_error: Option<String>,
         terminated: Mutex<Vec<Vec<i32>>>,
     }
 
@@ -517,8 +678,29 @@ mod tests {
         fn new(capture: Result<platform::Snapshot, PlatformError>) -> Self {
             Self {
                 capture,
+                capability: platform::NotificationCapability {
+                    supported: true,
+                    status: "available".to_string(),
+                    message: "available".to_string(),
+                },
+                notifications: Mutex::new(Vec::new()),
+                notify_error: None,
                 terminated: Mutex::new(Vec::new()),
             }
+        }
+
+        fn with_notifications_disabled(mut self) -> Self {
+            self.capability = platform::NotificationCapability {
+                supported: false,
+                status: "unavailable".to_string(),
+                message: "notify-send not found".to_string(),
+            };
+            self
+        }
+
+        fn with_notify_error(mut self, message: &str) -> Self {
+            self.notify_error = Some(message.to_string());
+            self
         }
     }
 
@@ -527,7 +709,18 @@ mod tests {
             self.capture.clone()
         }
 
-        fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
+        fn notification_capability(&self) -> platform::NotificationCapability {
+            self.capability.clone()
+        }
+
+        fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {
+            if let Some(error) = &self.notify_error {
+                return Err(PlatformError::Notify(error.clone()));
+            }
+            self.notifications
+                .lock()
+                .unwrap()
+                .push((title.to_string(), body.to_string()));
             Ok(())
         }
 

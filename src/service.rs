@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::config::{Agent, Config, Mode};
 use crate::ledger::{self, Ledger};
-use crate::platform::{self, Platform};
+use crate::platform::{self, NotificationCapability, Platform};
 use crate::usage::{Event, SourceReport};
 
 #[derive(Debug, Error)]
@@ -207,6 +207,59 @@ pub struct StopView {
     pub scope: String,
     pub scope_pids: Vec<i32>,
     pub result: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationView {
+    pub enabled: bool,
+    pub available: bool,
+    pub status: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_test_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+pub fn notification_view(
+    enabled: bool,
+    capability: NotificationCapability,
+    last: Option<NotificationView>,
+) -> NotificationView {
+    let mut view = new_notification_view(enabled, capability);
+    if let Some(last) = last {
+        view.last_test_at = last.last_test_at;
+        view.last_error = last.last_error;
+        if view.enabled && view.available && matches!(last.status.as_str(), "delivered" | "error") {
+            view.status = last.status;
+            view.message = last.message;
+            view.available = last.available;
+        }
+    }
+    view
+}
+
+fn new_notification_view(enabled: bool, capability: NotificationCapability) -> NotificationView {
+    let mut status = capability.status;
+    if status == "available" {
+        status = "ready".to_string();
+    }
+    let mut view = NotificationView {
+        enabled,
+        available: enabled && capability.supported,
+        status,
+        message: capability.message,
+        last_test_at: None,
+        last_error: None,
+    };
+    if !enabled {
+        view.status = "disabled".to_string();
+        view.message = "local notifications are disabled in Curb policy".to_string();
+        view.available = false;
+    } else if !capability.supported {
+        view.status = "unavailable".to_string();
+    }
+    view
 }
 
 pub struct Service<'a, P: Platform> {
@@ -1877,6 +1930,14 @@ mod tests {
     impl Platform for FakePlatform {
         fn capture(&self) -> Result<platform::Snapshot, PlatformError> {
             self.capture.clone()
+        }
+
+        fn notification_capability(&self) -> platform::NotificationCapability {
+            platform::NotificationCapability {
+                supported: true,
+                status: "available".to_string(),
+                message: "available".to_string(),
+            }
         }
 
         fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
