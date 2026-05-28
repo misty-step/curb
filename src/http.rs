@@ -172,8 +172,8 @@ mod tests {
     use crate::api::{ApiError, Backend, Server};
     use crate::runtime::TurnQuery;
     use crate::service::{
-        AckRequest, AckView, NotificationView, Overview, SessionView, Snapshot, StopRequest,
-        StopView, TurnView,
+        AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, Overview, SessionView,
+        Snapshot, StopRequest, StopView, TurnView,
     };
 
     #[test]
@@ -308,6 +308,14 @@ mod tests {
             Err(ApiError::StopConflict("not actionable".to_string()))
         }
 
+        fn config(&self) -> Result<ConfigView, ApiError> {
+            Ok(config_view())
+        }
+
+        fn update_config(&self, _update: ConfigUpdate) -> Result<ConfigView, ApiError> {
+            Ok(config_view())
+        }
+
         fn notification_health(&self) -> Result<NotificationView, ApiError> {
             Ok(notification_view("ready"))
         }
@@ -325,6 +333,25 @@ mod tests {
             message: status.to_string(),
             last_test_at: None,
             last_error: None,
+        }
+    }
+
+    fn config_view() -> ConfigView {
+        ConfigView {
+            path: None,
+            mode: "visibility".to_string(),
+            usage_enabled: true,
+            warn_turn_tokens: 1,
+            kill_turn_tokens: 2,
+            usage_window_seconds: 60,
+            usage_scan_seconds: 5,
+            lookback_seconds: 3600,
+            process_warn_seconds: 60,
+            process_kill_seconds: 120,
+            ack_extension_seconds: 30,
+            local_notifications: true,
+            ledger_forward_url: None,
+            agents: Vec::new(),
         }
     }
 

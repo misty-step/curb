@@ -22,6 +22,16 @@ pub enum ConfigError {
         path: PathBuf,
         source: serde_yaml::Error,
     },
+    #[error("serialize config {path}: {source}")]
+    Serialize {
+        path: PathBuf,
+        source: serde_yaml::Error,
+    },
+    #[error("write config {path}: {source}")]
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("version must be 1, got {0}")]
     Version(i64),
     #[error("invalid mode {0:?}")]
@@ -97,6 +107,34 @@ impl Config {
         cfg.set_defaults();
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
+        let path = path.as_ref();
+        self.validate()?;
+        let raw = serde_yaml::to_string(self).map_err(|source| ConfigError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|source| ConfigError::Write {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+            set_dir_private(parent)?;
+        }
+        let tmp = path.with_extension(format!(
+            "{}.tmp",
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("yaml")
+        ));
+        write_private_file(&tmp, raw.as_bytes())?;
+        fs::rename(&tmp, path).map_err(|source| ConfigError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        set_file_private(path)
     }
 
     pub fn set_defaults(&mut self) {
@@ -191,6 +229,54 @@ impl Config {
     }
 }
 
+fn write_private_file(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|source| ConfigError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    use std::io::Write;
+    file.write_all(content)
+        .map_err(|source| ConfigError::Write {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+fn set_dir_private(path: &Path) -> Result<(), ConfigError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| {
+            ConfigError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn set_file_private(path: &Path) -> Result<(), ConfigError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            ConfigError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
+}
+
 fn validate_forward_url(raw: &str) -> Result<(), ConfigError> {
     let parsed = Url::parse(raw).map_err(ConfigError::ForwardUrl)?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
@@ -218,13 +304,22 @@ fn validate_regexes(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Mode {
     #[default]
     Unspecified,
     Visibility,
     Alert,
     Enforcement,
+}
+
+impl Serialize for Mode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 impl fmt::Display for Mode {
@@ -374,12 +469,25 @@ impl Agent {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum AgentKind {
     #[default]
     Unspecified,
     Process,
     App,
+}
+
+impl Serialize for AgentKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(match self {
+            AgentKind::Unspecified => "",
+            AgentKind::Process => "process",
+            AgentKind::App => "app",
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for AgentKind {
@@ -667,6 +775,51 @@ mod tests {
         assert_eq!(cfg.usage.kill_turn_tokens, 3_000_000);
         assert_eq!(cfg.agents.len(), 5);
         assert!(!cfg.ledger.include_prompt_content);
+    }
+
+    #[test]
+    fn save_round_trips_yaml_with_lowercase_enums() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("curb.yaml");
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 2_000;
+        cfg.usage.kill_turn_tokens = 4_000;
+
+        cfg.save(&path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let reloaded = Config::load(&path).unwrap();
+
+        assert!(raw.contains("mode: enforcement"));
+        assert!(raw.contains("kind: process"));
+        assert_eq!(reloaded.mode, Mode::Enforcement);
+        assert_eq!(reloaded.usage.warn_turn_tokens, 2_000);
+        assert_eq!(reloaded.usage.kill_turn_tokens, 4_000);
+        assert_eq!(reloaded.agents.len(), cfg.agents.len());
+        assert_eq!(reloaded.ledger.path, cfg.ledger.path);
+    }
+
+    #[test]
+    fn save_validates_before_replacing_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("curb.yaml");
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.save(&path).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        cfg.usage.warn_turn_tokens = cfg.usage.kill_turn_tokens + 1;
+
+        let err = cfg.save(&path).unwrap_err();
+
+        assert!(matches!(err, ConfigError::InvalidUsageThresholds));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
+                .count(),
+            0
+        );
     }
 
     #[test]

@@ -13,8 +13,8 @@ use crate::config::parse_duration_for_cli;
 use crate::platform::Platform;
 use crate::runtime::{Runtime, RuntimeError, TurnQuery};
 use crate::service::{
-    AckRequest, AckView, NotificationView, ServiceError, SessionView, Snapshot, StopRequest,
-    StopView, TurnView,
+    AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, ServiceError, SessionView,
+    Snapshot, StopRequest, StopView, TurnView,
 };
 
 pub const TOKEN_COOKIE: &str = "curb_token";
@@ -68,6 +68,8 @@ pub trait Backend {
         request: StopRequest,
         now: DateTime<Utc>,
     ) -> Result<StopView, ApiError>;
+    fn config(&self) -> Result<ConfigView, ApiError>;
+    fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError>;
     fn notification_health(&self) -> Result<NotificationView, ApiError>;
     fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, ApiError>;
 }
@@ -111,6 +113,14 @@ impl<P: Platform> Backend for Runtime<P> {
         now: DateTime<Utc>,
     ) -> Result<StopView, ApiError> {
         self.stop_session(key, request, now).map_err(ApiError::from)
+    }
+
+    fn config(&self) -> Result<ConfigView, ApiError> {
+        self.config_view().map_err(ApiError::from)
+    }
+
+    fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError> {
+        self.update_config(update).map_err(ApiError::from)
     }
 
     fn notification_health(&self) -> Result<NotificationView, ApiError> {
@@ -208,10 +218,16 @@ impl<B: Backend> Server<B> {
                 .map(json_ok)
                 .unwrap_or_else(api_error_response),
             (_, "/v1/notifications/test") => error_response(405, "method not allowed"),
-            ("GET", "/v1/config")
-            | ("PUT", "/v1/config")
-            | ("GET", "/v1/onboarding")
-            | ("POST", "/v1/onboarding/complete") => {
+            ("GET", "/v1/config") => self
+                .backend
+                .config()
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            ("PUT", "/v1/config") => decode_config_update(&request)
+                .and_then(|update| self.backend.update_config(update))
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            ("GET", "/v1/onboarding") | ("POST", "/v1/onboarding/complete") => {
                 error_response(501, "endpoint not implemented by rust api")
             }
             ("GET", _) => error_response(404, "not found"),
@@ -410,6 +426,8 @@ pub enum ApiError {
     InvalidAck(String),
     #[error("invalid stop request: {0}")]
     InvalidStop(String),
+    #[error("invalid config update: {0}")]
+    InvalidConfig(String),
     #[error("session cannot be stopped safely: {0}")]
     StopConflict(String),
     #[error("local notifications are disabled")]
@@ -426,6 +444,9 @@ impl From<RuntimeError> for ApiError {
             RuntimeError::Service(ServiceError::SessionNotFound) => Self::SessionNotFound,
             RuntimeError::Service(ServiceError::InvalidAck(message)) => Self::InvalidAck(message),
             RuntimeError::Service(ServiceError::InvalidStop(message)) => Self::InvalidStop(message),
+            RuntimeError::Service(ServiceError::InvalidConfig(message)) => {
+                Self::InvalidConfig(message)
+            }
             RuntimeError::Service(ServiceError::StopConflict(message)) => {
                 Self::StopConflict(message)
             }
@@ -442,6 +463,11 @@ fn decode_ack(request: &Request) -> Result<AckRequest, ApiError> {
 
 fn decode_stop(request: &Request) -> Result<StopRequest, ApiError> {
     serde_json::from_slice(&request.body).map_err(|error| ApiError::InvalidStop(error.to_string()))
+}
+
+fn decode_config_update(request: &Request) -> Result<ConfigUpdate, ApiError> {
+    serde_json::from_slice(&request.body)
+        .map_err(|error| ApiError::InvalidConfig(error.to_string()))
 }
 
 fn json_ok(value: impl Serialize) -> Response {
@@ -470,6 +496,7 @@ fn api_error_response(error: ApiError) -> Response {
         ApiError::SessionNotFound => error_response(404, "session not found"),
         ApiError::InvalidAck(message) => error_response(400, &message),
         ApiError::InvalidStop(message) => error_response(400, &message),
+        ApiError::InvalidConfig(message) => error_response(400, &message),
         ApiError::StopConflict(message) => error_response(409, &message),
         ApiError::NotificationsDisabled(view) => {
             json_response(409, serde_json::to_value(view).unwrap())
@@ -925,6 +952,33 @@ mod tests {
     }
 
     #[test]
+    fn serves_and_updates_config() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let view = server.handle(authed("GET", "/v1/config"), now);
+        assert_eq!(view.status, 200);
+        assert!(view.text().contains("\"mode\":\"alert\""));
+        assert!(view.text().contains("\"warn_turn_tokens\":1000"));
+
+        let updated = server.handle(
+            authed("PUT", "/v1/config").body(
+                r#"{"mode":"visibility","warn_turn_tokens":2000,"kill_turn_tokens":4000,"usage_window_seconds":120,"local_notifications":false}"#,
+            ),
+            now,
+        );
+        assert_eq!(updated.status, 200);
+        assert!(updated.text().contains("\"mode\":\"visibility\""));
+        assert!(updated.text().contains("\"warn_turn_tokens\":2000"));
+        assert!(updated.text().contains("\"local_notifications\":false"));
+
+        let bad = server.handle(authed("PUT", "/v1/config").body("{"), now);
+        assert_eq!(bad.status, 400);
+
+        assert_eq!(server.handle(authed("POST", "/v1/config"), now).status, 405);
+    }
+
+    #[test]
     fn invalid_encoded_session_key_returns_bad_request_shape() {
         let server = Server::new("test-token", FakeBackend::default()).unwrap();
         let now = fixed_now();
@@ -1114,6 +1168,22 @@ mod tests {
             })
         }
 
+        fn config(&self) -> Result<ConfigView, ApiError> {
+            self.maybe_error()?;
+            Ok(config_view("alert", 1000, 3000, 900, true))
+        }
+
+        fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError> {
+            self.maybe_error()?;
+            Ok(config_view(
+                update.mode.as_deref().unwrap_or("alert"),
+                update.warn_turn_tokens.unwrap_or(1000),
+                update.kill_turn_tokens.unwrap_or(3000),
+                update.usage_window_seconds.unwrap_or(900),
+                update.local_notifications.unwrap_or(true),
+            ))
+        }
+
         fn notification_health(&self) -> Result<NotificationView, ApiError> {
             self.maybe_error()?;
             Ok(notification_view(true, true, "ready"))
@@ -1135,6 +1205,31 @@ mod tests {
             message: status.to_string(),
             last_test_at: None,
             last_error: None,
+        }
+    }
+
+    fn config_view(
+        mode: &str,
+        warn: i64,
+        kill: i64,
+        window: i64,
+        local_notifications: bool,
+    ) -> ConfigView {
+        ConfigView {
+            path: Some("/tmp/curb/config.yaml".to_string()),
+            mode: mode.to_string(),
+            usage_enabled: true,
+            warn_turn_tokens: warn,
+            kill_turn_tokens: kill,
+            usage_window_seconds: window,
+            usage_scan_seconds: 5,
+            lookback_seconds: 86_400,
+            process_warn_seconds: 90 * 60,
+            process_kill_seconds: 120 * 60,
+            ack_extension_seconds: 30 * 60,
+            local_notifications,
+            ledger_forward_url: None,
+            agents: Vec::new(),
         }
     }
 

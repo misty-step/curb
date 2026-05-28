@@ -7,8 +7,8 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
-    self, AckRequest, AckView, NotificationView, Service, ServiceError, SessionView, Snapshot,
-    StopRequest, StopView, TurnView,
+    self, AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, Service, ServiceError,
+    SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
 
@@ -20,6 +20,10 @@ pub enum RuntimeError {
     Usage(#[from] UsageError),
     #[error(transparent)]
     Service(#[from] ServiceError),
+    #[error("config path is unavailable")]
+    ConfigPathUnavailable,
+    #[error(transparent)]
+    Config(#[from] crate::config::ConfigError),
     #[error("local notifications are disabled")]
     NotificationsDisabled(NotificationView),
     #[error("local notifications are unavailable")]
@@ -33,7 +37,8 @@ pub struct TurnQuery {
 }
 
 pub struct Runtime<P: Platform> {
-    cfg: Config,
+    cfg: Mutex<Config>,
+    config_path: Option<PathBuf>,
     reader: Reader,
     platform: P,
     cache: Mutex<Option<Snapshot>>,
@@ -44,7 +49,8 @@ impl<P: Platform> Runtime<P> {
     pub fn new(cfg: Config, home: impl Into<PathBuf>, platform: P) -> Self {
         let state_dir = cfg.service.state_dir.join("usage");
         Self {
-            cfg,
+            cfg: Mutex::new(cfg),
+            config_path: None,
             reader: Reader::with_state(home, state_dir),
             platform,
             cache: Mutex::new(None),
@@ -54,7 +60,8 @@ impl<P: Platform> Runtime<P> {
 
     pub fn with_reader(cfg: Config, reader: Reader, platform: P) -> Self {
         Self {
-            cfg,
+            cfg: Mutex::new(cfg),
+            config_path: None,
             reader,
             platform,
             cache: Mutex::new(None),
@@ -62,8 +69,31 @@ impl<P: Platform> Runtime<P> {
         }
     }
 
-    pub fn config(&self) -> &Config {
-        &self.cfg
+    pub fn with_config_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.config_path = Some(path.into());
+        self
+    }
+
+    pub fn config(&self) -> Config {
+        self.cfg.lock().expect("config mutex poisoned").clone()
+    }
+
+    pub fn config_view(&self) -> Result<ConfigView, RuntimeError> {
+        let cfg = self.config();
+        Ok(service::config_view(self.config_path.as_deref(), &cfg))
+    }
+
+    pub fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, RuntimeError> {
+        let path = self
+            .config_path
+            .as_ref()
+            .ok_or(RuntimeError::ConfigPathUnavailable)?;
+        let mut next = self.config();
+        service::apply_config_update(&mut next, update)?;
+        next.save(path)?;
+        *self.cfg.lock().expect("config mutex poisoned") = next.clone();
+        *self.cache.lock().expect("runtime cache mutex poisoned") = None;
+        Ok(service::config_view(Some(path), &next))
     }
 
     pub fn rescan(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
@@ -94,8 +124,8 @@ impl<P: Platform> Runtime<P> {
         query: TurnQuery,
         now: DateTime<Utc>,
     ) -> Result<Vec<TurnView>, RuntimeError> {
-        let lookback_start =
-            now - chrono::Duration::from_std(self.cfg.usage.lookback.as_std()).unwrap();
+        let cfg = self.config();
+        let lookback_start = now - chrono::Duration::from_std(cfg.usage.lookback.as_std()).unwrap();
         let read_since = match query.since {
             Some(since) if since < lookback_start => since,
             _ => lookback_start,
@@ -119,8 +149,9 @@ impl<P: Platform> Runtime<P> {
         now: DateTime<Utc>,
     ) -> Result<AckView, RuntimeError> {
         let events = self.fresh_events(now)?;
-        let ack = Service::new(&self.cfg, &events, &self.platform)
-            .acknowledge_session(key, request, now)?;
+        let cfg = self.config();
+        let ack =
+            Service::new(&cfg, &events, &self.platform).acknowledge_session(key, request, now)?;
         let _ = self.rescan(now);
         Ok(ack)
     }
@@ -132,15 +163,16 @@ impl<P: Platform> Runtime<P> {
         now: DateTime<Utc>,
     ) -> Result<StopView, RuntimeError> {
         let events = self.fresh_events(now)?;
-        let stop =
-            Service::new(&self.cfg, &events, &self.platform).stop_session(key, request, now)?;
+        let cfg = self.config();
+        let stop = Service::new(&cfg, &events, &self.platform).stop_session(key, request, now)?;
         let _ = self.rescan(now);
         Ok(stop)
     }
 
     pub fn notification_health(&self) -> Result<NotificationView, RuntimeError> {
+        let cfg = self.config();
         Ok(service::notification_view(
-            self.cfg.alerts.local_notifications,
+            cfg.alerts.local_notifications,
             self.platform.notification_capability(),
             self.notification
                 .lock()
@@ -150,8 +182,9 @@ impl<P: Platform> Runtime<P> {
     }
 
     pub fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, RuntimeError> {
+        let cfg = self.config();
         let mut view = service::notification_view(
-            self.cfg.alerts.local_notifications,
+            cfg.alerts.local_notifications,
             self.platform.notification_capability(),
             self.notification
                 .lock()
@@ -192,6 +225,7 @@ impl<P: Platform> Runtime<P> {
 
     fn build_snapshot(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
         let scan = self.reader.scan_since(Some(self.lookback_start(now)))?;
+        let cfg = self.config();
         let mut sources = scan.sources;
         let captured = match self.platform.capture() {
             Ok(processes) => Some(processes),
@@ -201,7 +235,7 @@ impl<P: Platform> Runtime<P> {
             }
         };
         Ok(service::build_snapshot_with_processes(
-            &self.cfg,
+            &cfg,
             captured.as_ref(),
             &scan.events,
             sources,
@@ -217,7 +251,8 @@ impl<P: Platform> Runtime<P> {
     }
 
     fn lookback_start(&self, now: DateTime<Utc>) -> DateTime<Utc> {
-        now - chrono::Duration::from_std(self.cfg.usage.lookback.as_std()).unwrap()
+        let cfg = self.config();
+        now - chrono::Duration::from_std(cfg.usage.lookback.as_std()).unwrap()
     }
 
     fn record_notification(&self, view: NotificationView) {
@@ -497,6 +532,73 @@ mod tests {
             view.last_error.as_deref(),
             Some("notification failed: denied")
         );
+    }
+
+    #[test]
+    fn update_config_persists_validated_config_and_clears_snapshot_cache() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
+        let config_path = home.path().join("config.yaml");
+        let cfg = test_config(home.path(), Mode::Alert);
+        fs::write(&config_path, serde_yaml::to_string(&cfg).unwrap()).unwrap();
+        let runtime = Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        )
+        .with_config_path(&config_path);
+        let cached = runtime.snapshot(now).unwrap();
+        assert_eq!(cached.overview.mode, "alert");
+
+        let view = runtime
+            .update_config(ConfigUpdate {
+                mode: Some("visibility".to_string()),
+                warn_turn_tokens: Some(2_000),
+                kill_turn_tokens: Some(4_000),
+                usage_window_seconds: Some(120),
+                local_notifications: Some(false),
+                ..ConfigUpdate::default()
+            })
+            .unwrap();
+
+        assert_eq!(view.mode, "visibility");
+        assert_eq!(view.warn_turn_tokens, 2_000);
+        assert!(!view.local_notifications);
+        let reloaded = Config::load(&config_path).unwrap();
+        assert_eq!(reloaded.mode, Mode::Visibility);
+        assert_eq!(reloaded.usage.warn_turn_tokens, 2_000);
+        assert_eq!(reloaded.usage.window.as_std().as_secs(), 120);
+        assert_eq!(runtime.snapshot(now).unwrap().overview.mode, "visibility");
+    }
+
+    #[test]
+    fn update_config_rejects_invalid_values_without_persisting() {
+        let home = temp_home();
+        let config_path = home.path().join("config.yaml");
+        let cfg = test_config(home.path(), Mode::Alert);
+        fs::write(&config_path, serde_yaml::to_string(&cfg).unwrap()).unwrap();
+        let runtime = Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::default())),
+        )
+        .with_config_path(&config_path);
+
+        let err = runtime
+            .update_config(ConfigUpdate {
+                warn_turn_tokens: Some(5_000),
+                kill_turn_tokens: Some(4_000),
+                ..ConfigUpdate::default()
+            })
+            .unwrap_err();
+
+        assert!(err.to_string().contains("usage.warn_turn_tokens"));
+        let reloaded = Config::load(&config_path).unwrap();
+        assert_eq!(reloaded.usage.warn_turn_tokens, 100);
+        assert_eq!(runtime.config().usage.warn_turn_tokens, 100);
     }
 
     #[test]
