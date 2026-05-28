@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::config::{Agent, Config, HumanDuration, Mode};
 use crate::ledger::{self, Ledger};
-use crate::platform::{self, NotificationCapability, Platform};
+use crate::platform::{self, NotificationCapability, Platform, TerminationCapability};
 use crate::usage::{Event, SourceReport};
 
 #[derive(Debug, Error)]
@@ -224,6 +224,49 @@ pub struct NotificationView {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityView {
+    pub available: bool,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PlatformCapabilities {
+    pub platform: String,
+    pub notifications: CapabilityView,
+    pub process_capture: CapabilityView,
+    pub process_identity: CapabilityView,
+    pub enforcement: CapabilityView,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingView {
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<String>,
+    pub mode: String,
+    pub action: String,
+    pub mode_can_terminate: bool,
+    pub detected_providers: Vec<String>,
+    pub detected_workers: Vec<String>,
+    pub enforceable_agent_types: usize,
+    pub watch_only_agent_types: usize,
+    pub notifications: NotificationView,
+    pub capabilities: PlatformCapabilities,
+    pub sources: Vec<SourceReport>,
+    pub final_sentence: String,
+    pub steps: Vec<OnboardingStepView>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingStepView {
+    pub id: String,
+    pub label: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ConfigView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
@@ -413,6 +456,385 @@ fn new_notification_view(enabled: bool, capability: NotificationCapability) -> N
         view.status = "unavailable".to_string();
     }
     view
+}
+
+pub fn onboarding_view(
+    config: ConfigView,
+    required: bool,
+    notifications: NotificationView,
+    termination: TerminationCapability,
+    snapshot: Snapshot,
+) -> OnboardingView {
+    let enforceable_agent_types = config
+        .agents
+        .iter()
+        .filter(|agent| agent.terminates)
+        .count();
+    let watch_only_agent_types = config.agents.len().saturating_sub(enforceable_agent_types);
+    let capabilities = onboarding_capabilities(
+        &config,
+        &notifications,
+        &termination,
+        &snapshot,
+        enforceable_agent_types,
+    );
+    let mode_can_terminate = config.mode == "enforcement"
+        && enforceable_agent_types > 0
+        && capabilities.enforcement.available;
+    let steps = vec![
+        config_step(&config),
+        agent_step(&config),
+        source_step(&snapshot.overview.sources, &capabilities.process_capture),
+        notification_step(&config.mode, &notifications),
+        safety_step(&config),
+    ];
+    OnboardingView {
+        required,
+        config_path: config.path.clone(),
+        mode: config.mode.clone(),
+        action: action_label(&config.mode),
+        mode_can_terminate,
+        detected_providers: detected_providers(&snapshot),
+        detected_workers: detected_workers(&snapshot),
+        enforceable_agent_types,
+        watch_only_agent_types,
+        notifications,
+        capabilities,
+        sources: snapshot.overview.sources,
+        final_sentence: onboarding_final_sentence(&config.mode),
+        steps,
+    }
+}
+
+fn onboarding_capabilities(
+    config: &ConfigView,
+    notifications: &NotificationView,
+    termination: &TerminationCapability,
+    snapshot: &Snapshot,
+    enforceable_agent_types: usize,
+) -> PlatformCapabilities {
+    PlatformCapabilities {
+        platform: std::env::consts::OS.to_string(),
+        notifications: notification_capability_view(notifications),
+        process_capture: process_capture_capability(&snapshot.overview.sources),
+        process_identity: process_identity_capability(snapshot),
+        enforcement: enforcement_capability(config, termination, enforceable_agent_types),
+    }
+}
+
+fn notification_capability_view(notifications: &NotificationView) -> CapabilityView {
+    CapabilityView {
+        available: notifications.available,
+        status: notifications.status.clone(),
+        message: notifications.message.clone(),
+    }
+}
+
+fn process_capture_capability(sources: &[SourceReport]) -> CapabilityView {
+    if let Some(error) = sources
+        .iter()
+        .find(|source| source.provider == "processes")
+        .and_then(|source| source.error.clone())
+    {
+        return CapabilityView {
+            available: false,
+            status: "error".to_string(),
+            message: error,
+        };
+    }
+    CapabilityView {
+        available: true,
+        status: "ready".to_string(),
+        message: "local process scan is available".to_string(),
+    }
+}
+
+fn process_identity_capability(snapshot: &Snapshot) -> CapabilityView {
+    let matched = snapshot.agents.iter().filter(|agent| agent.pid > 0).count();
+    let revalidatable = snapshot
+        .agents
+        .iter()
+        .filter(|agent| agent.process_started_at.is_some() && agent.pid > 0)
+        .count();
+    if revalidatable > 0 {
+        CapabilityView {
+            available: true,
+            status: "ready".to_string(),
+            message: format!(
+                "{} include PID and start time",
+                format_count(revalidatable, "matched worker")
+            ),
+        }
+    } else if matched > 0 {
+        CapabilityView {
+            available: false,
+            status: "action".to_string(),
+            message: "matched workers are missing process start times; Curb will not stop them"
+                .to_string(),
+        }
+    } else {
+        CapabilityView {
+            available: false,
+            status: "waiting".to_string(),
+            message: "no live worker identity evidence yet".to_string(),
+        }
+    }
+}
+
+fn enforcement_capability(
+    config: &ConfigView,
+    termination: &TerminationCapability,
+    enforceable_agent_types: usize,
+) -> CapabilityView {
+    if config.mode != "enforcement" {
+        return CapabilityView {
+            available: false,
+            status: "disabled".to_string(),
+            message: "current mode never terminates processes".to_string(),
+        };
+    }
+    if enforceable_agent_types == 0 {
+        return CapabilityView {
+            available: false,
+            status: "action".to_string(),
+            message: "no enforceable worker matchers are configured".to_string(),
+        };
+    }
+    CapabilityView {
+        available: termination.supported,
+        status: if termination.supported {
+            "ready".to_string()
+        } else {
+            termination.status.clone()
+        },
+        message: if termination.supported {
+            "enforcement can stop only revalidated worker process trees".to_string()
+        } else {
+            termination.message.clone()
+        },
+    }
+}
+
+fn config_step(config: &ConfigView) -> OnboardingStepView {
+    match &config.path {
+        Some(path) if !path.is_empty() => step("config", "Config", "done", format!("using {path}")),
+        _ => step(
+            "config",
+            "Config",
+            "action",
+            "config path is not available".to_string(),
+        ),
+    }
+}
+
+fn agent_step(config: &ConfigView) -> OnboardingStepView {
+    if config.agents.is_empty() {
+        step(
+            "agents",
+            "Agents",
+            "action",
+            "no agent matchers are configured".to_string(),
+        )
+    } else {
+        step(
+            "agents",
+            "Agents",
+            "done",
+            agent_count_message(&config.agents),
+        )
+    }
+}
+
+fn source_step(sources: &[SourceReport], capture: &CapabilityView) -> OnboardingStepView {
+    if capture.status == "error" {
+        return step("sources", "Sources", "action", capture.message.clone());
+    }
+    if sources.is_empty() {
+        return step(
+            "sources",
+            "Sources",
+            "waiting",
+            "usage sources have not been scanned yet".to_string(),
+        );
+    }
+    if let Some(source) = sources.iter().find(|source| source.error.is_some()) {
+        return step(
+            "sources",
+            "Sources",
+            "action",
+            format!(
+                "{}: {}",
+                source.provider,
+                source.error.as_deref().unwrap_or_default()
+            ),
+        );
+    }
+    let events = sources.iter().map(|source| source.events).sum::<usize>();
+    let files = sources.iter().map(|source| source.files).sum::<usize>();
+    if events == 0 {
+        return step(
+            "sources",
+            "Sources",
+            "waiting",
+            "scanned usage sources; no local usage events found yet".to_string(),
+        );
+    }
+    step(
+        "sources",
+        "Sources",
+        "done",
+        format!(
+            "{} from {}",
+            format_count(events, "usage event"),
+            format_count(files, "file")
+        ),
+    )
+}
+
+fn notification_step(mode: &str, notifications: &NotificationView) -> OnboardingStepView {
+    if mode == "visibility" {
+        return step(
+            "notifications",
+            "Notifications",
+            "waiting",
+            "visibility mode records activity without requiring notifications".to_string(),
+        );
+    }
+    if !notifications.enabled {
+        return step(
+            "notifications",
+            "Notifications",
+            "action",
+            "local notifications are disabled".to_string(),
+        );
+    }
+    if !notifications.available {
+        return step(
+            "notifications",
+            "Notifications",
+            "action",
+            notifications.message.clone(),
+        );
+    }
+    step(
+        "notifications",
+        "Notifications",
+        "done",
+        notifications.message.clone(),
+    )
+}
+
+fn safety_step(config: &ConfigView) -> OnboardingStepView {
+    if let Some(agent) = config
+        .agents
+        .iter()
+        .find(|agent| agent.kind == "app" && agent.terminates)
+    {
+        return step(
+            "safety",
+            "Safety",
+            "action",
+            format!("{} is an app root but is enforceable", agent.label),
+        );
+    }
+    step(
+        "safety",
+        "Safety",
+        "done",
+        "desktop app roots are watch-only; Curb stops only enforceable workers".to_string(),
+    )
+}
+
+fn detected_providers(snapshot: &Snapshot) -> Vec<String> {
+    let mut providers = Vec::new();
+    for provider in snapshot
+        .overview
+        .sources
+        .iter()
+        .map(|source| source.provider.as_str())
+        .chain(
+            snapshot
+                .sessions
+                .iter()
+                .map(|session| session.provider.as_str()),
+        )
+    {
+        push_unique(&mut providers, provider);
+    }
+    providers
+}
+
+fn detected_workers(snapshot: &Snapshot) -> Vec<String> {
+    let mut workers = Vec::new();
+    for agent in &snapshot.agents {
+        let label = if agent.label.is_empty() {
+            agent.id.as_str()
+        } else {
+            agent.label.as_str()
+        };
+        push_unique(&mut workers, label);
+    }
+    workers
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !value.is_empty() && !values.iter().any(|seen| seen == value) {
+        values.push(value.to_string());
+    }
+}
+
+fn onboarding_final_sentence(mode: &str) -> String {
+    match mode {
+        "alert" => "Curb will notify on high-token turns. It will not stop any process in Alert mode. Desktop app roots are watch-only.".to_string(),
+        "enforcement" => "Curb can stop only correlated enforceable workers after policy and grace checks. Desktop app roots are watch-only.".to_string(),
+        _ => "Curb will record local agent activity. It will not notify or stop any process in Visibility mode. Desktop app roots are watch-only.".to_string(),
+    }
+}
+
+fn action_label(mode: &str) -> String {
+    match mode {
+        "visibility" => "record only; no warnings or kills",
+        "alert" => "notify only; never kill",
+        "enforcement" => "enforcement enabled",
+        other => other,
+    }
+    .to_string()
+}
+
+fn agent_count_message(agents: &[ConfigAgentView]) -> String {
+    let enforceable = agents.iter().filter(|agent| agent.terminates).count();
+    let watch_only = agents.len().saturating_sub(enforceable);
+    if watch_only == 0 {
+        format_count(enforceable, "enforceable agent")
+    } else {
+        format!(
+            "{}, {}",
+            format_count(enforceable, "enforceable agent"),
+            format_count(watch_only, "watch-only agent")
+        )
+    }
+}
+
+fn format_count(count: usize, singular: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {singular}s")
+    }
+}
+
+fn step(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    status: impl Into<String>,
+    message: String,
+) -> OnboardingStepView {
+    OnboardingStepView {
+        id: id.into(),
+        label: label.into(),
+        status: status.into(),
+        message,
+    }
 }
 
 pub struct Service<'a, P: Platform> {
@@ -2090,6 +2512,14 @@ mod tests {
                 supported: true,
                 status: "available".to_string(),
                 message: "available".to_string(),
+            }
+        }
+
+        fn termination_capability(&self) -> platform::TerminationCapability {
+            platform::TerminationCapability {
+                supported: true,
+                status: "available".to_string(),
+                message: "test platform can terminate process trees".to_string(),
             }
         }
 

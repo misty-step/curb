@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
@@ -7,8 +8,8 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
-    self, AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, Service, ServiceError,
-    SessionView, Snapshot, StopRequest, StopView, TurnView,
+    self, AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, OnboardingView, Service,
+    ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
 
@@ -94,6 +95,28 @@ impl<P: Platform> Runtime<P> {
         *self.cfg.lock().expect("config mutex poisoned") = next.clone();
         *self.cache.lock().expect("runtime cache mutex poisoned") = None;
         Ok(service::config_view(Some(path), &next))
+    }
+
+    pub fn onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, RuntimeError> {
+        let cfg = self.config();
+        let config = service::config_view(self.config_path.as_deref(), &cfg);
+        let required = !onboarding_completed(&cfg.service.state_dir);
+        let notifications = self.notification_health()?;
+        let termination = self.platform.termination_capability();
+        let snapshot = self.snapshot(now)?;
+        Ok(service::onboarding_view(
+            config,
+            required,
+            notifications,
+            termination,
+            snapshot,
+        ))
+    }
+
+    pub fn complete_onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, RuntimeError> {
+        let cfg = self.config();
+        write_onboarding_marker(&cfg.service.state_dir)?;
+        self.onboarding(now)
     }
 
     pub fn rescan(&self, now: DateTime<Utc>) -> Result<Snapshot, RuntimeError> {
@@ -261,6 +284,47 @@ impl<P: Platform> Runtime<P> {
             .lock()
             .expect("notification mutex poisoned") = Some(view);
     }
+}
+
+fn onboarding_completed(state_dir: &Path) -> bool {
+    onboarding_marker_path(state_dir).is_file()
+}
+
+fn write_onboarding_marker(state_dir: &Path) -> Result<(), ServiceError> {
+    fs::create_dir_all(state_dir).map_err(|source| ServiceError::Io {
+        path: state_dir.to_path_buf(),
+        source,
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(state_dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
+            ServiceError::Io {
+                path: state_dir.to_path_buf(),
+                source,
+            }
+        })?;
+    }
+    let path = onboarding_marker_path(state_dir);
+    fs::write(&path, b"complete\n").map_err(|source| ServiceError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            ServiceError::Io {
+                path: path.clone(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn onboarding_marker_path(state_dir: &Path) -> PathBuf {
+    state_dir.join("onboarding.complete")
 }
 
 fn find_session_view(snapshot: &Snapshot, key: &str) -> Option<SessionView> {
@@ -664,6 +728,60 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn onboarding_projects_first_run_state_and_completion_marker() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let home = temp_home();
+        write_codex_session(home.path(), "s1", "/repo", now, 90, 90);
+        let config_path = home.path().join("config.yaml");
+        let cfg = test_config(home.path(), Mode::Alert);
+        fs::write(&config_path, serde_yaml::to_string(&cfg).unwrap()).unwrap();
+        let runtime = Runtime::new(
+            cfg,
+            home.path(),
+            FakePlatform::new(Ok(platform::Snapshot::new([process(
+                now, 100, "codex", "/repo",
+            )]))),
+        )
+        .with_config_path(&config_path);
+
+        let view = runtime.onboarding(now).unwrap();
+
+        assert!(view.required);
+        assert_eq!(
+            view.config_path.as_deref(),
+            Some(config_path.to_str().unwrap())
+        );
+        assert_eq!(view.mode, "alert");
+        assert!(!view.mode_can_terminate);
+        assert_eq!(view.enforceable_agent_types, 1);
+        assert!(view.detected_providers.contains(&"codex".to_string()));
+        assert!(view.detected_workers.contains(&"Codex CLI".to_string()));
+        assert_eq!(view.capabilities.process_capture.status, "ready");
+        assert_eq!(view.capabilities.enforcement.status, "disabled");
+        assert!(view.steps.iter().any(|step| {
+            step.id == "sources" && step.status == "done" && step.message.contains("usage event")
+        }));
+
+        let completed = runtime.complete_onboarding(now).unwrap();
+
+        assert!(!completed.required);
+        let marker = runtime
+            .config()
+            .service
+            .state_dir
+            .join("onboarding.complete");
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "complete\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&marker).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
     fn temp_home() -> TempDir {
         let home = tempfile::tempdir().unwrap();
         fs::create_dir_all(home.path().join(".codex/archived_sessions")).unwrap();
@@ -813,6 +931,14 @@ mod tests {
 
         fn notification_capability(&self) -> platform::NotificationCapability {
             self.capability.clone()
+        }
+
+        fn termination_capability(&self) -> platform::TerminationCapability {
+            platform::TerminationCapability {
+                supported: true,
+                status: "available".to_string(),
+                message: "test platform can terminate process trees".to_string(),
+            }
         }
 
         fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {

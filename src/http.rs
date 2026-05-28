@@ -172,8 +172,9 @@ mod tests {
     use crate::api::{ApiError, Backend, Server};
     use crate::runtime::TurnQuery;
     use crate::service::{
-        AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, Overview, SessionView,
-        Snapshot, StopRequest, StopView, TurnView,
+        AckRequest, AckView, CapabilityView, ConfigUpdate, ConfigView, NotificationView,
+        OnboardingView, Overview, PlatformCapabilities, SessionView, Snapshot, StopRequest,
+        StopView, TurnView,
     };
 
     #[test]
@@ -316,12 +317,53 @@ mod tests {
             Ok(config_view())
         }
 
+        fn onboarding(&self, _now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+            Ok(onboarding_view(true))
+        }
+
+        fn complete_onboarding(&self, _now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+            Ok(onboarding_view(false))
+        }
+
         fn notification_health(&self) -> Result<NotificationView, ApiError> {
             Ok(notification_view("ready"))
         }
 
         fn test_notification(&self, _now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
             Ok(notification_view("delivered"))
+        }
+    }
+
+    fn onboarding_view(required: bool) -> OnboardingView {
+        OnboardingView {
+            required,
+            config_path: None,
+            mode: "visibility".to_string(),
+            action: "record only; no warnings or kills".to_string(),
+            mode_can_terminate: false,
+            detected_providers: Vec::new(),
+            detected_workers: Vec::new(),
+            enforceable_agent_types: 0,
+            watch_only_agent_types: 0,
+            notifications: notification_view("ready"),
+            capabilities: PlatformCapabilities {
+                platform: "test".to_string(),
+                notifications: capability(true, "ready", "ready"),
+                process_capture: capability(true, "ready", "ready"),
+                process_identity: capability(false, "waiting", "waiting"),
+                enforcement: capability(false, "disabled", "disabled"),
+            },
+            sources: Vec::new(),
+            final_sentence: "Curb will record local agent activity.".to_string(),
+            steps: Vec::new(),
+        }
+    }
+
+    fn capability(available: bool, status: &str, message: &str) -> CapabilityView {
+        CapabilityView {
+            available,
+            status: status.to_string(),
+            message: message.to_string(),
         }
     }
 

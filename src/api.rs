@@ -13,8 +13,8 @@ use crate::config::parse_duration_for_cli;
 use crate::platform::Platform;
 use crate::runtime::{Runtime, RuntimeError, TurnQuery};
 use crate::service::{
-    AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, ServiceError, SessionView,
-    Snapshot, StopRequest, StopView, TurnView,
+    AckRequest, AckView, ConfigUpdate, ConfigView, NotificationView, OnboardingView, ServiceError,
+    SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 
 pub const TOKEN_COOKIE: &str = "curb_token";
@@ -70,6 +70,8 @@ pub trait Backend {
     ) -> Result<StopView, ApiError>;
     fn config(&self) -> Result<ConfigView, ApiError>;
     fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError>;
+    fn onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, ApiError>;
+    fn complete_onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, ApiError>;
     fn notification_health(&self) -> Result<NotificationView, ApiError>;
     fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, ApiError>;
 }
@@ -121,6 +123,14 @@ impl<P: Platform> Backend for Runtime<P> {
 
     fn update_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError> {
         self.update_config(update).map_err(ApiError::from)
+    }
+
+    fn onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+        self.onboarding(now).map_err(ApiError::from)
+    }
+
+    fn complete_onboarding(&self, now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+        self.complete_onboarding(now).map_err(ApiError::from)
     }
 
     fn notification_health(&self) -> Result<NotificationView, ApiError> {
@@ -227,9 +237,19 @@ impl<B: Backend> Server<B> {
                 .and_then(|update| self.backend.update_config(update))
                 .map(json_ok)
                 .unwrap_or_else(api_error_response),
-            ("GET", "/v1/onboarding") | ("POST", "/v1/onboarding/complete") => {
-                error_response(501, "endpoint not implemented by rust api")
-            }
+            (_, "/v1/config") => error_response(405, "method not allowed"),
+            ("GET", "/v1/onboarding") => self
+                .backend
+                .onboarding(now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/onboarding") => error_response(405, "method not allowed"),
+            ("POST", "/v1/onboarding/complete") => self
+                .backend
+                .complete_onboarding(now)
+                .map(json_ok)
+                .unwrap_or_else(api_error_response),
+            (_, "/v1/onboarding/complete") => error_response(405, "method not allowed"),
             ("GET", _) => error_response(404, "not found"),
             _ => error_response(405, "method not allowed"),
         }
@@ -710,7 +730,7 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::service::{AgentView, Overview};
+    use crate::service::{AgentView, CapabilityView, Overview, PlatformCapabilities};
 
     #[test]
     fn requires_auth_for_api_routes_and_allows_local_preflight() {
@@ -979,6 +999,41 @@ mod tests {
     }
 
     #[test]
+    fn serves_and_completes_onboarding() {
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let now = fixed_now();
+
+        let initial = server.handle(authed("GET", "/v1/onboarding"), now);
+        assert_eq!(initial.status, 200);
+        assert!(initial.text().contains("\"required\":true"));
+        assert!(initial.text().contains("\"mode\":\"alert\""));
+        assert!(initial.text().contains("\"process_capture\""));
+
+        let completed = server.handle(authed("POST", "/v1/onboarding/complete"), now);
+        assert_eq!(completed.status, 200);
+        assert!(completed.text().contains("\"required\":false"));
+
+        assert_eq!(
+            server.handle(authed("POST", "/v1/onboarding"), now).status,
+            405
+        );
+        assert_eq!(
+            server
+                .handle(authed("GET", "/v1/onboarding/complete"), now)
+                .status,
+            405
+        );
+
+        let cross_origin_cookie = server.handle(
+            Request::new("POST", "/v1/onboarding/complete")
+                .cookie("curb_token=test-token")
+                .origin("http://evil.example"),
+            now,
+        );
+        assert_eq!(cross_origin_cookie.status, 403);
+    }
+
+    #[test]
     fn invalid_encoded_session_key_returns_bad_request_shape() {
         let server = Server::new("test-token", FakeBackend::default()).unwrap();
         let now = fixed_now();
@@ -1184,6 +1239,16 @@ mod tests {
             ))
         }
 
+        fn onboarding(&self, _now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+            self.maybe_error()?;
+            Ok(onboarding_view(true))
+        }
+
+        fn complete_onboarding(&self, _now: DateTime<Utc>) -> Result<OnboardingView, ApiError> {
+            self.maybe_error()?;
+            Ok(onboarding_view(false))
+        }
+
         fn notification_health(&self) -> Result<NotificationView, ApiError> {
             self.maybe_error()?;
             Ok(notification_view(true, true, "ready"))
@@ -1194,6 +1259,43 @@ mod tests {
             let mut view = notification_view(true, true, "delivered");
             view.last_test_at = Some(fixed_now());
             Ok(view)
+        }
+    }
+
+    fn onboarding_view(required: bool) -> OnboardingView {
+        OnboardingView {
+            required,
+            config_path: Some("/tmp/curb/config.yaml".to_string()),
+            mode: "alert".to_string(),
+            action: "notify only; never kill".to_string(),
+            mode_can_terminate: false,
+            detected_providers: vec!["codex".to_string()],
+            detected_workers: vec!["Codex Worker".to_string()],
+            enforceable_agent_types: 1,
+            watch_only_agent_types: 1,
+            notifications: notification_view(true, true, "ready"),
+            capabilities: PlatformCapabilities {
+                platform: "test".to_string(),
+                notifications: capability(true, "ready", "ready"),
+                process_capture: capability(true, "ready", "process capture available"),
+                process_identity: capability(true, "ready", "identity evidence available"),
+                enforcement: capability(
+                    false,
+                    "disabled",
+                    "current mode never terminates processes",
+                ),
+            },
+            sources: snapshot().overview.sources,
+            final_sentence: "Curb will notify on high-token turns.".to_string(),
+            steps: Vec::new(),
+        }
+    }
+
+    fn capability(available: bool, status: &str, message: &str) -> CapabilityView {
+        CapabilityView {
+            available,
+            status: status.to_string(),
+            message: message.to_string(),
         }
     }
 

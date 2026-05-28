@@ -174,9 +174,17 @@ pub struct NotificationCapability {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminationCapability {
+    pub supported: bool,
+    pub status: String,
+    pub message: String,
+}
+
 pub trait Platform {
     fn capture(&self) -> Result<Snapshot, PlatformError>;
     fn notification_capability(&self) -> NotificationCapability;
+    fn termination_capability(&self) -> TerminationCapability;
     fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError>;
     fn terminate(&self, target: &TerminationTarget) -> Result<(), PlatformError>;
 }
@@ -206,6 +214,14 @@ impl Platform for SystemPlatform {
 
     fn notification_capability(&self) -> NotificationCapability {
         notification_capability_for(std::env::consts::OS, command_exists)
+    }
+
+    fn termination_capability(&self) -> TerminationCapability {
+        TerminationCapability {
+            supported: false,
+            status: "unavailable".to_string(),
+            message: "Rust live process termination is not implemented yet".to_string(),
+        }
     }
 
     fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {
@@ -403,6 +419,14 @@ impl Platform for EmptyPlatform {
             supported: false,
             status: "unsupported".to_string(),
             message: "empty platform cannot deliver notifications".to_string(),
+        }
+    }
+
+    fn termination_capability(&self) -> TerminationCapability {
+        TerminationCapability {
+            supported: false,
+            status: "unsupported".to_string(),
+            message: "empty platform cannot terminate processes".to_string(),
         }
     }
 
