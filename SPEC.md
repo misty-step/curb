@@ -148,7 +148,7 @@ The dashboard and policy engine distinguish two token concepts:
   it is not the same as newly consumed work.
 - **spent tokens**: uncached input plus cache creation, output, and reasoning
   tokens for the observed checkpoint. Cached/read tokens remain visible for
-  diagnostics, but they do not drive the primary "spending now" headline or
+  diagnostics, but they do not drive the primary fresh-checkpoint headline or
   warning/stop thresholds.
 
 Codex emits local `token_count` checkpoints with `last_token_usage` and
@@ -158,6 +158,15 @@ emits request usage rows; Curb treats each request row as a checkpoint and
 excludes `cache_read_input_tokens` from spent tokens. Cumulative counters stay
 available for reconciliation and future velocity work, but they are not used as
 the primary operator-facing spend value.
+
+These local logs are completion/checkpoint ledgers. They prove that work
+finished and what it cost; they do not prove that tokens are being consumed at
+this exact instant. Curb therefore keeps liveness and usage as separate facts:
+process correlation says whether a worker is alive, while `data_recency` and
+`activity_basis` say whether a fresh, recent, historical, or unmatched usage
+checkpoint was observed. UI rows should stay session-first and stable as a run
+moves between fresh and quiet states; state changes should update badges and
+metrics in place instead of moving the run between unrelated process lists.
 
 Provider adapters are allowed to be uneven. Codex and Claude currently expose
 useful local metadata. Gemini/Antigravity and OpenCode/Pi may require additional

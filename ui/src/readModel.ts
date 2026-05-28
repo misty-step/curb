@@ -11,9 +11,18 @@ export interface AliveAgentGroup {
   latestStarted: number;
 }
 
+export interface SessionActivityRow {
+  session: SessionView;
+  workerCount: number;
+  workerLabel: string;
+  runningForSeconds: number;
+}
+
 export interface OperatorSummaryModel {
   aliveAgents: AgentView[];
   spendingAgents: AgentView[];
+  activeSessionRows: SessionActivityRow[];
+  freshSessionRows: SessionActivityRow[];
   recentUncorrelated: SessionView[];
   latestSpentTokens: number;
   recentUncorrelatedTokens: number;
@@ -26,23 +35,27 @@ export interface OperatorSummaryModel {
 export function selectOperatorSummary(snapshot: Snapshot): OperatorSummaryModel {
   const aliveAgents = snapshot.agents.filter(isAliveAgent);
   const spendingAgents = aliveAgents.filter(isSpendingAgent);
+  const activeSessionRows = sessionActivityRows(snapshot.sessions, aliveAgents);
+  const freshSessionRows = activeSessionRows.filter((row) => isSpendingSession(row.session));
   const spendingRows = uniqueSpendingRows(spendingAgents);
   const recentUncorrelated = snapshot.sessions.filter(isRecentUncorrelatedUsage);
-  const latestSpentTokens = spendingRows.reduce((sum, agent) => sum + (agent.latest_spent_tokens ?? agent.latest_turn_tokens ?? 0), 0);
+  const latestSpentTokens = freshSessionRows.reduce((sum, row) => sum + sessionLatestSpend(row.session), 0);
   const recentUncorrelatedTokens = recentUncorrelated.reduce((sum, session) => sum + (session.window_spent_tokens ?? session.window_tokens ?? 0), 0);
 
   return {
     aliveAgents,
     spendingAgents,
+    activeSessionRows,
+    freshSessionRows,
     recentUncorrelated,
     latestSpentTokens,
     recentUncorrelatedTokens,
     aliveRows: aliveAgentGroups(aliveAgents).slice(0, 6),
-    quietRows: aliveAgentGroups(aliveAgents.filter((agent) => !isSpendingAgent(agent))).slice(0, 4),
+    quietRows: quietAgentGroups(aliveAgents, activeSessionRows).slice(0, 4),
     spendingRows: spendingRows.slice(0, 5),
     headline:
-      spendingRows.length > 0
-        ? `${spendingRows.length} agent${spendingRows.length === 1 ? "" : "s"} with fresh token usage`
+      freshSessionRows.length > 0
+        ? `${freshSessionRows.length} run${freshSessionRows.length === 1 ? "" : "s"} with fresh usage checkpoints`
         : "No fresh token usage right now",
   };
 }
@@ -53,6 +66,52 @@ export function isAliveAgent(agent: AgentView): boolean {
 
 export function isSpendingAgent(agent: AgentView): boolean {
   return agent.activity_state === "spending";
+}
+
+export function isSpendingSession(session: SessionView): boolean {
+  return session.activity_state === "spending";
+}
+
+export function sessionLatestSpend(session: SessionView): number {
+  return session.latest_spent_tokens ?? session.latest_turn_tokens ?? 0;
+}
+
+export function sessionWindowSpend(session: SessionView): number {
+  return session.window_spent_tokens ?? session.window_tokens ?? 0;
+}
+
+export function sessionActivityRows(sessions: SessionView[], agents: AgentView[]): SessionActivityRow[] {
+  return sessions
+    .filter((session) => session.process_state === "running")
+    .map((session) => {
+      const workers = agents.filter((agent) => agent.latest_session_id === session.id || agent.pid === session.correlated_pid);
+      return {
+        session,
+        workerCount: Math.max(workers.length, session.correlated_pid ? 1 : 0),
+        workerLabel: workerLabel(workers, session),
+        runningForSeconds: workers.reduce((max, agent) => Math.max(max, agent.running_for_seconds ?? 0), 0),
+      };
+    })
+    .sort((left, right) => {
+      if (left.session.activity_state !== right.session.activity_state) {
+        if (left.session.activity_state === "spending") return -1;
+        if (right.session.activity_state === "spending") return 1;
+      }
+      if ((left.session.risk_rank ?? 99) !== (right.session.risk_rank ?? 99)) {
+        return (left.session.risk_rank ?? 99) - (right.session.risk_rank ?? 99);
+      }
+      const leftSpend = sessionWindowSpend(left.session);
+      const rightSpend = sessionWindowSpend(right.session);
+      if (leftSpend !== rightSpend) return rightSpend - leftSpend;
+      return new Date(right.session.last_seen_at).getTime() - new Date(left.session.last_seen_at).getTime();
+    });
+}
+
+function workerLabel(workers: AgentView[], session: SessionView): string {
+  const labels = Array.from(new Set(workers.map((agent) => agent.label || agent.id).filter(Boolean)));
+  if (labels.length === 0) return session.provider;
+  if (labels.length === 1) return labels[0];
+  return `${labels[0]} +${labels.length - 1}`;
 }
 
 function uniqueSpendingRows(agents: AgentView[]): AgentView[] {
@@ -121,4 +180,15 @@ export function aliveAgentGroups(agents: AgentView[]): AliveAgentGroup[] {
     if (left.latestStarted !== right.latestStarted) return right.latestStarted - left.latestStarted;
     return right.count - left.count;
   });
+}
+
+function quietAgentGroups(agents: AgentView[], activeRows: SessionActivityRow[]): AliveAgentGroup[] {
+  const activeKeys = new Set(activeRows.map((row) => `${row.session.provider}:${row.session.cwd || row.session.project || row.session.correlated_pid || row.session.id}`));
+  return aliveAgentGroups(
+    agents.filter((agent) => {
+      if (isSpendingAgent(agent)) return false;
+      const key = `${agent.provider}:${agent.cwd || agent.project || agent.pid}`;
+      return !activeKeys.has(key);
+    }),
+  );
 }

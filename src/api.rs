@@ -1741,6 +1741,9 @@ mod tests {
                 label: "Codex Worker".to_string(),
                 state: "warn".to_string(),
                 activity_state: "spending".to_string(),
+                data_recency: "fresh".to_string(),
+                activity_basis: "fresh completed usage checkpoint correlated to a live worker"
+                    .to_string(),
                 process_state: "running".to_string(),
                 usage_state: "warn".to_string(),
                 action_state: "acknowledge".to_string(),
@@ -1757,7 +1760,7 @@ mod tests {
                 latest_spent_tokens: 789,
                 window_tokens: 789,
                 window_spent_tokens: 789,
-                explanation: "latest turn crossed the warning threshold".to_string(),
+                explanation: "latest checkpoint crossed the warning threshold".to_string(),
             }],
             sessions: vec![SessionView {
                 key: "codex:session/one".to_string(),
@@ -1765,6 +1768,9 @@ mod tests {
                 provider: "codex".to_string(),
                 state: "warn".to_string(),
                 activity_state: "spending".to_string(),
+                data_recency: "fresh".to_string(),
+                activity_basis: "fresh completed usage checkpoint correlated to a live worker"
+                    .to_string(),
                 process_state: "running".to_string(),
                 usage_state: "warn".to_string(),
                 action_state: "acknowledge".to_string(),
@@ -1797,7 +1803,7 @@ mod tests {
                 confidence: 90,
                 matched_by: vec!["process_name".to_string()],
                 risk_rank: 1,
-                explanation: "latest turn crossed the warning threshold".to_string(),
+                explanation: "latest checkpoint crossed the warning threshold".to_string(),
             }],
             turns: Vec::new(),
         }

@@ -2,7 +2,7 @@ import { Activity, AlertTriangle, CheckCircle2, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { formatDuration, formatTokens, relativeTime, stateLabel, statusTone } from "../format";
-import { aliveAgentSummary, selectOperatorSummary, sessionForAgent } from "../readModel";
+import { aliveAgentSummary, selectOperatorSummary, sessionLatestSpend, sessionWindowSpend } from "../readModel";
 import type { AliveAgentGroup } from "../readModel";
 import type { AgentView, AlertView, ConfigView, NotificationView, OnboardingView, SessionView, Snapshot, TurnView } from "../types";
 
@@ -435,7 +435,7 @@ export function OperatorSummary({
 }) {
   const model = selectOperatorSummary(snapshot);
   const subline =
-    model.spendingAgents.length > 0
+    model.activeSessionRows.length > 0
       ? `${formatTokens(model.latestSpentTokens)} spent in the latest fresh checkpoints`
       : model.recentUncorrelated.length > 0
         ? `${formatTokens(model.recentUncorrelatedTokens)} recent tokens are uncorrelated to a live worker`
@@ -450,7 +450,7 @@ export function OperatorSummary({
           <p>{subline}</p>
         </div>
         <div className="operator-stats">
-          <MiniStat label="Active runs" value={`${model.spendingRows.length}`} />
+          <MiniStat label="Fresh runs" value={`${model.freshSessionRows.length}`} />
           <MiniStat label="Alive workers" value={`${model.aliveAgents.length}`} />
           <MiniStat label="Fresh spend" value={formatTokens(model.latestSpentTokens)} />
           <MiniStat label="Unmatched logs" value={formatTokens(model.recentUncorrelatedTokens)} />
@@ -458,34 +458,34 @@ export function OperatorSummary({
         </div>
       </div>
       <div className="operator-list" aria-label="Current agent runs">
-        {model.spendingRows.length > 0 ? (
+        {model.activeSessionRows.length > 0 ? (
           <>
-            {model.spendingRows.map((agent) => {
-            const session = sessionForAgent(agent, snapshot.sessions);
+            {model.activeSessionRows.map((row) => {
+            const session = row.session;
             return (
               <button
                 type="button"
                 className={`operator-row ${session?.key === selectedKey ? "selected" : ""}`}
-                key={`${agent.id}-${agent.pid}`}
+                key={session.key}
                 onClick={() => session ? onSelect(session.key) : undefined}
               >
                 <span className="operator-state">
-                  <StateChip state={agent.usage_state || "spending"} />
+                  <StateChip state={session.activity_state === "spending" ? (session.usage_state || "fresh") : "idle"} />
                 </span>
                 <span className="operator-main">
-                  <strong>{agent.project || agent.label}</strong>
-                  <span>{agent.provider} · {agent.label}</span>
+                  <strong>{session.project || session.provider}</strong>
+                  <span>{row.workerLabel} · {session.provider} usage · {row.workerCount} worker{row.workerCount === 1 ? "" : "s"} · {session.activity_basis || `${session.data_recency || "recent"} checkpoint`}</span>
                 </span>
                 <span>
-                  <strong>{formatTokens(agent.latest_spent_tokens ?? agent.latest_turn_tokens ?? 0)}</strong>
-                  <span>latest spend</span>
+                  <strong>{formatTokens(sessionLatestSpend(session))}</strong>
+                  <span>checkpoint spend</span>
                 </span>
                 <span>
-                  <strong>{formatTokens(agent.window_spent_tokens ?? agent.window_tokens ?? 0)}</strong>
+                  <strong>{formatTokens(sessionWindowSpend(session))}</strong>
                   <span>window spend</span>
                 </span>
                 <span>
-                  <strong>{formatDuration(agent.running_for_seconds)}</strong>
+                  <strong>{formatDuration(row.runningForSeconds)}</strong>
                   <span>running</span>
                 </span>
               </button>
@@ -525,8 +525,8 @@ function QuietWorkerRow({ group }: { group: AliveAgentGroup }) {
         <span>alive</span>
       </span>
       <span>
-        <strong>idle</strong>
-        <span>no fresh token use</span>
+        <strong>quiet</strong>
+        <span>no fresh checkpoint</span>
       </span>
     </div>
   );
@@ -863,10 +863,10 @@ function SpendMeter({ latest, window, warn, stop }: { latest: number; window: nu
   const warnLeft = Math.min(100, (warn / denominator) * 100);
   const stopLeft = Math.min(100, (stop / denominator) * 100);
   return (
-    <div className="spend-meter" aria-label={`Latest spend ${formatTokens(latest)}, window ${formatTokens(window)}`}>
+    <div className="spend-meter" aria-label={`Checkpoint spend ${formatTokens(latest)}, window ${formatTokens(window)}`}>
       <div className="spend-row">
         <strong>{formatTokens(latest)}</strong>
-        <span>latest spend</span>
+        <span>checkpoint spend</span>
       </div>
       <div className="spend-track">
         <div className="spend-fill" style={{ width: `${latestWidth}%` }} />

@@ -55,6 +55,8 @@ export interface AgentView {
   label: string;
   state: string;
   activity_state?: string;
+  data_recency?: string;
+  activity_basis?: string;
   process_state: string;
   usage_state?: string;
   action_state: string;
@@ -81,6 +83,8 @@ export interface SessionView {
   provider: string;
   state: string;
   activity_state?: string;
+  data_recency?: string;
+  activity_basis?: string;
   agent_state?: string;
   process_state: string;
   usage_state?: string;

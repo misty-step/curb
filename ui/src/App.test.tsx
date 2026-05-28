@@ -32,15 +32,15 @@ describe("App alert feed", () => {
     await actRender(<App />);
 
     const headings = Array.from(document.querySelectorAll("h2")).map((heading) => heading.textContent);
-    expect(headings[0]).toBe("1 agent with fresh token usage");
+    expect(headings[0]).toBe("1 run with fresh usage checkpoints");
     const page = document.body.textContent ?? "";
     expect(page).toContain("Right now");
-    expect(page).toContain("Active runs");
+    expect(page).toContain("Fresh runs");
     expect(page).toContain("Alive workers");
     expect(page).toContain("Fresh spend");
-    expect(page).toContain("latest spend");
+    expect(page).toContain("checkpoint spend");
     expect(page).toContain("Policy settings");
-    expect(page).toContain("latest turn");
+    expect(page).toContain("latest checkpoint");
     expect(page).toContain("620k in window");
     expect(document.querySelector(".operator-summary")).toBeTruthy();
     expect(document.querySelector(".drilldown-drawer")).toBeTruthy();
@@ -103,12 +103,12 @@ describe("App alert feed", () => {
     expect(page).toContain("220k recent tokens are uncorrelated to a live worker");
     expect(page).toContain("Unmatched logs");
     expect(page).toContain("worker processes");
-    expect(page).toContain("no fresh token use");
+    expect(page).toContain("no fresh checkpoint");
     expect(page).not.toContain("confirmed input");
     expect(page).not.toContain("1 agent with fresh token usage");
   });
 
-  it("counts active runtime workers instead of provider usage sessions", async () => {
+  it("keeps provider usage sessions stable while showing the correlated worker", async () => {
     const now = new Date().toISOString();
     const snapshot: Snapshot = {
       ...demoSnapshot,
@@ -177,11 +177,10 @@ describe("App alert feed", () => {
     await actRender(<App />);
 
     const summary = document.querySelector(".operator-summary")?.textContent ?? "";
-    expect(summary).toContain("1 agent with fresh token usage");
+    expect(summary).toContain("2 runs with fresh usage checkpoints");
     expect(summary).toContain("Codex CLI");
-    expect(summary).toContain("Fresh spend77k");
+    expect(summary).toContain("Fresh spend143k");
     expect(summary).not.toContain("2 agents with fresh token usage");
-    expect(summary).not.toContain("claude ·");
   });
 
   it("summarizes live readiness before connection plumbing", async () => {

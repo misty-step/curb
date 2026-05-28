@@ -87,6 +87,8 @@ pub struct SessionView {
     pub provider: String,
     pub state: String,
     pub activity_state: String,
+    pub data_recency: String,
+    pub activity_basis: String,
     pub process_state: String,
     pub usage_state: String,
     pub action_state: String,
@@ -140,6 +142,8 @@ pub struct AgentView {
     pub label: String,
     pub state: String,
     pub activity_state: String,
+    pub data_recency: String,
+    pub activity_basis: String,
     pub process_state: String,
     pub usage_state: String,
     pub action_state: String,
@@ -2092,6 +2096,8 @@ fn build_session_view(
 ) -> SessionView {
     let in_policy_window = session.last_usage.is_some_and(|last| last >= window_start);
     let fresh_usage = session.last_usage.is_some_and(|last| last >= fresh_start);
+    let data_recency = usage_recency(session.last_usage, window_start, fresh_start);
+    let activity_basis = usage_activity_basis(data_recency, correlation.matched);
     let activity_state = if fresh_usage { "spending" } else { "idle" };
     let over_stop = session.latest_spent_tokens >= cfg.usage.kill_turn_tokens;
     let over_warn = session.latest_spent_tokens >= cfg.usage.warn_turn_tokens;
@@ -2130,7 +2136,7 @@ fn build_session_view(
                     "watch-only" => {
                         "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
                     }
-                    _ => "latest turn crossed the stop threshold",
+                    _ => "latest checkpoint crossed the stop threshold",
                 },
             )
         } else if in_policy_window && over_warn {
@@ -2153,7 +2159,7 @@ fn build_session_view(
                     "watch-only" => {
                         "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
                     }
-                    _ => "latest turn crossed the warning threshold",
+                    _ => "latest checkpoint crossed the warning threshold",
                 },
             )
         } else if in_policy_window {
@@ -2163,9 +2169,9 @@ fn build_session_view(
                 "none",
                 1,
                 if fresh_usage {
-                    "fresh token usage is within policy"
+                    "fresh usage checkpoint is within policy"
                 } else {
-                    "token usage is within the policy window, but no fresh token use is visible"
+                    "usage is within the policy window, but no fresh checkpoint is visible"
                 },
             )
         } else if over_stop || over_warn {
@@ -2193,6 +2199,8 @@ fn build_session_view(
         provider: session.provider.clone(),
         state: state.to_string(),
         activity_state: activity_state.to_string(),
+        data_recency: data_recency.to_string(),
+        activity_basis: activity_basis.to_string(),
         process_state: process_state.to_string(),
         usage_state: usage_state.to_string(),
         action_state: action_state.to_string(),
@@ -2286,7 +2294,7 @@ fn build_overview(
     let message = match status {
         "ACTION" => "usage is over a stop threshold",
         "WATCH" => "usage is over a warning threshold",
-        "ACTIVE" => "agents are spending tokens within policy",
+        "ACTIVE" => "fresh usage checkpoints observed within policy",
         _ => "no fresh over-budget usage",
     };
     Overview {
@@ -2316,6 +2324,31 @@ fn usage_activity_start(cfg: &Config, now: DateTime<Utc>) -> DateTime<Utc> {
     let scan = cfg.usage.scan_interval.as_std();
     let freshness = std::time::Duration::from_secs(scan.as_secs().saturating_mul(3).max(30));
     now - chrono::Duration::from_std(freshness).unwrap()
+}
+
+fn usage_recency(
+    last_usage: Option<DateTime<Utc>>,
+    window_start: DateTime<Utc>,
+    fresh_start: DateTime<Utc>,
+) -> &'static str {
+    match last_usage {
+        Some(last) if last >= fresh_start => "fresh",
+        Some(last) if last >= window_start => "recent",
+        Some(_) => "historical",
+        None => "none",
+    }
+}
+
+fn usage_activity_basis(data_recency: &str, process_matched: bool) -> &'static str {
+    match (data_recency, process_matched) {
+        ("fresh", true) => "fresh completed usage checkpoint correlated to a live worker",
+        ("fresh", false) => "fresh completed usage checkpoint with no correlated worker",
+        ("recent", true) => "recent completed usage checkpoint correlated to a live worker",
+        ("recent", false) => "recent completed usage checkpoint with no correlated worker",
+        ("historical", true) => "historical usage checkpoint; worker is still alive",
+        ("historical", false) => "historical usage checkpoint with no correlated worker",
+        _ => "no usage checkpoint observed",
+    }
 }
 
 pub(crate) fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Vec<ProcessMatch> {
@@ -2490,6 +2523,8 @@ fn build_agent_view(
         "matched agent is watch-only"
     };
     let mut activity_state = "idle";
+    let mut data_recency = "none";
+    let mut activity_basis = "process is running with no correlated usage";
     let mut usage_state = "quiet";
     let mut action_state = "none";
     let mut actionable = false;
@@ -2509,6 +2544,8 @@ fn build_agent_view(
             "watch-only"
         };
         activity_state = &session.activity_state;
+        data_recency = &session.data_recency;
+        activity_basis = &session.activity_basis;
         usage_state = &session.usage_state;
         action_state = &session.action_state;
         actionable = session.actionable;
@@ -2529,6 +2566,8 @@ fn build_agent_view(
         label: matched.agent.label.clone(),
         state: state.to_string(),
         activity_state: activity_state.to_string(),
+        data_recency: data_recency.to_string(),
+        activity_basis: activity_basis.to_string(),
         process_state: if matched.agent.termination_allowed() {
             "running"
         } else {

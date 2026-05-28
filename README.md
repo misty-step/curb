@@ -86,7 +86,8 @@ opens that dashboard instead of asking you to manage ports or paste tokens.
 clients and service-style launches.
 `curb usage` reads local Codex and Claude metadata logs and summarizes sessions,
 models, and token usage without printing or storing prompt or response content.
-`curb tail` streams new local usage events as agents spend tokens. Use
+`curb tail` streams completed local usage checkpoints as agents report token
+metadata. Use
 `curb tail --since 1h --interval 2s` for an operator view, or
 `curb tail --once` in scripts and demos.
 `curb status`, `curb runs`, and `curb ack` use usage session keys such as
@@ -96,8 +97,10 @@ handle.
 The built UI is embedded in the Rust binary. `curb app` is the normal launch
 path; `cd ui && npm run dev` is only needed while developing the frontend.
 
-`curb watch` is usage-first when usage monitoring is enabled. It warns when
-recent uncached spend crosses the configured latest-turn limit, and in
+`curb watch` is usage-first when usage monitoring is enabled. Provider logs are
+completion ledgers, not true live token meters, so Curb describes fresh
+checkpoints instead of claiming that a model is spending at this instant. It
+warns when recent uncached checkpoint spend crosses the configured limit, and in
 enforcement mode it stops only a correlated live agent process. Cached/read
 context remains visible as checkpoint data, but it is not treated as fresh spend.
 
