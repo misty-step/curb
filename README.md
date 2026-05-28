@@ -91,7 +91,9 @@ opens that dashboard instead of asking you to manage ports or paste tokens.
 clients and service-style launches.
 `curb usage` reads local Codex and Claude metadata logs and summarizes sessions,
 models, and token usage without printing or storing prompt or response content.
-`curb tail` streams new local usage events.
+`curb tail` streams new local usage events as agents spend tokens. Use
+`curb tail --since 1h --interval 2s` for an operator view, or
+`curb tail --once` in scripts and demos.
 
 The built UI is embedded in the Go binary. `curb app` is the normal launch path;
 `cd ui && npm run dev` is only needed while developing the frontend.

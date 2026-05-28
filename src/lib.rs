@@ -13,6 +13,7 @@ pub mod ledger;
 pub mod platform;
 pub mod runtime;
 pub mod service;
+pub mod tail;
 pub mod usage;
 pub mod usagewatch;
 pub mod web;

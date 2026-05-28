@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
@@ -87,6 +88,21 @@ enum Command {
         /// Scan all known local logs.
         #[arg(long)]
         all: bool,
+    },
+    /// Stream new local provider usage events.
+    Tail {
+        /// Home directory containing provider log roots.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Initial and rolling lookback window such as 5m, 1h, or 30s.
+        #[arg(long, default_value = "5m")]
+        since: String,
+        /// Poll interval such as 2s or 500ms.
+        #[arg(long, default_value = "2s")]
+        interval: String,
+        /// Run one scan and exit.
+        #[arg(long)]
+        once: bool,
     },
     /// Serve the Rust local API on loopback.
     Serve {
@@ -214,6 +230,20 @@ fn run() -> Result<()> {
                 }
             }
         }
+        Some(Command::Tail {
+            home,
+            since,
+            interval,
+            once,
+        }) => {
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            let since = curb::config::parse_duration_for_cli(&since).map_err(anyhow::Error::msg)?;
+            let interval =
+                curb::config::parse_duration_for_cli(&interval).map_err(anyhow::Error::msg)?;
+            tail_command(home, since, interval, once)?;
+        }
         Some(Command::Serve { config, addr, home }) => serve_dashboard(
             config.unwrap_or_else(default_config_path),
             addr,
@@ -261,6 +291,42 @@ fn run() -> Result<()> {
             Cli::command().print_help()?;
             println!();
         }
+    }
+    Ok(())
+}
+
+fn tail_command(
+    home: PathBuf,
+    since: StdDuration,
+    interval: StdDuration,
+    once: bool,
+) -> Result<()> {
+    let reader = curb::usage::Reader::new(home);
+    let mut state = curb::tail::TailState::default();
+    println!("curb tail");
+    if once {
+        println!(
+            "  scanning usage events from the last {}",
+            short_duration(since)
+        );
+    } else {
+        println!(
+            "  watching usage events every {}; Ctrl-C to stop",
+            short_duration(interval)
+        );
+    }
+    println!();
+    loop {
+        let now = Utc::now();
+        let since_at = now - Duration::from_std(since)?;
+        let scan = curb::tail::scan_once(&reader, &mut state, std::io::stdout(), since_at, now)?;
+        if let Some(error) = scan.source_error {
+            eprintln!("curb: tail: {error}");
+        }
+        if once {
+            break;
+        }
+        std::thread::sleep(interval);
     }
     Ok(())
 }
@@ -315,5 +381,18 @@ fn open_dashboard(url: &str) -> Result<()> {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => bail!("open dashboard command exited with {status}"),
         Err(error) => bail!("open dashboard: {error}"),
+    }
+}
+
+fn short_duration(duration: StdDuration) -> String {
+    let seconds = duration.as_secs();
+    if seconds != 0 && seconds.is_multiple_of(3600) {
+        format!("{}h", seconds / 3600)
+    } else if seconds != 0 && seconds.is_multiple_of(60) {
+        format!("{}m", seconds / 60)
+    } else if seconds == 0 && duration.subsec_millis() > 0 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{seconds}s")
     }
 }

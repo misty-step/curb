@@ -118,6 +118,41 @@ fn usage_reads_synthetic_provider_metadata() {
 }
 
 #[test]
+fn tail_once_prints_recent_synthetic_usage_events() {
+    let home = tempdir().expect("home");
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 107);
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.args(["tail", "--once", "--home"])
+        .arg(home.path())
+        .args(["--since", "1h"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("curb tail"))
+        .stdout(predicate::str::contains(
+            "scanning usage events from the last 1h",
+        ))
+        .stdout(predicate::str::contains("codex"))
+        .stdout(predicate::str::contains("session_codex"))
+        .stdout(predicate::str::contains("total=107"))
+        .stdout(predicate::str::contains("output=5"))
+        .stdout(predicate::str::contains("cwd=/repo"));
+}
+
+#[test]
+fn tail_rejects_invalid_duration() {
+    let home = tempdir().expect("home");
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["tail", "--once", "--home"])
+        .arg(home.path())
+        .args(["--since", "soon"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid duration"));
+}
+
+#[test]
 fn dashboard_prints_service_snapshot_from_synthetic_usage() {
     let home = tempdir().expect("home");
     let state = tempdir().expect("state");
