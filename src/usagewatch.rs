@@ -371,3 +371,175 @@ fn format_tokens(tokens: i64) -> String {
         tokens.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    use chrono::TimeZone;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::config::{Config, HumanDuration};
+    use crate::platform::{
+        NotificationCapability, Pid, Platform, PlatformError, Process, Snapshot,
+        TerminationCapability, TerminationResult, TerminationTarget,
+    };
+    use crate::usage::EventKind;
+
+    /// Records which pids it was asked to terminate.
+    #[derive(Default)]
+    struct KillPlatform {
+        terminated: Mutex<Vec<i32>>,
+    }
+
+    impl Platform for KillPlatform {
+        fn capture(&self) -> Result<Snapshot, PlatformError> {
+            Ok(Snapshot::new([]))
+        }
+        fn notification_capability(&self) -> NotificationCapability {
+            NotificationCapability {
+                supported: false,
+                status: "off".to_string(),
+                message: "off".to_string(),
+            }
+        }
+        fn termination_capability(&self) -> TerminationCapability {
+            TerminationCapability {
+                supported: true,
+                status: "ok".to_string(),
+                message: "ok".to_string(),
+            }
+        }
+        fn notify(&self, _: &str, _: &str) -> Result<(), PlatformError> {
+            Ok(())
+        }
+        fn terminate(&self, target: &TerminationTarget, _: Duration) -> TerminationResult {
+            self.terminated
+                .lock()
+                .unwrap()
+                .extend(target.scope().iter().map(|pid| pid.get()));
+            TerminationResult::default()
+        }
+    }
+
+    fn codex_process(now: DateTime<Utc>, pid: i32, cwd: &str) -> Process {
+        Process {
+            pid: Pid::new(pid),
+            ppid: None,
+            name: "codex".to_string(),
+            executable: Some("/usr/local/bin/codex".into()),
+            command: "codex".to_string(),
+            cwd: Some(cwd.into()),
+            started_at: Some(now - chrono::Duration::minutes(5)),
+            username: Some("tester".to_string()),
+            bundle_id: None,
+            team_id: None,
+        }
+    }
+
+    fn over_kill_event(now: DateTime<Utc>, cwd: &str, spent: i64) -> UsageEvent {
+        UsageEvent {
+            kind: EventKind::TokenCheckpoint,
+            provider: "codex".to_string(),
+            source: "test".to_string(),
+            source_path: "fixture.jsonl".into(),
+            session_id: Some("s1".to_string()),
+            turn_id: None,
+            request_id: None,
+            model: None,
+            cwd: Some(cwd.into()),
+            timestamp: Some(now),
+            input_tokens: spent,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: spent,
+            spent_tokens: spent,
+            cumulative_tokens: spent,
+            model_context_window: 0,
+        }
+    }
+
+    #[test]
+    fn enforcement_auto_kills_a_correlated_worker_after_grace() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(30);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        // Over the kill line: grace starts, nothing is terminated yet.
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+        assert!(platform.terminated.lock().unwrap().is_empty());
+
+        // After the grace period, still over the line: the worker is terminated.
+        let after = now + chrono::Duration::seconds(31);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(after, "/repo", 250)],
+                &processes,
+                &platform,
+                after,
+            )
+            .unwrap();
+        assert_eq!(*platform.terminated.lock().unwrap(), vec![4242]);
+    }
+
+    #[test]
+    fn watch_mode_never_terminates() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Alert; // watch, not enforce
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+        let later = now + chrono::Duration::seconds(5);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(later, "/repo", 250)],
+                &processes,
+                &platform,
+                later,
+            )
+            .unwrap();
+        assert!(platform.terminated.lock().unwrap().is_empty());
+    }
+}
