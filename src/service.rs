@@ -543,6 +543,7 @@ fn default_event_message(category: &str, kind: &str) -> String {
 fn default_alert_message(category: &str) -> &'static str {
     match category {
         "stopped" => "Curb stopped a correlated worker.",
+        "stopping" => "Curb started stopping a correlated worker.",
         "grace" => "Curb started an enforcement grace period.",
         "would_stop" => "Curb would stop a correlated worker in enforcement mode.",
         "blocked" => "Curb blocked termination for an uncorrelated or protected process.",

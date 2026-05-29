@@ -261,20 +261,16 @@ impl LedgerEvent {
     }
 
     /// Full alert-view classification, for events where [`is_alert`](Self::is_alert)
-    /// holds.
-    ///
-    /// NOTE: this preserves the exact (quirky) historical mapping. In
-    /// particular `UsageTerminationStarted` / `TerminationStarted` classify as
-    /// the `grace` category and label, because the prior substring logic keyed
-    /// the category on the `started` substring before any `termination` check.
-    /// See the round-trip test and the builder hand-off note.
+    /// holds. The three termination phases stay distinct: `*GraceStarted` is the
+    /// pre-kill waiting state (`grace`), `*TerminationStarted` is the
+    /// kill-in-progress state (`stopping`), and `*TerminationCompleted` is the
+    /// finished state (`stopped`).
     #[must_use]
     pub fn alert_class(self) -> AlertClass {
         let category = match self {
             Self::UsageTerminationCompleted | Self::TerminationCompleted => "stopped",
-            Self::UsageGraceStarted | Self::UsageTerminationStarted | Self::TerminationStarted => {
-                "grace"
-            }
+            Self::UsageGraceStarted => "grace",
+            Self::UsageTerminationStarted | Self::TerminationStarted => "stopping",
             Self::UsageWouldTerminate => "would_stop",
             Self::UsageKillBlocked => "blocked",
             Self::UsageTerminationFailed | Self::TerminationFailed => "failed",
@@ -289,9 +285,8 @@ impl LedgerEvent {
         };
         let label = match self {
             Self::UsageTerminationCompleted | Self::TerminationCompleted => "stopped",
-            Self::UsageGraceStarted | Self::UsageTerminationStarted | Self::TerminationStarted => {
-                "grace"
-            }
+            Self::UsageGraceStarted => "grace",
+            Self::UsageTerminationStarted | Self::TerminationStarted => "stopping",
             Self::UsageWouldTerminate => "would stop",
             Self::UsageKillBlocked => "blocked",
             Self::UsageTerminationFailed | Self::TerminationFailed => "failed",
@@ -700,6 +695,30 @@ mod tests {
     #[test]
     fn unknown_event_type_does_not_parse() {
         assert_eq!(LedgerEvent::parse("totally_made_up"), None);
+    }
+
+    #[test]
+    fn termination_phases_classify_distinctly() {
+        // grace = waiting before the kill; stopping = kill in progress;
+        // stopped = finished. A kill-in-progress must not be mislabeled grace.
+        let grace = LedgerEvent::UsageGraceStarted.alert_class();
+        assert_eq!((grace.category, grace.label), ("grace", "grace"));
+
+        for started in [
+            LedgerEvent::UsageTerminationStarted,
+            LedgerEvent::TerminationStarted,
+        ] {
+            let class = started.alert_class();
+            assert_eq!(
+                (class.category, class.label),
+                ("stopping", "stopping"),
+                "{started:?} should classify as stopping, not grace"
+            );
+            assert!(class.actionable);
+        }
+
+        let done = LedgerEvent::UsageTerminationCompleted.alert_class();
+        assert_eq!((done.category, done.label), ("stopped", "stopped"));
     }
 
     #[test]
