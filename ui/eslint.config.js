@@ -25,6 +25,9 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-hooks/set-state-in-effect": "off",
+      // RATCHET: cap lines per TS/TSX file to prevent god-objects. Remedy on
+      // trip is to extract a module, not raise the cap; ratchet down over time.
+      "max-lines": ["error", { "max": 400, "skipBlankLines": false, "skipComments": false }],
     },
   },
 );

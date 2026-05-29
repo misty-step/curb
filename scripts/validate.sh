@@ -7,6 +7,7 @@ cd "$ROOT"
 "$ROOT/scripts/build-ui.sh" --check
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
+bash "$ROOT/scripts/check-file-length.sh"
 cargo test
 bash demo/006/script/run-backlog-006-demo.sh --dry-run
 (cd ui && npm run typecheck)
