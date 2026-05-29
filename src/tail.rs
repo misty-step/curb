@@ -59,7 +59,7 @@ pub fn render_new_events(
     seen: &mut HashSet<String>,
 ) -> io::Result<usize> {
     let mut events = events.to_vec();
-    events.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
+    events.sort_by_key(|left| left.timestamp);
     let mut rendered = 0;
     for event in events {
         let Some(timestamp) = event.timestamp else {

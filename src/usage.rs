@@ -818,7 +818,7 @@ pub fn summarize(events: &[Event]) -> Vec<SessionSummary> {
         summary.models = models.remove(key).unwrap_or_default().into_iter().collect();
     }
     let mut out = by_key.into_values().collect::<Vec<_>>();
-    out.sort_by(|left, right| right.last.cmp(&left.last));
+    out.sort_by_key(|right| std::cmp::Reverse(right.last));
     out
 }
 
@@ -1060,7 +1060,7 @@ fn dedupe(events: Vec<Event>) -> Vec<Event> {
 }
 
 fn sort_events(events: &mut [Event]) {
-    events.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
+    events.sort_by_key(|left| left.timestamp);
 }
 
 fn event_is_since(event: &Event, since: Option<DateTime<Utc>>) -> bool {

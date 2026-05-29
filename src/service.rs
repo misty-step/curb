@@ -923,7 +923,7 @@ pub fn session_turns(
         .into_iter()
         .filter(|turn| since.is_none_or(|since| turn.at.is_none_or(|at| at >= since)))
         .collect::<Vec<_>>();
-    turns.sort_by(|left, right| right.at.cmp(&left.at));
+    turns.sort_by_key(|right| std::cmp::Reverse(right.at));
     if limit > 0 && turns.len() > limit {
         turns.truncate(limit);
     }

@@ -1,0 +1,7 @@
+# Pin the Rust toolchain so local checks and CI run the SAME clippy/rustfmt.
+# Without this, CI floats to the newest stable while a contributor may be on an
+# older one, so `-D warnings` can pass locally and fail in CI (toolchain drift).
+# Bump deliberately and re-run the gate when you do.
+[toolchain]
+channel = "1.94.0"
+components = ["rustfmt", "clippy"]
