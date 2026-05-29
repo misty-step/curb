@@ -225,7 +225,8 @@ impl<P: Platform> Runtime<P> {
             Ok(snapshot) => Ok(snapshot),
             Err(error) => {
                 self.append_runtime_event(
-                    crate::ledger::Event::new("usage_scan_failed").with_message(error.to_string()),
+                    crate::ledger::Event::new(crate::ledger::LedgerEvent::UsageScanFailed.as_str())
+                        .with_message(error.to_string()),
                 )?;
                 self.rescan(now)
             }

@@ -5,7 +5,7 @@ use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 use crate::config::{Config, Mode};
-use crate::ledger::{self, Ledger};
+use crate::ledger::{self, Ledger, LedgerEvent};
 use crate::platform::{self, Platform};
 use crate::service::{self, ServiceError};
 use crate::usage::Event as UsageEvent;
@@ -101,7 +101,14 @@ impl UsageWatch {
 
         if self.warned.insert(key.to_string()) {
             notify_user(cfg, platform, "Curb usage warning", &message)?;
-            append_event(cfg, "usage_warning", session, correlation, &message, None)?;
+            append_event(
+                cfg,
+                LedgerEvent::UsageWarning,
+                session,
+                correlation,
+                &message,
+                None,
+            )?;
         }
         if !over_stop {
             self.grace.remove(key);
@@ -119,7 +126,7 @@ impl UsageWatch {
                 )?;
                 append_event(
                     cfg,
-                    "usage_kill_blocked",
+                    LedgerEvent::UsageKillBlocked,
                     session,
                     correlation,
                     "usage threshold exceeded but no live process correlation was found",
@@ -148,7 +155,7 @@ impl UsageWatch {
                 notify_user(cfg, platform, title, detail)?;
                 append_event(
                     cfg,
-                    "usage_kill_blocked",
+                    LedgerEvent::UsageKillBlocked,
                     session,
                     correlation,
                     detail,
@@ -163,7 +170,7 @@ impl UsageWatch {
                 notify_user(cfg, platform, "Curb would stop agent", &message)?;
                 append_event(
                     cfg,
-                    "usage_would_terminate",
+                    LedgerEvent::UsageWouldTerminate,
                     session,
                     correlation,
                     &message,
@@ -182,7 +189,7 @@ impl UsageWatch {
             notify_user(cfg, platform, "Curb usage grace period", &message)?;
             append_event(
                 cfg,
-                "usage_grace_started",
+                LedgerEvent::UsageGraceStarted,
                 session,
                 correlation,
                 &message,
@@ -222,7 +229,7 @@ impl UsageWatch {
             )?;
             append_event(
                 cfg,
-                "usage_termination_failed",
+                LedgerEvent::UsageTerminationFailed,
                 session,
                 &termination_correlation,
                 "safety guard rejected termination",
@@ -232,7 +239,7 @@ impl UsageWatch {
         };
         append_event(
             cfg,
-            "usage_termination_started",
+            LedgerEvent::UsageTerminationStarted,
             session,
             &termination_correlation,
             &message,
@@ -242,7 +249,7 @@ impl UsageWatch {
         notify_user(cfg, platform, "Curb stopped agent", &message)?;
         append_event(
             cfg,
-            "usage_termination_completed",
+            LedgerEvent::UsageTerminationCompleted,
             session,
             &termination_correlation,
             &message,
@@ -304,7 +311,7 @@ fn notify_user<P: Platform>(
     }
     if let Err(error) = platform.notify(title, message) {
         Ledger::open(&cfg.ledger.path)?.append(
-            ledger::Event::new("notification_failed")
+            ledger::Event::new(LedgerEvent::NotificationFailed.as_str())
                 .with_message(error.to_string())
                 .with_mode(cfg.mode.to_string()),
         )?;
@@ -314,13 +321,13 @@ fn notify_user<P: Platform>(
 
 fn append_event(
     cfg: &Config,
-    event_type: &str,
+    event_type: LedgerEvent,
     session: &service::Session,
     correlation: &service::Correlation,
     message: &str,
     result: Option<Value>,
 ) -> Result<(), UsageWatchError> {
-    let mut event = ledger::Event::new(event_type)
+    let mut event = ledger::Event::new(event_type.as_str())
         .with_message(message.to_string())
         .with_data(event_data(session, correlation, result));
     event.agent_id = correlation.agent.as_ref().map(|agent| agent.id.clone());

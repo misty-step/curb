@@ -643,35 +643,42 @@ fn effective_limit(limit: usize, len: usize) -> usize {
 }
 
 fn new_event_view(event: &ledger::Event) -> EventView {
-    let (category, kind) = event_class(&event.event_type);
+    let view = ledger::LedgerEvent::parse(&event.event_type)
+        .map_or(DEFAULT_VIEW_CLASS, ledger::LedgerEvent::view_class);
     EventView {
         seq: event.seq,
         at: event.ts,
-        category: category.to_string(),
-        kind: kind.to_string(),
+        category: view.category.to_string(),
+        kind: view.kind.to_string(),
         message: event
             .message
             .clone()
-            .unwrap_or_else(|| default_event_message(category, kind)),
+            .unwrap_or_else(|| default_event_message(view.category, view.kind)),
         run_id: event.run_id.clone(),
         agent_id: event.agent_id.clone(),
         mode: event.mode.clone(),
     }
 }
 
+const DEFAULT_VIEW_CLASS: ledger::ViewClass = ledger::ViewClass {
+    category: "other",
+    kind: "recorded",
+};
+
 fn new_alert_view(event: &ledger::Event) -> Option<AlertView> {
-    if !alert_event(&event.event_type) {
+    let parsed = ledger::LedgerEvent::parse(&event.event_type)?;
+    if !parsed.is_alert() {
         return None;
     }
-    let category = alert_category(&event.event_type);
+    let alert = parsed.alert_class();
     Some(AlertView {
-        severity: alert_severity(event).to_string(),
-        label: alert_label(&event.event_type).to_string(),
-        category: category.to_string(),
+        severity: alert.severity.to_string(),
+        label: alert.label.to_string(),
+        category: alert.category.to_string(),
         message: event
             .message
             .clone()
-            .unwrap_or_else(|| default_alert_message(category).to_string()),
+            .unwrap_or_else(|| default_alert_message(alert.category).to_string()),
         at: event.ts,
         seq: event.seq,
         run_id: event.run_id.clone(),
@@ -681,31 +688,10 @@ fn new_alert_view(event: &ledger::Event) -> Option<AlertView> {
         cwd: string_data(event, "cwd"),
         session_key: None,
         session_id: string_data(event, "session_id"),
-        actionable: actionable_event(event),
+        actionable: alert.actionable,
         can_acknowledge: false,
-        explanation: alert_explanation(&event.event_type).to_string(),
+        explanation: alert.explanation.to_string(),
     })
-}
-
-fn event_class(event_type: &str) -> (&'static str, &'static str) {
-    match event_type {
-        "service_started" => ("service", "started"),
-        "service_stopped" => ("service", "stopped"),
-        "run_started" => ("run", "started"),
-        "run_stopped" => ("run", "stopped"),
-        "ack_received" | "session_ack_received" => ("ack", "received"),
-        "ack_rejected" => ("ack", "rejected"),
-        "policy_warning" | "usage_warning" => ("alert", "warning"),
-        "usage_would_terminate" => ("alert", "would_stop"),
-        "usage_kill_blocked" => ("alert", "blocked"),
-        "usage_grace_started" => ("alert", "grace"),
-        "usage_termination_started" | "termination_started" => ("termination", "started"),
-        "usage_termination_completed" | "termination_completed" => ("termination", "completed"),
-        "usage_termination_failed" | "termination_failed" => ("termination", "failed"),
-        "scan_failed" | "usage_scan_failed" => ("error", "scan_failed"),
-        "notification_failed" => ("error", "notification_failed"),
-        _ => ("other", "recorded"),
-    }
 }
 
 fn default_event_message(category: &str, kind: &str) -> String {
@@ -720,60 +706,6 @@ fn default_event_message(category: &str, kind: &str) -> String {
     }
 }
 
-fn alert_event(event_type: &str) -> bool {
-    event_type.contains("warning")
-        || event_type.contains("terminate")
-        || event_type.contains("termination")
-        || event_type.contains("kill")
-        || event_type.contains("grace")
-}
-
-fn alert_category(event_type: &str) -> &'static str {
-    if event_type.contains("completed") {
-        "stopped"
-    } else if event_type.contains("started") || event_type.contains("grace") {
-        "grace"
-    } else if event_type.contains("would") {
-        "would_stop"
-    } else if event_type.contains("blocked") {
-        "blocked"
-    } else if event_type.contains("failed") {
-        "failed"
-    } else {
-        "warning"
-    }
-}
-
-fn alert_severity(event: &ledger::Event) -> &'static str {
-    if event.event_type == "usage_termination_completed" {
-        "stop"
-    } else if event.event_type.contains("failed") {
-        "error"
-    } else if event.event_type.contains("blocked") {
-        "blocked"
-    } else if event.event_type.contains("would") || event.event_type.contains("grace") {
-        "watch"
-    } else {
-        "warn"
-    }
-}
-
-fn alert_label(event_type: &str) -> &'static str {
-    if event_type.contains("completed") {
-        "stopped"
-    } else if event_type.contains("started") || event_type.contains("grace") {
-        "grace"
-    } else if event_type.contains("would") {
-        "would stop"
-    } else if event_type.contains("blocked") {
-        "blocked"
-    } else if event_type.contains("failed") {
-        "failed"
-    } else {
-        "warning"
-    }
-}
-
 fn default_alert_message(category: &str) -> &'static str {
     match category {
         "stopped" => "Curb stopped a correlated worker.",
@@ -782,29 +714,6 @@ fn default_alert_message(category: &str) -> &'static str {
         "blocked" => "Curb blocked termination for an uncorrelated or protected process.",
         "failed" => "Curb could not complete a policy action.",
         _ => "Usage or runtime crossed policy.",
-    }
-}
-
-fn actionable_event(event: &ledger::Event) -> bool {
-    matches!(
-        event.event_type.as_str(),
-        "usage_termination_started" | "usage_termination_completed"
-    )
-}
-
-fn alert_explanation(event_type: &str) -> &'static str {
-    match event_type {
-        "usage_would_terminate" => {
-            "Alert mode: Curb would stop this correlated worker in enforcement mode."
-        }
-        "usage_kill_blocked" => {
-            "Curb did not stop anything because the session was uncorrelated or watch-only."
-        }
-        "usage_grace_started" => "Enforcement grace period started for a correlated worker.",
-        "usage_termination_started" => "Curb started terminating a correlated worker.",
-        "usage_termination_completed" => "Curb completed termination for a correlated worker.",
-        "policy_warning" | "usage_warning" => "Usage or runtime crossed the warning policy.",
-        _ => "",
     }
 }
 
@@ -1564,7 +1473,7 @@ impl<'a, P: Platform> Service<'a, P> {
             ServiceError::StopConflict("process identity could not be revalidated".to_string())
         })?;
         self.append_manual_stop_event(
-            "manual_stop_started",
+            ledger::LedgerEvent::ManualStopStarted,
             &session,
             &correlation,
             &target,
@@ -1575,7 +1484,7 @@ impl<'a, P: Platform> Service<'a, P> {
             .platform
             .terminate(&target, self.cfg.usage.grace_period.as_std());
         self.append_manual_stop_event(
-            "manual_stop_completed",
+            ledger::LedgerEvent::ManualStopCompleted,
             &session,
             &correlation,
             &target,
@@ -1614,7 +1523,7 @@ impl<'a, P: Platform> Service<'a, P> {
         );
         data.insert("until".to_string(), Value::String(ack.until.to_rfc3339()));
         self.append_ledger_event(
-            ledger::Event::new("session_ack_received")
+            ledger::Event::new(ledger::LedgerEvent::SessionAckReceived.as_str())
                 .with_data(data)
                 .with_message(ack.reason.clone()),
         )
@@ -1622,14 +1531,14 @@ impl<'a, P: Platform> Service<'a, P> {
 
     fn append_manual_stop_event(
         &self,
-        event_type: &str,
+        event_type: ledger::LedgerEvent,
         session: &Session,
         correlation: &Correlation,
         target: &platform::TerminationTarget,
         result: Option<&str>,
         reason: &str,
     ) -> Result<(), ServiceError> {
-        let mut event = ledger::Event::new(event_type).with_data(manual_stop_event_data(
+        let mut event = ledger::Event::new(event_type.as_str()).with_data(manual_stop_event_data(
             session,
             correlation,
             target,
