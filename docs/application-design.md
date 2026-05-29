@@ -15,7 +15,10 @@ Curb safely do?
 ```
 
 The app is a usage monitor with process correlation. Runtime is supporting
-evidence. Token turns are the primary risk primitive.
+evidence. The primary risk primitive is **turn spend**: the tokens an agent has
+consumed since your last input. A runaway is one human instruction that triggers
+unbounded autonomous spend, so the turn — not a rolling clock or a single model
+call — is the unit Curb warns and enforces on.
 
 ## Product Shape
 
@@ -219,37 +222,28 @@ Agents are evidence. Sessions lead the UI because spend is the product.
 
 ## State Vocabulary
 
-Use three separate state axes everywhere.
+Each agent carries exactly two state words plus a capability flag. They are
+independent: "is it spending" and "what can Curb do about it" are different
+facts.
 
-Process state:
+`status` — is the agent active right now?
 
-- `running`: live worker exists.
-- `idle`: live worker exists with no recent correlated spend.
-- `watch-only`: visible but not an enforcement target.
-- `unknown`: usage exists, but process correlation is missing or weak.
-- `no-process`: historical usage exists with no live process.
+- `working`: a fresh usage checkpoint landed within the activity window.
+- `idle`: alive or recently seen, but not spending now.
 
-Usage state:
+`alert` — where does the current turn sit against your lines?
 
-- `quiet`: no token usage in the current policy window.
-- `quiet-high`: historically expensive but currently quiet.
-- `spending`: recent usage below threshold.
-- `warn`: latest turn crossed warning threshold.
-- `stop`: latest turn crossed stop threshold.
-- `acknowledged`: policy crossing is suppressed until a bounded time.
+- `ok`: within limits (or acknowledged).
+- `warn`: this turn crossed the warn line.
+- `kill`: this turn crossed the kill line.
 
-Action state:
+`can_stop` — true only when Curb could safely terminate now: enforce mode, a
+correlated live enforceable worker, over the kill line, not acknowledged. The
+actual stop still revalidates process identity at the instant of the kill.
 
-- `none`: no action needed.
-- `notify`: alert has been or should be sent.
-- `acknowledge`: user can extend the session.
-- `would-stop`: alert mode says enforcement would stop this if enabled.
-- `stop-pending`: enforcement mode and grace are active.
-- `stopped`: Curb terminated a revalidated worker.
-- `blocked`: policy crossed, but Curb cannot prove a safe target.
-
-`blocked` is a successful safety state. The UI should make it legible, not bury
-it as a generic error.
+When `alert` is `kill` but `can_stop` is false, the row's one-line explanation
+says why Curb will not act (uncorrelated, watch-only app, or warn-only mode).
+That is a successful safety state, not an error — the UI makes it legible.
 
 ## UI Information Architecture
 

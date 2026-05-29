@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Curb — A Walkthrough</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg:#0a0e13; --bg2:#0e141c; --panel:#121922; --panel2:#161f2a;
+    --border:#1f2b39; --border2:#2a3a4d;
+    --ink:#dce4ee; --muted:#8995a6; --faint:#5c6878;
+    --accent:#5eead4;
+    --green:#4ade80; --blue:#60a5fa; --amber:#fbbf24; --red:#f87171;
+    --purple:#a78bfa; --cyan:#5eead4; --pink:#f472b6;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1080px;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; scroll-padding-top:72px; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); line-height:1.62; font-size:16px;
+    -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(1200px 600px at 80% -10%, rgba(94,234,212,.06), transparent),
+                     radial-gradient(900px 500px at -10% 10%, rgba(96,165,250,.05), transparent);
+    background-attachment:fixed;
+  }
+  a { color:var(--cyan); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  /* ---- Top nav ---- */
+  nav {
+    position:sticky; top:0; z-index:50; backdrop-filter:blur(12px);
+    background:rgba(10,14,19,.82); border-bottom:1px solid var(--border);
+  }
+  nav .wrap { max-width:var(--maxw); margin:0 auto; padding:11px 22px;
+    display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+  nav .logo { display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:-.01em; }
+  nav .logo .dot { width:18px; height:18px; border-radius:6px;
+    background:linear-gradient(135deg,var(--cyan),var(--blue)); box-shadow:0 0 16px rgba(94,234,212,.5); }
+  nav .links { display:flex; gap:4px; flex-wrap:wrap; margin-left:auto; }
+  nav .links a { color:var(--muted); font-size:13px; padding:5px 10px; border-radius:7px; font-weight:500; }
+  nav .links a:hover { color:var(--ink); background:var(--panel2); text-decoration:none; }
+
+  /* ---- Layout ---- */
+  main { max-width:var(--maxw); margin:0 auto; padding:0 22px 120px; }
+  section { padding-top:54px; }
+  h1,h2,h3 { letter-spacing:-.02em; line-height:1.18; }
+  h2 { font-size:30px; margin:0 0 6px; }
+  h2 .num { color:var(--faint); font-variant-numeric:tabular-nums; font-weight:600; margin-right:12px; font-size:20px; }
+  h3 { font-size:18px; margin:30px 0 8px; color:var(--ink); }
+  .lede { color:var(--muted); font-size:17px; max-width:70ch; margin:2px 0 18px; }
+  p { max-width:74ch; }
+  .muted { color:var(--muted); }
+
+  /* ---- Hero ---- */
+  header.hero { padding:78px 0 30px; }
+  header.hero .kicker { color:var(--cyan); font-weight:600; font-size:13px;
+    letter-spacing:.14em; text-transform:uppercase; }
+  header.hero h1 { font-size:64px; margin:14px 0 8px; font-weight:800;
+    background:linear-gradient(180deg,#fff,#9fb2c6); -webkit-background-clip:text;
+    background-clip:text; color:transparent; }
+  header.hero .tag { font-size:21px; color:var(--muted); max-width:64ch; }
+  header.hero .tag b { color:var(--ink); font-weight:600; }
+
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:34px 0 6px; }
+  .stat { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; }
+  .stat .n { font-size:26px; font-weight:750; letter-spacing:-.02em; }
+  .stat .l { font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .stat .n.g{color:var(--green)} .stat .n.b{color:var(--blue)}
+  .stat .n.a{color:var(--amber)} .stat .n.p{color:var(--purple)}
+
+  /* ---- Cards / callouts ---- */
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:22px 24px; margin:18px 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .callout { border-left:3px solid var(--cyan); background:linear-gradient(90deg,rgba(94,234,212,.07),transparent);
+    padding:14px 18px; border-radius:0 10px 10px 0; margin:18px 0; }
+  .callout.amber { border-color:var(--amber); background:linear-gradient(90deg,rgba(251,191,36,.08),transparent); }
+  .callout.red { border-color:var(--red); background:linear-gradient(90deg,rgba(248,113,113,.08),transparent); }
+  .callout.green { border-color:var(--green); background:linear-gradient(90deg,rgba(74,222,128,.08),transparent); }
+  .callout p { margin:0; }
+  .callout .t { font-weight:700; display:block; margin-bottom:3px; }
+
+  /* ---- Chips ---- */
+  .chip { display:inline-flex; align-items:center; gap:5px; font-family:var(--mono);
+    font-size:12px; padding:2px 9px; border-radius:20px; border:1px solid var(--border2);
+    background:var(--panel2); color:var(--muted); white-space:nowrap; }
+  .chip.green{color:var(--green);border-color:rgba(74,222,128,.4);background:rgba(74,222,128,.08)}
+  .chip.blue{color:var(--blue);border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.08)}
+  .chip.amber{color:var(--amber);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.08)}
+  .chip.red{color:var(--red);border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.08)}
+  .chip.purple{color:var(--purple);border-color:rgba(167,139,250,.4);background:rgba(167,139,250,.08)}
+  .chips { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0; }
+
+  /* ---- Code ---- */
+  code { font-family:var(--mono); font-size:.86em; background:var(--panel2);
+    padding:1.5px 6px; border-radius:5px; border:1px solid var(--border); color:#bfe6dd; }
+  pre { background:#080c11; border:1px solid var(--border); border-radius:12px;
+    padding:16px 18px; overflow-x:auto; font-family:var(--mono); font-size:13px; line-height:1.6; }
+  pre code { background:none; border:none; padding:0; color:#cdd8e4; }
+  .c-com{color:#5c6878} .c-key{color:var(--pink)} .c-str{color:var(--green)}
+  .c-fn{color:var(--blue)} .c-num{color:var(--amber)}
+
+  /* ---- Tables ---- */
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:14px; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--faint); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  tr:hover td { background:rgba(255,255,255,.015); }
+  td code { font-size:12px; white-space:nowrap; }
+  .t-narrow td:first-child, .t-narrow th:first-child { white-space:nowrap; }
+
+  /* ---- Diagrams ---- */
+  .mermaid { background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:22px; margin:18px 0; text-align:center; overflow-x:auto; }
+  figcaption { color:var(--faint); font-size:12.5px; text-align:center; margin-top:-6px; margin-bottom:8px; }
+
+  /* pipeline diagram */
+  .pipe { display:flex; align-items:stretch; gap:0; margin:20px 0; flex-wrap:wrap; }
+  .pipe .step { flex:1; min-width:150px; background:var(--panel); border:1px solid var(--border);
+    border-radius:12px; padding:14px 16px; position:relative; }
+  .pipe .arrow { display:flex; align-items:center; color:var(--faint); padding:0 4px; font-size:22px; }
+  .pipe .step .k { font-size:11px; color:var(--cyan); font-family:var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .pipe .step .h { font-weight:700; margin:3px 0 4px; font-size:15px; }
+  .pipe .step .d { font-size:12.5px; color:var(--muted); }
+
+  /* axis cards */
+  .axis { border-radius:14px; padding:18px 20px; border:1px solid var(--border); background:var(--panel); }
+  .axis h4 { margin:0 0 4px; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .axis .badge { font-size:10px; font-family:var(--mono); padding:2px 7px; border-radius:6px; }
+  .axis ul { margin:8px 0 0; padding-left:0; list-style:none; }
+  .axis li { font-size:13px; padding:3px 0; color:var(--muted); display:flex; gap:8px; }
+  .axis li b { color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:600; min-width:96px; display:inline-block; }
+
+  .gauntlet { counter-reset:g; margin:18px 0; }
+  .gauntlet .gate { display:flex; gap:14px; padding:13px 16px; border:1px solid var(--border);
+    border-radius:11px; margin:8px 0; background:var(--panel); align-items:flex-start; }
+  .gauntlet .gate::before { counter-increment:g; content:counter(g); flex:none;
+    width:26px; height:26px; border-radius:8px; background:rgba(248,113,113,.12); color:var(--red);
+    display:grid; place-items:center; font-weight:700; font-size:13px; font-family:var(--mono); }
+  .gauntlet .gate .gx { font-weight:650; font-size:14px; }
+  .gauntlet .gate .gd { color:var(--muted); font-size:13px; }
+
+  hr.sep { border:none; border-top:1px solid var(--border); margin:0; }
+  .ascii { font-family:var(--mono); font-size:12.5px; line-height:1.5; white-space:pre; color:var(--muted); }
+
+  footer { max-width:var(--maxw); margin:0 auto; padding:40px 22px 60px; color:var(--faint);
+    border-top:1px solid var(--border); font-size:13.5px; }
+
+  @media (max-width:780px){
+    header.hero h1{font-size:42px}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .grid2,.grid3{grid-template-columns:1fr}
+    nav .links{display:none}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="logo"><span class="dot"></span> Curb</span>
+    <div class="links">
+      <a href="#idea">Big idea</a>
+      <a href="#arch">Architecture</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#modules">Modules</a>
+      <a href="#state">State model</a>
+      <a href="#policy">Policy</a>
+      <a href="#safety">Safety</a>
+      <a href="#api">API</a>
+      <a href="#cli">CLI</a>
+      <a href="#ui">UI</a>
+      <a href="#build">Build</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <main style="padding-bottom:0">
+    <div class="kicker">Local AI-agent visibility &amp; watchdog</div>
+    <h1>Curb</h1>
+    <p class="tag">One local service that watches how much your AI coding agents are <b>spending</b> — tokens, models, sessions — then <b>warns</b> and, only when you ask it to, <b>stops</b> a runaway worker. The CLI and the web dashboard are thin clients of that service. <b>No prompt or response content is ever captured.</b></p>
+
+    <div class="stats">
+      <div class="stat"><div class="n b">~13.7k</div><div class="l">lines of Rust across 13 deep modules</div></div>
+      <div class="stat"><div class="n g">179</div><div class="l">tests (140 Rust + 39 UI)</div></div>
+      <div class="stat"><div class="n a">2</div><div class="l">modes: Watch · Enforce</div></div>
+      <div class="stat"><div class="n p">0</div><div class="l">bytes of prompt content stored</div></div>
+    </div>
+    <p class="muted" style="font-size:13.5px;margin-top:14px">A single Rust binary. <code>cargo build --release --bin curb</code> → <code>curb app</code> serves an embedded React dashboard on loopback and opens your browser. Rust owns everything stateful; the UI just renders.</p>
+  </main>
+</header>
+
+<main>
+
+<!-- ============ BIG IDEA ============ -->
+<section id="idea">
+  <h2><span class="num">01</span>The big idea</h2>
+  <p class="lede">An agent process can sit idle for hours burning nothing. A tight agent loop can vaporize a model budget in minutes. So Curb measures <em>spend</em>, not clock time.</p>
+
+  <div class="grid3">
+    <div class="card" style="margin:0">
+      <h3 style="margin:0 0 6px">Tokens are the risk primitive</h3>
+      <p class="muted" style="font-size:14px;margin:0">Wall-clock runtime is demoted to a stale/stuck-process hint. The first question Curb answers is <em>“what is spending tokens right now, what is idle, what is risky?”</em></p>
+    </div>
+    <div class="card" style="margin:0">
+      <h3 style="margin:0 0 6px">Metadata only, ever</h3>
+      <p class="muted" style="font-size:14px;margin:0">Curb reads the local usage logs Codex &amp; Claude already write — token counts, model ids, session ids, cwd, timestamps. Prompt/response text, files, screenshots, and keystrokes are out of scope and rejected at config load.</p>
+    </div>
+    <div class="card" style="margin:0">
+      <h3 style="margin:0 0 6px">The endpoint owns policy</h3>
+      <p class="muted" style="font-size:14px;margin:0">No cloud control plane. One local service correlates usage to live processes, evaluates policy, notifies, and (only in enforcement mode) terminates — then writes an append-only audit ledger.</p>
+    </div>
+  </div>
+
+  <h3>The one metric: turn spend</h3>
+  <div class="grid2">
+    <div class="callout green" style="margin-top:6px"><span class="t">Turn spend</span>Tokens an agent has consumed <em>since your last input</em>. Codex <code>user_message</code> events and Claude typed-input rows mark turn boundaries; Curb sums the fresh spend after the latest boundary. This single number drives the headline and the warn/kill lines.</div>
+    <div class="callout" style="margin-top:6px"><span class="t">Spent, not context</span>Spend = uncached input + cache-creation + output + reasoning. <em>Cached reads are excluded</em> — re-reading a big context isn't fresh work. A finished expensive turn that's now idle does not alert.</div>
+  </div>
+  <p class="muted" style="font-size:14px">Every agent is described by three facts: <code>turn_tokens</code> (spend this turn), <code>status</code> (<code>working</code> or <code>idle</code>), and <code>alert</code> (<code>ok</code>, <code>warn</code>, or <code>kill</code>). That's the whole vocabulary — there is no checkpoint/window/recency jargon.</p>
+
+  <h3>Two operating modes</h3>
+  <table class="t-narrow">
+    <thead><tr><th>Mode</th><th>What it does</th><th>Can it kill?</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip amber">Watch</span></td><td>Track every agent's turn spend, surface it in the dashboard, notify you when a turn crosses the warn line, and allow <code>curb ack</code> extensions. The default.</td><td><b style="color:var(--green)">Never</b></td></tr>
+      <tr><td><span class="chip red">Enforce</span></td><td>Everything in Watch, plus: when a turn crosses the kill line, start a grace period, re-validate the worker's identity, then terminate the correlated worker tree.</td><td><b style="color:var(--red)">Yes — gated</b></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="arch">
+  <h2><span class="num">02</span>Architecture at a glance</h2>
+  <p class="lede">A deep daemon surrounded by thin clients. The clients sort, filter, select, and render — they never parse logs, inspect process trees, recompute policy, or decide what's safe to kill.</p>
+
+  <figure>
+  <div class="mermaid">
+flowchart LR
+  subgraph IN["Local facts"]
+    P["OS process table"]
+    L["Provider usage logs<br/>~/.codex · ~/.claude"]
+    C["User / managed<br/>config.yaml"]
+  end
+  subgraph D["curb Rust service (the daemon)"]
+    direction TB
+    PL["platform.rs<br/>capture · notify · terminate"]
+    US["usage.rs<br/>incremental ingestion"]
+    SV["service.rs<br/>read models · correlation<br/>states · safety"]
+    UW["usagewatch.rs<br/>policy engine"]
+    RT["runtime.rs<br/>orchestration · cache"]
+    LG["ledger.rs<br/>append-only audit"]
+    AP["api.rs / http.rs<br/>loopback HTTP + token"]
+  end
+  subgraph CL["Thin clients"]
+    W["Embedded web UI"]
+    K["curb CLI"]
+    T["future Tauri tray"]
+  end
+  P --> PL --> SV
+  L --> US --> SV
+  C --> RT --> SV
+  SV --> UW
+  UW --> LG
+  UW --> PL
+  RT --> AP
+  SV --> RT
+  AP --> W
+  AP --> K
+  AP --> T
+  </div>
+  <figcaption>The daemon owns every stateful, privileged, or safety-critical concern. <code>service.rs</code> is the application boundary; HTTP/CLI/tray speak only to its views and actions.</figcaption>
+  </figure>
+
+  <div class="callout"><span class="t">The deep-module bet</span>Each <code>src/*.rs</code> file hides a hard problem behind a small surface: provider log quirks, process-identity safety, policy thresholds, the audit ledger. Clients compose those modules instead of reimplementing their internals. Information-hiding is the architecture — Tauri/tray/installers are just future packaging around the same local API.</div>
+</section>
+
+<!-- ============ PIPELINE ============ -->
+<section id="pipeline">
+  <h2><span class="num">03</span>The data pipeline</h2>
+  <p class="lede">Raw provider log lines become a coherent, sorted, de-duplicated read model in five hops. Everything downstream renders from a single <code>Snapshot</code>.</p>
+
+  <div class="pipe">
+    <div class="step"><div class="k">ingest</div><div class="h">Raw rows</div><div class="d">JSONL files scanned incrementally by path · size · mtime · prefix-hash. Live Codex logs tail the last 256&nbsp;KB.</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">normalize</div><div class="h">Event</div><div class="d">Provider-neutral shape: provider, session, turn, model, cwd, ts, and the full token breakdown incl. <code>spent_tokens</code>.</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">dedupe</div><div class="h">Sessions</div><div class="d">Events grouped by <code>provider:session_id</code>, sorted by time, with rolling-window &amp; latest-turn aggregates.</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">correlate</div><div class="h">Views</div><div class="d">Sessions matched to live processes; each gets a 3-axis state, risk rank, and a plain-English explanation.</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">serve</div><div class="h">Snapshot</div><div class="d">Cached read model: <code>overview + agents + sessions + turns</code>, served over loopback &amp; rendered by clients.</div></div>
+  </div>
+
+  <h3>Incremental ingestion (the part that makes it cheap to leave open)</h3>
+  <p>The <code>usage::Reader</code> caches parsed events per file. On each scan it compares <code>(size, mtime)</code>; unchanged files return cached events instantly. When a file grew, it verifies the old prefix still hashes the same (catching truncation/replacement) and parses only the appended bytes. The cache is persisted to <code>usage-cache.json</code> with <code>0600</code> perms, so a daemon restart resumes mid-stream instead of re-reading everything.</p>
+  <div class="chips">
+    <span class="chip green">size+mtime fast path</span>
+    <span class="chip blue">prefix-hash tamper check</span>
+    <span class="chip amber">append-only re-parse</span>
+    <span class="chip purple">live-tail last 256KB</span>
+    <span class="chip">deleted-file pruning</span>
+    <span class="chip">per-provider error isolation</span>
+  </div>
+  <p class="muted" style="font-size:14px">Provider adapters are allowed to be uneven. Codex and Claude expose rich local metadata today; a bad row in one provider becomes a <em>source-health error</em>, never a fatal dashboard failure — the other provider still loads.</p>
+
+  <h3>How each provider maps to one Event shape</h3>
+  <table>
+    <thead><tr><th>Provider</th><th>Source</th><th>Checkpoint = </th><th>Spent = </th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip blue">codex</span></td><td><code>~/.codex/sessions</code> (live, recursive)<br/><code>~/.codex/archived_sessions</code></td><td><code>last_token_usage.total_tokens</code></td><td><code>(input + output + reasoning).min(total)</code></td></tr>
+      <tr><td><span class="chip purple">claude</span></td><td><code>~/.claude/projects/**</code> (per request row)</td><td><code>input + cache_read + cache_creation + output</code></td><td><code>input + cache_creation + output</code> <span class="muted">(excludes cache_read)</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ MODULES ============ -->
+<section id="modules">
+  <h2><span class="num">04</span>The module map</h2>
+  <p class="lede">Thirteen Rust modules, ordered roughly by depth. The two giants — <code>service.rs</code> and <code>api.rs</code> — are the boundary and the adapter; everything else feeds them.</p>
+
+  <table class="t-narrow">
+    <thead><tr><th>Module</th><th>LOC</th><th>Owns</th></tr></thead>
+    <tbody>
+      <tr><td><code>service.rs</code></td><td>3633</td><td><b>The application boundary.</b> Builds <code>Snapshot</code>, all the views, the 3-axis state vocabulary, session↔process correlation, risk ranking, acks, and sealed-target stop logic.</td></tr>
+      <tr><td><code>api.rs</code></td><td>1811</td><td>Token-gated loopback HTTP adapter. Routing, auth (bearer / header / cookie), CORS, same-origin CSRF guard, embedded-UI serving.</td></tr>
+      <tr><td><code>usage.rs</code></td><td>1600</td><td>Provider log readers, the normalized <code>Event</code>, incremental file cache, dedupe, session summaries.</td></tr>
+      <tr><td><code>runtime.rs</code></td><td>1423</td><td>Daemon orchestration: scan ticks, snapshot cache + deltas, config persistence, the background usage watcher, action plumbing.</td></tr>
+      <tr><td><code>config.rs</code></td><td>1211</td><td>Strict YAML loading, defaults, validation, policy inheritance, the three presets, human-duration parsing.</td></tr>
+      <tr><td><code>platform.rs</code></td><td>787</td><td>macOS/Win/Linux process capture (<code>sysinfo</code>), notifications, and the <b>sealed</b> <code>TerminationTarget</code> + revalidated kill.</td></tr>
+      <tr><td><code>cli.rs</code></td><td>773</td><td>Command implementations: init, config, dashboard, doctor, status, scan, runs, ack, install.</td></tr>
+      <tr><td><code>main.rs</code></td><td>556</td><td>clap command tree + composition: <code>watch</code>, <code>serve</code>, <code>app</code>, <code>tail</code>, <code>usage</code>, and routing into <code>cli.rs</code>.</td></tr>
+      <tr><td><code>http.rs</code></td><td>435</td><td>Tiny blocking loopback HTTP server: <code>bind_loopback</code>, request limits, <code>Connection: close</code>.</td></tr>
+      <tr><td><code>ledger.rs</code></td><td>414</td><td>Append-only NDJSON journal with <code>seq</code> + hash chaining + sensitive-data scrubbing.</td></tr>
+      <tr><td><code>usagewatch.rs</code></td><td>373</td><td>The policy engine: warn/stop evaluation, grace state machine, enforcement decision, notifications.</td></tr>
+      <tr><td><code>dashboard.rs</code></td><td>303</td><td>The terminal dashboard renderer for <code>curb dashboard</code>.</td></tr>
+      <tr><td><code>tail.rs</code></td><td>298</td><td>Streaming new usage checkpoints for <code>curb tail</code>.</td></tr>
+      <tr><td><code>web.rs</code></td><td>112</td><td>Serves the build-time-embedded UI assets (SPA fallback, MIME types).</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ STATE MODEL ============ -->
+<section id="state">
+  <h2><span class="num">05</span>The state model: two words plus a flag</h2>
+  <p class="lede">Each agent carries two independent state words and one capability flag — because “is it spending now” and “what can Curb do about it” are genuinely different facts. This replaced an eight-value, three-axis vocabulary that nobody could read at a glance.</p>
+
+  <div class="grid3">
+    <div class="axis" style="border-top:2px solid var(--green)">
+      <h4>status <span class="badge" style="background:rgba(74,222,128,.15);color:var(--green)">activity</span></h4>
+      <p class="muted" style="font-size:12.5px;margin:0 0 4px">Is it spending right now?</p>
+      <ul>
+        <li><b>working</b> fresh checkpoint just landed</li>
+        <li><b>idle</b> alive/recent, not spending now</li>
+      </ul>
+    </div>
+    <div class="axis" style="border-top:2px solid var(--amber)">
+      <h4>alert <span class="badge" style="background:rgba(251,191,36,.15);color:var(--amber)">vs your lines</span></h4>
+      <p class="muted" style="font-size:12.5px;margin:0 0 4px">Where is this turn vs warn/kill?</p>
+      <ul>
+        <li><b>ok</b> within limits (or acknowledged)</li>
+        <li><b>warn</b> this turn crossed warn</li>
+        <li><b>kill</b> this turn crossed kill</li>
+      </ul>
+    </div>
+    <div class="axis" style="border-top:2px solid var(--red)">
+      <h4>can_stop <span class="badge" style="background:rgba(248,113,113,.15);color:var(--red)">safety gate</span></h4>
+      <p class="muted" style="font-size:12.5px;margin:0 0 4px">Could Curb safely stop it now?</p>
+      <ul>
+        <li><b>true</b> enforce mode · correlated · enforceable · over kill</li>
+        <li><b>false</b> anything else — the row explains why</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout green"><span class="t">A blocked kill is a success, not an error</span>When <code>alert</code> is <code>kill</code> but <code>can_stop</code> is false — uncorrelated, a watch-only desktop app, or warn-only mode — the row says so in one plain sentence. <em>Refusing to kill the wrong thing is the feature.</em></div>
+
+  <h3>Correlation: matching spend to a living process</h3>
+  <p><code>service.rs</code> scores every session against every matched process. The signal that links them is <b>provider + working directory</b>:</p>
+  <table class="t-narrow">
+    <thead><tr><th>Score</th><th>Evidence</th><th>Reason tag</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip green">125</span></td><td>provider matches &amp; <code>cwd</code> is an exact match</td><td><code>provider+cwd</code></td></tr>
+      <tr><td><span class="chip amber">75</span></td><td>provider matches &amp; <code>cwd</code> is a safe prefix (≥2 path components each side; rejects <code>/</code> &amp; <code>/Users</code>)</td><td><code>provider+cwd-prefix</code></td></tr>
+      <tr><td><span class="chip">0</span></td><td>provider mismatch or no usable cwd → uncorrelated</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:14px">Process↔agent <em>confidence</em> is additive and separate: <code>process_name +50</code>, <code>command_regex +40</code>, <code>executable_path +80</code>, <code>bundle_id +80</code>; exclusion filters reset a match to zero. The matched evidence types are surfaced verbatim to the UI in <code>matched_by</code> so an operator can see <em>why</em> Curb thinks pid 1234 is this session.</p>
+
+  <h3>Ranking: spend outranks runtime, always</h3>
+  <p>Sessions sort by <code>risk_rank</code> (0 = stop-pending, 1 = warn/would-stop/blocked, 2 = acknowledged, 3 = idle-high, 5 = quiet) → then latest-turn tokens → window tokens → recency. A six-hour-old idle process never jumps above a session that just spent a million tokens.</p>
+</section>
+
+<!-- ============ POLICY ============ -->
+<section id="policy">
+  <h2><span class="num">06</span>Policy &amp; the watch loop</h2>
+  <p class="lede">A background thread ticks on the usage scan interval. Each tick rebuilds sessions, correlates, and runs the <code>usagewatch</code> policy engine. State lives in three little maps: <code>warned</code>, <code>grace</code>, and <code>targets</code>.</p>
+
+  <figure>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant T as watcher thread
+  participant R as Reader (usage)
+  participant P as Platform
+  participant W as UsageWatch
+  participant L as Ledger
+  participant N as Notifications
+  T->>R: scan_since(window)
+  R-->>T: deduped events
+  T->>P: capture()
+  P-->>T: live process snapshot
+  T->>W: scan(cfg, events, processes, now)
+  Note over W: build sessions · correlate ·<br/>compare latest turn to warn/stop
+  alt latest turn ≥ warn
+    W->>N: notify (alert/enforce)
+    W->>L: append usage_warning
+  end
+  alt latest turn ≥ stop AND enforcement AND safe
+    W->>W: start / check grace timer
+    W->>L: grace started
+    Note over W: after grace, revalidate identity
+    W->>P: terminate(sealed target, grace)
+    W->>L: usage_termination_completed
+  end
+  T->>T: rescan() → cache snapshot
+  </div>
+  <figcaption>One scan tick. In visibility/alert mode the termination branch is structurally unreachable — it emits a <code>would-stop</code> instead.</figcaption>
+  </figure>
+
+  <h3>The rolling window matters</h3>
+  <p>Policy evaluates <em>recent</em> activity only. A session with a giant historical turn but zero tokens inside the current window (default 15m) shows up in the dashboard as <code>quiet-high</code> / <code>idle-high</code> — visible, but never warned or enforced. Runaway means <em>spending now</em>.</p>
+
+  <h3>Presets: one command to a sane posture</h3>
+  <table>
+    <thead><tr><th>Preset</th><th>Mode</th><th>Warn / Stop per turn</th><th>Window</th><th>Grace</th></tr></thead>
+    <tbody>
+      <tr><td><code>curb config aggressive</code></td><td><span class="chip red">enforcement</span></td><td>250k / 750k</td><td>1m</td><td>10s</td></tr>
+      <tr><td><code>curb config reasonable</code></td><td><span class="chip amber">alert</span></td><td>1M / 3M</td><td>15m</td><td>60s</td></tr>
+      <tr><td><code>curb config observe</code></td><td><span class="chip green">visibility</span></td><td>5M / 10M</td><td>15m</td><td>60s</td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:14px">Config is strict: <code>#[serde(deny_unknown_fields)]</code>, <code>warn &lt; stop</code> enforced, every matcher regex must compile at load, and <code>ledger.include_prompt_content: true</code> is a hard validation error. Writes are atomic (temp file + rename) with <code>0600</code>/<code>0700</code> permissions.</p>
+</section>
+
+<!-- ============ SAFETY ============ -->
+<section id="safety">
+  <h2><span class="num">07</span>The safety gauntlet</h2>
+  <p class="lede">Termination is the one irreversible thing Curb does, so it's wrapped in layers. A kill only happens when <em>every</em> gate passes — and the platform layer refuses to accept a bare PID at all.</p>
+
+  <div class="gauntlet">
+    <div class="gate"><div><div class="gx">Mode is enforcement</div><div class="gd">Visibility &amp; alert physically cannot reach the terminate call — they emit <code>would-stop</code>.</div></div></div>
+    <div class="gate"><div><div class="gx">Latest turn crossed the stop threshold</div><div class="gd">Not historical, not cumulative — the most recent checkpoint, inside the window.</div></div></div>
+    <div class="gate"><div><div class="gx">No active acknowledgement</div><div class="gd">A user ack (bounded, capped at the configured extension) suppresses the crossing entirely.</div></div></div>
+    <div class="gate"><div><div class="gx">Grace period elapsed</div><div class="gd">A timer starts on first crossing; the session gets a window to quiet down or be acknowledged.</div></div></div>
+    <div class="gate"><div><div class="gx">Correlated to a live, enforceable worker</div><div class="gd">Uncorrelated → <code>blocked</code>. A watch-only desktop <b>app root</b> is never a target — only worker/CLI processes.</div></div></div>
+    <div class="gate"><div><div class="gx">Identity revalidated at the instant of the kill</div><div class="gd">PID + start time + owner + executable/bundle/team must still match. PID reuse → refuse.</div></div></div>
+  </div>
+
+  <div class="callout red"><span class="t">Sealed TerminationTarget</span>The platform API <em>cannot</em> be handed a raw PID. The only way to get a <code>TerminationTarget</code> is <code>Snapshot::termination_target(process)</code>, which fails unless the process has <code>pid ≥ 2</code>, a real start time, an owner, and at least one of executable/bundle/team id. The target carries the whole process subtree in children-first order. Termination is SIGTERM to leaves first → wait grace → SIGKILL to survivors (<code>taskkill /T /F</code> on Windows).</div>
+
+  <h3>Session lifecycle</h3>
+  <figure>
+  <div class="mermaid">
+stateDiagram-v2
+  [*] --> quiet
+  quiet --> spending: fresh usage in window
+  spending --> warn: latest turn ≥ warn
+  warn --> acknowledged: curb ack
+  acknowledged --> spending: ack expires
+  warn --> stop: latest turn ≥ stop
+  stop --> blocked: no safe target
+  stop --> would_stop: alert mode
+  stop --> grace: enforcement + correlated + enforceable
+  grace --> stopped: grace elapses, identity revalidated
+  grace --> spending: quiets down / acknowledged
+  spending --> quiet: window goes quiet
+  blocked --> [*]
+  stopped --> [*]
+  </div>
+  <figcaption>The same crossing routes to <code>blocked</code>, <code>would-stop</code>, or <code>grace→stopped</code> depending purely on mode and provable safety.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ API ============ -->
+<section id="api">
+  <h2><span class="num">08</span>The local API</h2>
+  <p class="lede">A small, versioned HTTP surface bound to loopback only. <code>GET /v1/snapshot</code> is the coherent contract; every other endpoint is a projection or drill-down over the same service-owned state.</p>
+
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:6px">Read</h3>
+      <table class="t-narrow">
+        <tbody>
+          <tr><td><code>GET /v1/health</code></td><td>liveness</td></tr>
+          <tr><td><code>GET /v1/snapshot</code></td><td>full read model</td></tr>
+          <tr><td><code>GET /v1/overview</code></td><td>status strip</td></tr>
+          <tr><td><code>GET /v1/sessions</code></td><td>session table</td></tr>
+          <tr><td><code>GET /v1/sessions/{key}</code></td><td>one session</td></tr>
+          <tr><td><code>GET /v1/sessions/{key}/turns</code></td><td>per-turn drill-down</td></tr>
+          <tr><td><code>GET /v1/agents</code></td><td>live workers</td></tr>
+          <tr><td><code>GET /v1/alerts</code></td><td>alert projection</td></tr>
+          <tr><td><code>GET /v1/events</code></td><td>ledger events</td></tr>
+          <tr><td><code>GET /v1/config</code></td><td>editable policy</td></tr>
+          <tr><td><code>GET /v1/onboarding</code></td><td>first-run checklist</td></tr>
+          <tr><td><code>GET /v1/notifications/health</code></td><td>notify status</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="margin-top:6px">Act</h3>
+      <table class="t-narrow">
+        <tbody>
+          <tr><td><code>POST /v1/service/rescan</code></td><td>force refresh</td></tr>
+          <tr><td><code>PUT /v1/config</code></td><td>update policy</td></tr>
+          <tr><td><code>POST …/{key}/ack</code></td><td>extend a session</td></tr>
+          <tr><td><code>POST …/{key}/stop</code></td><td>terminate (gated)</td></tr>
+          <tr><td><code>POST /v1/notifications/test</code></td><td>fire a test notify</td></tr>
+          <tr><td><code>POST /v1/onboarding/complete</code></td><td>finish setup</td></tr>
+        </tbody>
+      </table>
+      <h3>Hardening</h3>
+      <div class="chips">
+        <span class="chip green">loopback-only (double-checked at bind)</span>
+        <span class="chip blue">64-char token, 0600 file</span>
+        <span class="chip">constant-time compare</span>
+        <span class="chip amber">same-origin CSRF guard on cookie writes</span>
+        <span class="chip purple">CORS limited to loopback origins</span>
+        <span class="chip">64KB headers · 1MB body caps</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout"><span class="t">Why <code>curb app</code> needs no token paste</span>Three auth paths exist: <code>Authorization: Bearer</code>, an <code>X-Curb-Token</code> header, and a <code>curb_token</code> cookie (<code>HttpOnly · SameSite=Strict · Path=/v1/</code>). The embedded dashboard is served same-origin and gets the cookie automatically, so the browser just works. Bearer/header auth is for separate API clients. Unsafe cookie-authed requests additionally require a matching <code>Origin</code>.</div>
+</section>
+
+<!-- ============ CLI ============ -->
+<section id="cli">
+  <h2><span class="num">09</span>The CLI surface</h2>
+  <p class="lede">The product surface is intentionally small: configure Curb, then run the app or the watcher. Everything else is for scripts and diagnostics. Action handles are usage session keys like <code>codex:session-id</code>.</p>
+
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:6px">Everyday</h3>
+      <table class="t-narrow">
+        <tbody>
+          <tr><td><code>curb app</code></td><td>serve UI + open browser</td></tr>
+          <tr><td><code>curb watch</code></td><td>run the policy loop (default)</td></tr>
+          <tr><td><code>curb dashboard</code></td><td>live view in the terminal</td></tr>
+          <tr><td><code>curb usage --since 24h</code></td><td>summarize local usage</td></tr>
+          <tr><td><code>curb tail</code></td><td>stream new checkpoints</td></tr>
+          <tr><td><code>curb config reasonable</code></td><td>apply a preset</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="margin-top:6px">Operate &amp; inspect</h3>
+      <table class="t-narrow">
+        <tbody>
+          <tr><td><code>curb status</code></td><td>config + session status</td></tr>
+          <tr><td><code>curb runs --state attention</code></td><td>filter sessions</td></tr>
+          <tr><td><code>curb ack codex:sid --extend 30m</code></td><td>acknowledge + extend</td></tr>
+          <tr><td><code>curb scan</code></td><td>print process matches once</td></tr>
+          <tr><td><code>curb serve</code></td><td>headless loopback API</td></tr>
+          <tr><td><code>curb doctor</code></td><td>capability self-check</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="muted" style="font-size:14px"><code>curb install</code> copies the binary to <code>~/.local/bin</code>; <code>curb validate-config</code> checks a YAML file; <code>curb help advanced</code> lists the full command set. Aliases: <code>dash</code>, <code>sessions</code>, <code>serve|daemon|api</code>, <code>watch|run|start</code>.</p>
+</section>
+
+<!-- ============ UI ============ -->
+<section id="ui">
+  <h2><span class="num">10</span>The embedded dashboard</h2>
+  <p class="lede">React 19 + Vite + TypeScript, only two runtime deps (<code>react</code> + <code>lucide-react</code> icons). It's a session-first operator console — not a landing page, not a YAML editor. Built to <code>web/dist</code>, then baked into the Rust binary at compile time.</p>
+
+  <div class="card">
+  <div class="ascii">┌────────────────────────────────────────────────────────────────────────┐
+│ ⛊ Curb           2 sessions spending · 1 warning      [ACTIVE]  alert ⟳  │
+├────────────────────────────────────────────────────────────────────────┤
+│ Window tokens   Since scan   Spending      Warnings    Policy            │
+│ 418k / 15m      +62k         2 sessions    1           1M / 3M / turn    │
+├──────────────────────────────────────────┬─────────────────────────────┤
+│ Sessions                                  │ Selected session            │
+│ ● spending   320k turn  gpt-5    curb     │ Codex · curb                │
+│ ○ idle        55k last  opus     daybook  │ latest turn 320k            │
+│ ▲ warn       1.4M turn  gpt-5    gradient │ window 418k · turn timeline │
+├──────────────────────────────────────────┼─────────────────────────────┤
+│ Alerts                                    │ Agents                      │
+│ Codex curb latest turn 1.4M > warn 1M     │ Codex worker pid 123 active │
+│ Alert mode: no process will be stopped.   │ Claude Code  pid 456  idle  │
+└──────────────────────────────────────────┴─────────────────────────────┘</div>
+  </div>
+
+  <div class="grid3">
+    <div class="card" style="margin:6px 0">
+      <h3 style="margin:0 0 6px">Renders from selectors</h3>
+      <p class="muted" style="font-size:13.5px;margin:0">Sorting/grouping lives in tested read-model functions (<code>selectOperatorSummary</code>, <code>sessionActivityRows</code>), not ad-hoc component branches. The UI re-asks the daemon — it doesn't recompute policy.</p>
+    </div>
+    <div class="card" style="margin:6px 0">
+      <h3 style="margin:0 0 6px">Demo-safe by default</h3>
+      <p class="muted" style="font-size:13.5px;margin:0">Before connecting, it shows clearly-marked demo data so it can never be mistaken for live protection. It polls <code>/v1/snapshot</code> every 5s and degrades to a readable error on connection loss.</p>
+    </div>
+    <div class="card" style="margin:6px 0">
+      <h3 style="margin:0 0 6px">Progressive disclosure</h3>
+      <p class="muted" style="font-size:13.5px;margin:0">Spend &amp; risk are the first viewport. Connection plumbing, onboarding, drill-downs, and policy settings live in collapsible drawers below the fold.</p>
+    </div>
+  </div>
+  <p class="muted" style="font-size:14px"><code>build.rs</code> walks <code>web/dist</code> and emits an <code>include_bytes!</code> table, so the binary serves the whole SPA with zero filesystem reads at runtime. <code>cd ui &amp;&amp; npm run dev</code> is only needed while developing the frontend.</p>
+</section>
+
+<!-- ============ LEDGER ============ -->
+<section id="ledger">
+  <h2><span class="num">11</span>The audit ledger</h2>
+  <p class="lede">Every meaningful event — service start, policy warning, ack, grace, termination success/failure — is appended to a tamper-evident NDJSON journal. It's evidence, scrubbed of anything sensitive.</p>
+
+  <pre><code><span class="c-com">// one line per event, hash-chained, content-scrubbed</span>
+{ <span class="c-str">"type"</span>:<span class="c-str">"usage_warning"</span>, <span class="c-str">"seq"</span>:<span class="c-num">42</span>, <span class="c-str">"ts"</span>:<span class="c-str">"2026-05-29T22:00:00Z"</span>,
+  <span class="c-str">"agent_id"</span>:<span class="c-str">"codex-cli"</span>, <span class="c-str">"mode"</span>:<span class="c-str">"alert"</span>,
+  <span class="c-str">"message"</span>:<span class="c-str">"latest turn 1.4M &gt; warn 1.0M"</span>,
+  <span class="c-str">"prev_hash"</span>:<span class="c-str">"9c1f…"</span>, <span class="c-str">"event_hash"</span>:<span class="c-str">"a73b…"</span> }</code></pre>
+
+  <div class="grid2">
+    <div>
+      <ul class="muted" style="font-size:14px">
+        <li>Monotonic <code>seq</code> + <code>prev_hash</code>→<code>event_hash</code> SHA-256 chain detects tampering or gaps.</li>
+        <li><code>scrub_sensitive_data</code> recursively strips anything that smells like content before write.</li>
+        <li>Owner-only file perms; optional metadata-only forward to a webhook (<code>http/https</code> validated).</li>
+      </ul>
+    </div>
+    <div>
+      <p class="muted" style="font-size:13px;margin-top:4px">Event types include:</p>
+      <div class="chips">
+        <span class="chip">service_started</span><span class="chip">run_started</span>
+        <span class="chip amber">policy_warning</span><span class="chip amber">usage_warning</span>
+        <span class="chip">ack_received</span><span class="chip">session_ack_received</span>
+        <span class="chip red">usage_termination_started</span>
+        <span class="chip red">usage_termination_completed</span>
+        <span class="chip red">usage_termination_failed</span>
+        <span class="chip">usage_scan_failed</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BUILD ============ -->
+<section id="build">
+  <h2><span class="num">12</span>Build, verify, ship</h2>
+  <p class="lede">Rust edition 2024, a lean dependency set, and a single pre-merge gate that builds the UI, lints, type-checks, and runs every test on both sides.</p>
+
+  <h3>From source</h3>
+  <pre><code><span class="c-key">cargo</span> build --release --bin curb
+./target/release/curb install
+curb app                       <span class="c-com"># serve embedded UI + open browser</span></code></pre>
+
+  <h3>The gate — <code>scripts/validate.sh</code></h3>
+  <pre><code>build-ui.sh --check          <span class="c-com"># UI assets are fresh &amp; embedded</span>
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test                   <span class="c-com"># 140 Rust tests</span>
+run-backlog-006-demo.sh --dry-run   <span class="c-com"># synthetic end-to-end demo</span>
+cd ui &amp;&amp; npm run typecheck &amp;&amp; npm run lint &amp;&amp; npm test  <span class="c-com"># 39 UI tests</span></code></pre>
+
+  <div class="grid2">
+    <div class="card" style="margin:6px 0">
+      <h3 style="margin:0 0 6px">Dependencies kept thin</h3>
+      <p class="muted" style="font-size:13.5px;margin:0"><code>anyhow</code> · <code>thiserror</code> · <code>clap</code> · <code>serde</code>(+json/yaml) · <code>chrono</code> · <code>regex</code> · <code>url</code> · <code>sha2</code> · <code>hex</code> · <code>getrandom</code> · <code>sysinfo</code>. No async runtime — the HTTP server is a deliberately small blocking loop.</p>
+    </div>
+    <div class="card" style="margin:6px 0">
+      <h3 style="margin:0 0 6px">Tested with real things</h3>
+      <p class="muted" style="font-size:13.5px;margin:0">Real temp config files, real temp ledgers, harmless real subprocesses, and deterministic process-snapshot fixtures. Mocks only at the true OS boundary (notifications, termination).</p>
+    </div>
+  </div>
+
+  <div class="callout green"><span class="t">The standing invariants</span>Visibility &amp; alert never terminate · prompt/response/file capture is rejected by default · PID + start time is the identity boundary · desktop app roots are never enforcement targets · termination APIs never accept a bare PID. These aren't guidelines — they're enforced by the type system and the test suite.</div>
+</section>
+
+</main>
+
+<footer>
+  <p style="max-width:74ch"><b style="color:var(--ink)">Curb</b> — local AI-agent visibility &amp; watchdog. This walkthrough was generated from the live source on the <code>rewrite/rust-curb</code> branch. Canonical docs: <code>README.md</code>, <code>SPEC.md</code>, <code>docs/application-design.md</code>, <code>docs/user-guide.md</code>, <code>docs/contributor-guide.md</code>.</p>
+  <p>See what's spending, what's idle, what's risky — and let Curb stop only what it can prove is safe to stop.</p>
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad:true,
+    theme:"base",
+    themeVariables:{
+      darkMode:true,
+      background:"#121922",
+      primaryColor:"#161f2a",
+      primaryTextColor:"#dce4ee",
+      primaryBorderColor:"#2a3a4d",
+      lineColor:"#5c6878",
+      secondaryColor:"#0e141c",
+      tertiaryColor:"#0e141c",
+      fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontSize:"13px"
+    },
+    flowchart:{ curve:"basis", htmlLabels:true },
+    sequence:{ useMaxWidth:true },
+    state:{ useMaxWidth:true }
+  });
+</script>
+</body>
+</html>

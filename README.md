@@ -5,10 +5,36 @@ on the machine owns usage ingestion, process correlation, notifications,
 policy, enforcement, and the audit ledger; the CLI and embedded UI are thin
 clients of that local service.
 
-The design target is simple: create local visibility into agent activity first,
-including token usage and model usage where agent logs expose it, then layer
-warnings and enforcement on top of those signals. Wall-clock runtime is useful
-for stale or stuck processes, but it is not a reliable proxy for spend.
+Curb measures one thing: **tokens an agent has spent since your last input** —
+the runaway signal. When that turn spend crosses your warn line, Curb tells you;
+in enforce mode, when it crosses your kill line, Curb stops the correlated
+worker after a short grace period. Wall-clock runtime is not the signal: an
+agent can idle for hours spending nothing, or burn a budget in one autonomous
+loop.
+
+Each agent is described by three facts: how much it has spent this turn
+(`turn_tokens`), whether it is `working` or `idle`, and its `alert` level
+(`ok`, `warn`, or `kill`). There are two modes — **Watch** (warn only) and
+**Enforce** (warn, then stop runaways). No prompt or response content is ever
+read or stored.
+
+## Supported agents
+
+Curb reads token usage for the agents that expose per-turn metadata locally:
+
+- **Codex** — `~/.codex/sessions` (live) and `~/.codex/archived_sessions`.
+- **Claude Code** — `~/.claude/projects`.
+
+Ingestion is modular: each agent is one `Provider` in `providers()` in
+`src/usage.rs` (log roots + a file parser that emits token checkpoints and
+user-input boundaries). Adding the GrokBuild CLI, Antigravity CLI, Pi, or
+OpenCode is a localized change — the scan loop, cache, dedupe, policy engine,
+and dashboard are provider-agnostic. An agent with no local token ledger (for
+example an editor-embedded one) cannot be metered until such a source exists.
+
+Turn spend counts fresh work only: uncached input + cache-creation + output +
+reasoning. Cached/re-read context is excluded for both providers, so a turn's
+many tool calls do not re-count the context the model re-reads each call.
 
 The implementation is active. The most useful entry points are:
 
@@ -86,8 +112,7 @@ opens that dashboard instead of asking you to manage ports or paste tokens.
 clients and service-style launches.
 `curb usage` reads local Codex and Claude metadata logs and summarizes sessions,
 models, and token usage without printing or storing prompt or response content.
-`curb tail` streams completed local usage checkpoints as agents report token
-metadata. Use
+`curb tail` streams new local usage events as agents report token metadata. Use
 `curb tail --since 1h --interval 2s` for an operator view, or
 `curb tail --once` in scripts and demos.
 `curb status`, `curb runs`, and `curb ack` use usage session keys such as
@@ -95,14 +120,18 @@ metadata. Use
 handle.
 
 The built UI is embedded in the Rust binary. `curb app` is the normal launch
-path; `cd ui && npm run dev` is only needed while developing the frontend.
+path; `cd ui && npm run dev` is only needed while developing the frontend. The
+dashboard is one list of working agents, each a spend bar against your warn and
+kill lines, with idle agents folded into a count. It is built on a token-based
+design system and follows the OS light/dark theme.
 
-`curb watch` is usage-first when usage monitoring is enabled. Provider logs are
-completion ledgers, not true live token meters, so Curb describes fresh
-checkpoints instead of claiming that a model is spending at this instant. It
-warns when recent uncached checkpoint spend crosses the configured limit, and in
-enforcement mode it stops only a correlated live agent process. Cached/read
-context remains visible as checkpoint data, but it is not treated as fresh spend.
+`curb watch` runs the policy loop. Each scan rebuilds per-session turn spend
+from the provider logs (Codex `user_message` events and Claude typed-input rows
+mark turn boundaries), excludes cached/read context from spend, and compares the
+current turn against your warn and kill lines. In enforce mode it stops only a
+correlated live worker, after grace, and only after revalidating process
+identity (PID, start time, owner, executable). It never stops a watch-only
+desktop app root.
 
 The generated default config watches agent worker processes such as Codex
 Desktop workers, Codex CLI, Claude Code, and Anti-Gravity's `agy` CLI. Desktop
