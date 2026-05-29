@@ -38,12 +38,12 @@ export const demoNotifications: NotificationView = {
 export const demoSnapshot: Snapshot = {
   overview: {
     mode: "watch",
-    status: "WATCH",
-    message: "1 over the warn line",
-    working: 2,
+    status: "ACTION",
+    message: "1 over the kill line",
+    working: 3,
     warn: 1,
-    kill: 0,
-    busiest_turn_tokens: 1_400_000,
+    kill: 1,
+    busiest_turn_tokens: 3_300_000,
     last_scan: NOW,
     sources: [
       { provider: "codex", files: 12, events: 340 },
@@ -71,6 +71,29 @@ export const demoSnapshot: Snapshot = {
     { id: "codex-cli", provider: "codex", label: "Codex CLI", status: "working", pid: 5310, process_started_at: A_MINUTE_AGO, running_for_seconds: 240, project: "curb", cwd: "/Users/you/dev/curb", session_key: "codex:curb", turn_tokens: 320_000, explanation: "Working." },
   ],
   sessions: [
+    {
+      key: "codex:olympus",
+      id: "olympus",
+      provider: "codex",
+      status: "working",
+      alert: "kill",
+      can_stop: false,
+      can_acknowledge: true,
+      project: "olympus",
+      cwd: "/Users/you/dev/olympus",
+      models: ["gpt-5-codex"],
+      turn_tokens: 3_300_000,
+      turn_context_tokens: 3_600_000,
+      total_tokens: 8_100_000,
+      calls: 52,
+      last_activity_at: NOW,
+      pid: 7731,
+      process_started_at: A_MINUTE_AGO,
+      owner: "you",
+      executable: "/Applications/Codex.app/Contents/Resources/codex",
+      explanation:
+        "Over your kill line, but a desktop app supervises this task and would respawn it — Curb can warn but not stop it.",
+    },
     {
       key: "claude:gradient",
       id: "gradient",

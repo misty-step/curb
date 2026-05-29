@@ -25,9 +25,10 @@ function session(overrides: Partial<SessionView>): SessionView {
 describe("selectDashboard", () => {
   it("splits working/alerting agents from recently-idle ones", () => {
     const model = selectDashboard(demoSnapshot, 900);
-    expect(model.active.map((entry) => entry.id)).toEqual(["gradient", "curb"]);
+    // sorted by urgency: kill, then warn, then working
+    expect(model.active.map((entry) => entry.id)).toEqual(["olympus", "gradient", "curb"]);
     expect(model.idle.map((entry) => entry.id)).toEqual(["daybook"]);
-    expect(model.headline).toBe("1 over the warn line");
+    expect(model.headline).toBe("1 over the kill line");
   });
 
   it("drops finished sessions: old activity, no live worker, is not an agent", () => {

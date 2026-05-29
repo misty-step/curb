@@ -116,7 +116,9 @@ export function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
-          <Shield size={19} />
+          <span className="brand-mark">
+            <Shield size={17} />
+          </span>
           <span>Curb</span>
         </div>
         <p className="headline">{model.headline}</p>

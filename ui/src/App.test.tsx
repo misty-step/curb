@@ -37,10 +37,11 @@ describe("Curb dashboard", () => {
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("1 over the warn line");
+    expect(page).toContain("1 over the kill line");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
     expect(page).toContain("over warn");
+    expect(page).toContain("over kill");
     expect(page).toContain("Limits & mode");
     // Idle agents fold into a count rather than cluttering the list.
     expect(page).toContain("idle agent");

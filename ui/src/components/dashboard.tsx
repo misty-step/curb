@@ -80,17 +80,19 @@ function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy }: 
   return (
     <div className={`row row-${tone(session)} ${selected ? "row-open" : ""}`}>
       <button type="button" className="row-head" onClick={() => onSelect(selected ? "" : session.key)}>
-        <div className="row-id">
-          <span className="row-project">{session.project ?? session.id}</span>
-          <span className="row-meta">
-            {providerLabel(session.provider)} · {relativeTime(session.last_activity_at)}
-          </span>
+        <div className="row-top">
+          <div className="row-id">
+            <span className="row-project">{session.project ?? session.id}</span>
+            <span className="row-meta">
+              {providerLabel(session.provider)} · {relativeTime(session.last_activity_at)}
+            </span>
+          </div>
+          <div className="row-spend">
+            <span className="row-tokens">{tokens(session.turn_tokens)}</span>
+            <StatusChip session={session} />
+          </div>
         </div>
         <SpendBar session={session} config={config} />
-        <div className="row-spend">
-          <span className="row-tokens">{tokens(session.turn_tokens)}</span>
-          <StatusChip session={session} />
-        </div>
       </button>
       {selected ? (
         <div className="row-detail">
