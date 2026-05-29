@@ -11,11 +11,12 @@ use thiserror::Error;
 use url::Url;
 
 use crate::config::parse_duration_for_cli;
+use crate::onboarding::{NotificationView, OnboardingView};
 use crate::platform::Platform;
 use crate::runtime::{Runtime, RuntimeError, TurnQuery};
 use crate::service::{
-    AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, NotificationView,
-    OnboardingView, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
+    AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, ServiceError, SessionView,
+    Snapshot, StopRequest, StopView, TurnView,
 };
 
 pub const TOKEN_COOKIE: &str = "curb_token";
@@ -862,7 +863,8 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::service::{AgentView, CapabilityView, Overview, PlatformCapabilities};
+    use crate::onboarding::{CapabilityView, PlatformCapabilities};
+    use crate::service::{AgentView, Overview};
 
     #[test]
     fn requires_auth_for_api_routes_and_allows_local_preflight() {

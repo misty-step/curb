@@ -7,10 +7,11 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::config::Config;
+use crate::onboarding::{self, NotificationView, OnboardingView};
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
-    self, AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, NotificationView,
-    OnboardingView, Service, ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
+    self, AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, Service,
+    ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
 use crate::usagewatch::{UsageWatch, UsageWatchError};
@@ -187,7 +188,7 @@ impl<P: Platform> Runtime<P> {
         let notifications = self.notification_health()?;
         let termination = self.platform.termination_capability();
         let snapshot = self.snapshot(now)?;
-        Ok(service::onboarding_view(
+        Ok(onboarding::onboarding_view(
             config,
             required,
             notifications,
@@ -315,7 +316,7 @@ impl<P: Platform> Runtime<P> {
 
     pub fn notification_health(&self) -> Result<NotificationView, RuntimeError> {
         let cfg = self.config();
-        Ok(service::notification_view(
+        Ok(onboarding::notification_view(
             cfg.alerts.local_notifications,
             self.platform.notification_capability(),
             self.notification
@@ -327,7 +328,7 @@ impl<P: Platform> Runtime<P> {
 
     pub fn test_notification(&self, now: DateTime<Utc>) -> Result<NotificationView, RuntimeError> {
         let cfg = self.config();
-        let mut view = service::notification_view(
+        let mut view = onboarding::notification_view(
             cfg.alerts.local_notifications,
             self.platform.notification_capability(),
             self.notification
@@ -393,7 +394,7 @@ impl<P: Platform> Runtime<P> {
             now,
             &terminated,
         );
-        snapshot.overview.capabilities = service::platform_capabilities(
+        snapshot.overview.capabilities = onboarding::platform_capabilities(
             &cfg,
             captured.as_ref(),
             capture_error.as_ref(),

@@ -170,11 +170,13 @@ mod tests {
 
     use super::*;
     use crate::api::{ApiError, Backend, Server};
+    use crate::onboarding::{
+        CapabilityView, NotificationView, OnboardingView, PlatformCapabilities,
+    };
     use crate::runtime::TurnQuery;
     use crate::service::{
-        AckRequest, AckView, AlertView, CapabilityView, ConfigUpdate, ConfigView, EventView,
-        NotificationView, OnboardingView, Overview, PlatformCapabilities, SessionView, Snapshot,
-        StopRequest, StopView, TurnView,
+        AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, Overview, SessionView,
+        Snapshot, StopRequest, StopView, TurnView,
     };
 
     #[test]
