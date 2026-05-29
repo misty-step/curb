@@ -18,3 +18,4 @@ pub mod tail;
 pub mod usage;
 pub mod usagewatch;
 pub mod web;
+pub mod write_path;

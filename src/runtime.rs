@@ -10,11 +10,12 @@ use crate::config::Config;
 use crate::onboarding::{self, NotificationView, OnboardingView};
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
-    self, AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, Service,
-    ServiceError, SessionView, Snapshot, StopRequest, StopView, TurnView,
+    self, AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, ServiceError,
+    SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
 use crate::usagewatch::{UsageWatch, UsageWatchError};
+use crate::write_path::Service;
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
@@ -1079,7 +1080,7 @@ mod tests {
         let home = temp_home();
         write_codex_session(home.path(), "s1", "/repo", now, 250, 250);
         let cfg = test_config(home.path(), Mode::Enforcement);
-        crate::service::write_session_ack(
+        crate::write_path::write_session_ack(
             &cfg.service.state_dir,
             "codex:s1",
             std::time::Duration::from_secs(60),
