@@ -813,4 +813,227 @@ mod tests {
             .spawn()
             .expect("spawn sleep child")
     }
+
+    mod seal_properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Which of the three optional identity facets a generated
+        /// complete-identity process carries. At least one is always present so
+        /// the base process satisfies `has_termination_identity`.
+        #[derive(Clone, Copy, Debug)]
+        struct FacetPresence {
+            executable: bool,
+            bundle_id: bool,
+            team_id: bool,
+        }
+
+        /// The compared facets the seal checks; used to drive the single-facet
+        /// mismatch property over exactly the fields `same_process_identity`
+        /// inspects.
+        #[derive(Clone, Copy, Debug)]
+        enum ComparedFacet {
+            Pid,
+            StartedAt,
+            Username,
+            Executable,
+            BundleId,
+            TeamId,
+        }
+
+        /// A pid that is never dangerous: in `2..=1_000_000` and never equal to
+        /// the running test process. Excluding `std::process::id()` keeps the
+        /// strategy deterministic across runs even though the pid varies.
+        fn safe_pid() -> impl Strategy<Value = i32> {
+            (2i32..=1_000_000).prop_filter("pid must not equal the test process", |pid| {
+                *pid != std::process::id() as i32
+            })
+        }
+
+        /// A start time strictly after the Unix epoch, so
+        /// `started_at.timestamp() > 0`.
+        fn live_start_time() -> impl Strategy<Value = DateTime<Utc>> {
+            (1i64..=4_000_000_000).prop_map(|secs| Utc.timestamp_opt(secs, 0).single().unwrap())
+        }
+
+        /// At least one of the three optional facets present, in every
+        /// combination.
+        fn facet_presence() -> impl Strategy<Value = FacetPresence> {
+            (any::<bool>(), any::<bool>(), any::<bool>())
+                .prop_map(|(executable, bundle_id, team_id)| FacetPresence {
+                    executable,
+                    bundle_id,
+                    team_id,
+                })
+                .prop_filter("at least one optional facet must be present", |facets| {
+                    facets.executable || facets.bundle_id || facets.team_id
+                })
+        }
+
+        /// Build a complete-identity `Process` from generated parts. The result
+        /// always satisfies `has_termination_identity`.
+        fn complete_identity(
+            pid: i32,
+            started_at: DateTime<Utc>,
+            username: String,
+            facets: FacetPresence,
+            exe: String,
+            bundle: String,
+            team: String,
+        ) -> Process {
+            Process {
+                pid: Pid::new(pid),
+                ppid: None,
+                name: "agent".to_string(),
+                executable: facets.executable.then(|| PathBuf::from(exe)),
+                command: "agent run".to_string(),
+                cwd: Some(PathBuf::from("/repo")),
+                started_at: Some(started_at),
+                username: Some(username),
+                bundle_id: facets.bundle_id.then_some(bundle),
+                team_id: facets.team_id.then_some(team),
+            }
+        }
+
+        /// Strategy yielding a complete-identity `Process` plus the set of
+        /// compared facets that apply to it (pid/started_at/username always;
+        /// the optional facets only when present).
+        fn complete_identity_process() -> impl Strategy<Value = (Process, Vec<ComparedFacet>)> {
+            (
+                safe_pid(),
+                live_start_time(),
+                "[a-z][a-z0-9]{0,15}",
+                facet_presence(),
+                "/usr/local/bin/[a-z]{1,12}",
+                "com\\.[a-z]{1,8}\\.[a-z]{1,8}",
+                "[A-Z0-9]{6,10}",
+            )
+                .prop_map(|(pid, started_at, username, facets, exe, bundle, team)| {
+                    let process =
+                        complete_identity(pid, started_at, username, facets, exe, bundle, team);
+                    let mut compared = vec![
+                        ComparedFacet::Pid,
+                        ComparedFacet::StartedAt,
+                        ComparedFacet::Username,
+                    ];
+                    if facets.executable {
+                        compared.push(ComparedFacet::Executable);
+                    }
+                    if facets.bundle_id {
+                        compared.push(ComparedFacet::BundleId);
+                    }
+                    if facets.team_id {
+                        compared.push(ComparedFacet::TeamId);
+                    }
+                    (process, compared)
+                })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// Reflexive: a complete-identity process seals against an identical
+            /// clone, both at the `same_process_identity` predicate and through
+            /// the public `Snapshot::termination_target` entry point.
+            #[test]
+            fn complete_identity_seals_against_itself((process, _compared) in complete_identity_process()) {
+                prop_assert!(process.has_termination_identity());
+                prop_assert!(same_process_identity(&process, &process));
+                prop_assert!(
+                    Snapshot::new([process.clone()])
+                        .termination_target(&process)
+                        .is_some()
+                );
+            }
+
+            /// Single-facet mismatch rejects: mutating exactly one compared
+            /// facet on `current` so it differs from `expected` must break the
+            /// seal. Only facets the seal inspects are mutated (pid/started_at/
+            /// username always; executable/bundle_id/team_id only when present
+            /// on `expected`).
+            #[test]
+            fn single_compared_facet_mismatch_rejects(
+                (expected, compared) in complete_identity_process(),
+                facet_index in any::<prop::sample::Index>(),
+            ) {
+                let facet = compared[facet_index.index(compared.len())];
+                let mut current = expected.clone();
+                match facet {
+                    ComparedFacet::Pid => {
+                        let next = if expected.pid.get() == 1_000_000 {
+                            2
+                        } else {
+                            expected.pid.get() + 1
+                        };
+                        let next = if next == std::process::id() as i32 {
+                            next + 1
+                        } else {
+                            next
+                        };
+                        current.pid = Pid::new(next);
+                    }
+                    ComparedFacet::StartedAt => {
+                        let secs = expected.started_at.unwrap().timestamp();
+                        current.started_at = Some(Utc.timestamp_opt(secs + 1, 0).single().unwrap());
+                    }
+                    ComparedFacet::Username => {
+                        current.username =
+                            Some(format!("{}x", expected.username.as_ref().unwrap()));
+                    }
+                    ComparedFacet::Executable => {
+                        current.executable = Some(PathBuf::from("/usr/local/bin/imposter"));
+                    }
+                    ComparedFacet::BundleId => {
+                        current.bundle_id = Some("com.imposter.fake".to_string());
+                    }
+                    ComparedFacet::TeamId => {
+                        current.team_id = Some("IMPOSTER".to_string());
+                    }
+                }
+
+                prop_assert!(!same_process_identity(&expected, &current));
+                // The public entry keys on pid; a pid mismatch means no process
+                // at expected.pid, the rest exercise the identity rejection.
+                prop_assert!(
+                    Snapshot::new([current])
+                        .termination_target(&expected)
+                        .is_none()
+                );
+            }
+
+            /// Incomplete identity rejects: clearing started_at, emptying the
+            /// username, or removing all three optional facets on either side of
+            /// the comparison must break the seal.
+            #[test]
+            fn incomplete_identity_rejects(
+                (process, _compared) in complete_identity_process(),
+                degrade in 0u8..3,
+                degrade_side_expected in any::<bool>(),
+            ) {
+                let mut expected = process.clone();
+                let mut current = process.clone();
+                let target = if degrade_side_expected {
+                    &mut expected
+                } else {
+                    &mut current
+                };
+                match degrade {
+                    0 => target.started_at = None,
+                    1 => target.username = Some(String::new()),
+                    _ => {
+                        target.executable = None;
+                        target.bundle_id = None;
+                        target.team_id = None;
+                    }
+                }
+
+                prop_assert!(!same_process_identity(&expected, &current));
+                prop_assert!(
+                    Snapshot::new([current])
+                        .termination_target(&expected)
+                        .is_none()
+                );
+            }
+        }
+    }
 }
