@@ -2147,23 +2147,17 @@ fn session_explanation(
     over_limit: bool,
 ) -> String {
     if acknowledged && over_limit {
-        return "Past your limit, but you acknowledged this run.".to_string();
+        return "Over your limit, but acknowledged.".to_string();
     }
     match alert {
-        "kill" if !matched => {
-            "Past your kill line, but no live process matched — Curb won't stop anything."
-        }
-        "kill" if !enforceable => {
-            "Past your kill line, but this is a watch-only desktop app — Curb won't stop it."
-        }
-        "kill" if mode != Mode::Enforcement => {
-            "Past your kill line. Watch mode only warns; switch to Enforce to stop runaways."
-        }
-        "kill" => "Past your kill line — Curb will stop this worker after the grace period.",
-        "warn" => "Past your warn line since your last input.",
+        "kill" if !matched => "Over your kill line, but no live process matched to stop.",
+        "kill" if !enforceable => "Over your kill line, but this is a watch-only desktop app.",
+        "kill" if mode != Mode::Enforcement => "Over your kill line. Watch mode only warns.",
+        "kill" => "Over your kill line — stopping after the grace period.",
+        "warn" => "Over your warn line this turn.",
         _ => match status {
-            "working" => "Working, within your limits.",
-            _ => "Idle.",
+            "working" => "Working.",
+            _ => "Idle between turns.",
         },
     }
     .to_string()
@@ -2228,16 +2222,19 @@ pub(crate) fn mode_label(mode: Mode) -> String {
 fn overview_message(status: &str, working: usize, warn: usize, kill: usize) -> String {
     let plural = |count: usize| if count == 1 { "agent" } else { "agents" };
     match status {
-        "ACTION" => format!("{kill} {} past your kill line", plural(kill)),
-        "WATCH" => format!("{warn} {} past your warn line", plural(warn)),
-        _ if working > 0 => format!("{working} {} working, all within limits", plural(working)),
-        _ => "No agents over your limits".to_string(),
+        "ACTION" => format!("{kill} over the kill line"),
+        "WATCH" => format!("{warn} over the warn line"),
+        _ if working > 0 => format!("{working} {} working", plural(working)),
+        _ => "Nothing spending".to_string(),
     }
 }
 
+/// A checkpoint is "fresh" (the agent is spending now) if it landed within a
+/// few scan intervals. The floor keeps a worker from flickering to idle between
+/// model calls; lower is snappier at calling a finished agent idle.
 fn usage_activity_start(cfg: &Config, now: DateTime<Utc>) -> DateTime<Utc> {
     let scan = cfg.usage.scan_interval.as_std();
-    let freshness = std::time::Duration::from_secs(scan.as_secs().saturating_mul(3).max(30));
+    let freshness = std::time::Duration::from_secs(scan.as_secs().saturating_mul(3).max(15));
     now - chrono::Duration::from_std(freshness).unwrap()
 }
 

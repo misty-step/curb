@@ -11,7 +11,7 @@ service:
 
 usage:
   enabled: true
-  scan_interval: 5s
+  scan_interval: 2s
   lookback: 24h
   window: 15m
   warn_turn_tokens: 1000000
