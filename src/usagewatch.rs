@@ -489,12 +489,21 @@ mod tests {
     }
 
     fn over_kill_event(now: DateTime<Utc>, cwd: &str, spent: i64) -> UsageEvent {
+        over_kill_event_for(now, "s1", cwd, spent)
+    }
+
+    fn over_kill_event_for(
+        now: DateTime<Utc>,
+        session_id: &str,
+        cwd: &str,
+        spent: i64,
+    ) -> UsageEvent {
         UsageEvent {
             kind: EventKind::TokenCheckpoint,
             provider: "codex".to_string(),
             source: "test".to_string(),
             source_path: "fixture.jsonl".into(),
-            session_id: Some("s1".to_string()),
+            session_id: Some(session_id.to_string()),
             turn_id: None,
             request_id: None,
             model: None,
@@ -510,6 +519,15 @@ mod tests {
             cumulative_tokens: spent,
             model_context_window: 0,
         }
+    }
+
+    /// The decision the scan recorded, read back from the real temp ledger.
+    fn ledger_event_types(cfg: &Config) -> Vec<String> {
+        ledger::read(&cfg.ledger.path)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.event_type)
+            .collect()
     }
 
     #[test]
@@ -751,5 +769,321 @@ mod tests {
         // Killed exactly once, and remembered so the read model drops its row.
         assert_eq!(*platform.terminated.lock().unwrap(), vec![4242]);
         assert!(watch.terminated_keys().contains("codex:s1"));
+    }
+
+    /// Scenario 1: over the kill line, but no live process correlates to the
+    /// session. Curb must refuse and say so — `usage_kill_blocked` — never kill.
+    #[test]
+    fn uncorrelated_over_kill_blocks_and_records_decision() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        // The only live worker runs in a different repo, so nothing correlates.
+        let processes = Snapshot::new([codex_process(now, 4242, "/other-repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(
+            ledger_event_types(&cfg),
+            ["usage_warning", "usage_kill_blocked"]
+        );
+        assert!(platform.terminated.lock().unwrap().is_empty());
+        assert!(watch.terminated_keys().is_empty());
+    }
+
+    /// Scenario 2: a supervised desktop worker is over the kill line in enforce
+    /// mode with escalation off. Killing the leaf is futile, so Curb refuses —
+    /// `usage_kill_blocked` — and nothing dies.
+    #[test]
+    fn supervised_over_kill_blocks_and_records_decision() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.usage.escalate_supervised = false;
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([
+            desktop_supervisor(now, 3032),
+            desktop_leaf(now, 7731, 3032, "/repo"),
+        ]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(
+            ledger_event_types(&cfg),
+            ["usage_warning", "usage_kill_blocked"]
+        );
+        assert!(platform.terminated.lock().unwrap().is_empty());
+        assert!(watch.terminated_keys().is_empty());
+    }
+
+    /// Scenario 3: a correlated, terminable worker is over the kill line, but
+    /// Curb is in watch (alert) mode. It must record `usage_would_terminate`,
+    /// not actually terminate.
+    #[test]
+    fn alert_mode_over_kill_records_would_terminate() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Alert;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(
+            ledger_event_types(&cfg),
+            ["usage_warning", "usage_would_terminate"]
+        );
+        assert!(platform.terminated.lock().unwrap().is_empty());
+        assert!(watch.terminated_keys().is_empty());
+    }
+
+    /// Scenario 4: the worker correlates and grace elapses, but by kill time the
+    /// PID belongs to a different process (reused pid). The safety guard rejects
+    /// termination — `usage_termination_failed` — and nothing dies.
+    #[test]
+    fn pid_reuse_at_kill_time_records_termination_failed() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(1);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let original = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        // Same pid and cwd (still correlates), but a fresh start time means a
+        // different process now holds the pid — the safety guard must refuse.
+        let mut reused_process = codex_process(now, 4242, "/repo");
+        reused_process.started_at = Some(now + chrono::Duration::seconds(2));
+        let reused = Snapshot::new([reused_process]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        // scan 1: grace starts against the original process.
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &original,
+                &platform,
+                now,
+            )
+            .unwrap();
+        // scan 2 (grace elapsed): the pid now belongs to a different process.
+        let after = now + chrono::Duration::seconds(2);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(after, "/repo", 250)],
+                &reused,
+                &platform,
+                after,
+            )
+            .unwrap();
+
+        assert_eq!(
+            ledger_event_types(&cfg),
+            [
+                "usage_warning",
+                "usage_grace_started",
+                "usage_termination_failed"
+            ]
+        );
+        assert!(platform.terminated.lock().unwrap().is_empty());
+        assert!(watch.terminated_keys().is_empty());
+    }
+
+    /// Scenario 5: a killed worker logs fresh usage after the kill — it came
+    /// back. The next scans must re-arm and re-kill it, not treat it as dead.
+    #[test]
+    fn killed_worker_that_resumes_is_rearmed_and_rekilled() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        // scan 1: grace. scan 2: first kill.
+        let killed_at = now + chrono::Duration::seconds(5);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(killed_at, "/repo", 250)],
+                &processes,
+                &platform,
+                killed_at,
+            )
+            .unwrap();
+        assert_eq!(*platform.terminated.lock().unwrap(), vec![4242]);
+
+        // Fresh usage after the kill: the session resumed. scan 3 re-arms grace,
+        // scan 4 re-kills it.
+        let resumed = killed_at + chrono::Duration::seconds(5);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(resumed, "/repo", 250)],
+                &processes,
+                &platform,
+                resumed,
+            )
+            .unwrap();
+        let rekill = resumed + chrono::Duration::seconds(5);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(rekill, "/repo", 250)],
+                &processes,
+                &platform,
+                rekill,
+            )
+            .unwrap();
+
+        // Re-armed (a second grace) and re-killed (the pid appears twice).
+        assert_eq!(*platform.terminated.lock().unwrap(), vec![4242, 4242]);
+        assert!(watch.terminated_keys().contains("codex:s1"));
+        assert_eq!(
+            ledger_event_types(&cfg),
+            [
+                "usage_warning",
+                "usage_grace_started",
+                "usage_termination_started",
+                "usage_termination_completed",
+                "usage_grace_started",
+                "usage_termination_started",
+                "usage_termination_completed",
+            ]
+        );
+    }
+
+    /// Scenario 6: after a kill, time moves past the window with no further
+    /// activity from that session. The terminated row must age out (so the read
+    /// model stops showing it) and the worker must not be re-killed.
+    #[test]
+    fn kill_aged_out_of_window_drops_row_without_rekill() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.usage.window = HumanDuration::minutes(5);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        // scan 1: grace. scan 2: kill, remembered at killed_at.
+        let killed_at = now + chrono::Duration::seconds(5);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(killed_at, "/repo", 250)],
+                &processes,
+                &platform,
+                killed_at,
+            )
+            .unwrap();
+        assert!(watch.terminated_keys().contains("codex:s1"));
+
+        // scan 3 runs past the window. Only an unrelated session is active, so
+        // s1 never enters the loop — the age-out retain is the one thing that
+        // can drop its remembered kill.
+        let aged_out = killed_at + chrono::Duration::minutes(5) + chrono::Duration::seconds(10);
+        let unrelated = Snapshot::new([codex_process(aged_out, 5555, "/elsewhere")]);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event_for(aged_out, "s2", "/elsewhere", 250)],
+                &unrelated,
+                &platform,
+                aged_out,
+            )
+            .unwrap();
+
+        // The remembered kill aged out, and the original worker was not killed
+        // again (only the first kill stands).
+        assert!(!watch.terminated_keys().contains("codex:s1"));
+        assert_eq!(*platform.terminated.lock().unwrap(), vec![4242]);
     }
 }
