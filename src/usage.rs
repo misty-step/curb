@@ -863,9 +863,17 @@ fn parse_codex_file(
             }
             continue;
         }
-        if row.row_type == "event_msg"
-            && row.payload.payload_type.as_deref() == Some("user_message")
-        {
+        // A user-input boundary ends the current turn. Codex records the human's
+        // input two ways and does not always emit both: the `user_message` UI
+        // event, and the canonical `message` conversation item with role "user"
+        // (the more complete record). Treat either as a boundary so turn spend
+        // resets on every prompt, not just the ones that emit a UI event.
+        let is_user_input = (row.row_type == "event_msg"
+            && row.payload.payload_type.as_deref() == Some("user_message"))
+            || (row.row_type == "response_item"
+                && row.payload.payload_type.as_deref() == Some("message")
+                && row.payload.role.as_deref() == Some("user"));
+        if is_user_input {
             out.push(user_input_event(
                 "codex",
                 "codex.sessions",
@@ -1176,6 +1184,8 @@ struct CodexPayload {
     cwd: Option<String>,
     #[serde(default, rename = "type")]
     payload_type: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
     #[serde(default)]
     info: Option<CodexInfo>,
 }
@@ -1710,6 +1720,38 @@ mod tests {
         // fixture row spends uncached input (100-20) + output 5 + reasoning 2 = 87,
         // independent of the cached context size: 87 + 87 = 174.
         assert_eq!(spent_after_last_boundary(&parsed.events), 174);
+    }
+
+    #[test]
+    fn codex_response_item_user_message_resets_the_turn() {
+        // Codex often records a prompt only as a `response_item` message with
+        // role "user" (no `user_message` UI event). That must still end the turn,
+        // or spend accumulates across prompts instead of resetting.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        fs::write(
+            &path,
+            format!(
+                r#"{{"timestamp":"2026-05-29T16:00:00Z","type":"session_meta","payload":{{"id":"s","cwd":"/repo"}}}}
+{{"timestamp":"2026-05-29T16:00:01Z","type":"response_item","payload":{{"type":"message","role":"user"}}}}
+{}{{"timestamp":"2026-05-29T16:00:03Z","type":"response_item","payload":{{"type":"message","role":"user"}}}}
+{}"#,
+                codex_token_row("2026-05-29T16:00:02Z", 100, 100),
+                codex_token_row("2026-05-29T16:00:04Z", 200, 300),
+            ),
+        )
+        .unwrap();
+
+        let parsed = parse_codex_file(&path, 0, None, None).unwrap();
+        let boundaries = parsed
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::UserInput))
+            .count();
+        assert_eq!(boundaries, 2);
+        // Spend resets at the second prompt, so only the final checkpoint counts:
+        // uncached (100-20) + output 5 + reasoning 2 = 87, not 174.
+        assert_eq!(spent_after_last_boundary(&parsed.events), 87);
     }
 
     #[test]
