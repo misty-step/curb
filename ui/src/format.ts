@@ -1,37 +1,32 @@
-export function formatTokens(value?: number): string {
-  const n = value ?? 0;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
-  return `${n}`;
+// Display helpers shared across the dashboard. Kept tiny and pure so they are
+// trivially testable.
+
+/** Compact token scale: 0, 920, 12k, 2.4M, 3M. */
+export function tokens(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return `${Math.round(value)}`;
 }
 
-export function formatDuration(seconds?: number): string {
-  if (seconds === undefined || seconds < 0) return "-";
-  if (seconds < 60) return `${Math.floor(seconds)}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
-}
-
-export function relativeTime(iso?: string): string {
-  if (!iso) return "-";
+/** Human "time since" for a timestamp the service produced. */
+export function relativeTime(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return "—";
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "-";
-  const elapsed = Math.max(0, Date.now() - then);
-  if (elapsed < 60_000) return "now";
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m ago`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h ago`;
-  return `${Math.floor(elapsed / 86_400_000)}d ago`;
+  if (Number.isNaN(then)) return "—";
+  const seconds = Math.max(0, Math.round((now - then) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
-export function stateLabel(state: string, usageState?: string): string {
-  if (usageState && usageState !== state) return `${state} / ${usageState}`;
-  return state;
-}
-
-export function statusTone(status: string): "ok" | "active" | "watch" | "action" {
-  if (status === "ACTION") return "action";
-  if (status === "WATCH") return "watch";
-  if (status === "ACTIVE") return "active";
-  return "ok";
+/** Coerce a form value to a finite number, defaulting to 0. */
+export function numberValue(value: number | string): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

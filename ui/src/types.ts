@@ -1,4 +1,10 @@
-export type Status = "OK" | "ACTIVE" | "WATCH" | "ACTION";
+// The Curb read model, mirrored from the Rust service. Every view is built by
+// the daemon; the UI only renders it. Three facts describe each agent:
+// turn_tokens (spend since your last input), status, and alert.
+
+export type Status = "OK" | "WATCH" | "ACTION";
+export type AlertLevel = "ok" | "warn" | "kill";
+export type AgentStatus = "working" | "idle";
 
 export interface SourceHealth {
   provider: string;
@@ -7,22 +13,10 @@ export interface SourceHealth {
   error?: string;
 }
 
-export interface Overview {
-  mode: string;
-  action: string;
-  status: Status;
+export interface CapabilityView {
+  available: boolean;
+  status: string;
   message: string;
-  active_agents: number;
-  active_sessions: number;
-  warning_sessions: number;
-  stop_sessions: number;
-  idle_high_sessions: number;
-  window_tokens: number;
-  lookback_tokens: number;
-  last_scan: string;
-  sources: SourceHealth[];
-  changes: OverviewDelta;
-  capabilities: PlatformCapabilities;
 }
 
 export interface PlatformCapabilities {
@@ -31,12 +25,6 @@ export interface PlatformCapabilities {
   process_capture: CapabilityView;
   process_identity: CapabilityView;
   enforcement: CapabilityView;
-}
-
-export interface CapabilityView {
-  available: boolean;
-  status: string;
-  message: string;
 }
 
 export interface OverviewDelta {
@@ -49,94 +37,69 @@ export interface OverviewDelta {
   source_errors: number;
 }
 
+export interface Overview {
+  mode: string; // "watch" | "enforce"
+  status: Status;
+  message: string;
+  working: number;
+  warn: number;
+  kill: number;
+  busiest_turn_tokens: number;
+  last_scan: string;
+  sources: SourceHealth[];
+  changes: OverviewDelta;
+  capabilities: PlatformCapabilities;
+}
+
+export interface SessionView {
+  key: string;
+  id: string;
+  provider: string;
+  status: AgentStatus;
+  alert: AlertLevel;
+  can_stop: boolean;
+  can_acknowledge: boolean;
+  acknowledged_until?: string;
+  project?: string;
+  cwd?: string;
+  models: string[];
+  turn_tokens: number;
+  turn_context_tokens: number;
+  total_tokens: number;
+  calls: number;
+  last_activity_at?: string;
+  pid?: number;
+  process_started_at?: string;
+  owner?: string;
+  executable?: string;
+  bundle_id?: string;
+  team_id?: string;
+  explanation: string;
+}
+
 export interface AgentView {
   id: string;
   provider: string;
   label: string;
-  state: string;
-  activity_state?: string;
-  data_recency?: string;
-  activity_basis?: string;
-  process_state: string;
-  usage_state?: string;
-  action_state: string;
-  actionable: boolean;
+  status: AgentStatus;
   pid: number;
   process_started_at?: string;
   running_for_seconds?: number;
   project?: string;
   cwd?: string;
-  matched_by?: string[];
-  confidence: number;
-  cpu_percent?: number;
-  latest_session_id?: string;
-  latest_turn_tokens?: number;
-  latest_spent_tokens?: number;
-  window_tokens?: number;
-  window_spent_tokens?: number;
-  explanation: string;
-}
-
-export interface SessionView {
-  key: string;
-  id?: string;
-  provider: string;
-  state: string;
-  activity_state?: string;
-  data_recency?: string;
-  activity_basis?: string;
-  agent_state?: string;
-  process_state: string;
-  usage_state?: string;
-  action_state: string;
-  actionable: boolean;
-  can_acknowledge: boolean;
-  project?: string;
-  cwd?: string;
-  models?: string[];
-  last_seen_at: string;
-  last_usage_at?: string;
-  calls: number;
-  latest_turn_tokens?: number;
-  latest_spent_tokens?: number;
-  window_tokens?: number;
-  window_spent_tokens?: number;
-  total_tokens: number;
-  total_spent_tokens?: number;
-  correlated_agent_id?: string;
-  correlated_pid?: number;
-  correlated_process_started_at?: string;
-  correlated_owner?: string;
-  correlated_executable?: string;
-  correlated_bundle_id?: string;
-  correlated_team_id?: string;
-  correlation_reason?: string;
-  correlation_score?: number;
-  confidence?: number;
-  matched_by?: string[];
-  risk_rank: number;
-  acknowledged: boolean;
-  acknowledged_until?: string;
+  session_key?: string;
+  turn_tokens: number;
   explanation: string;
 }
 
 export interface TurnView {
-  id?: string;
-  request_id?: string;
   session_key?: string;
   session_id?: string;
   provider: string;
-  at: string;
+  at?: string;
   model?: string;
-  input_tokens?: number;
-  cached_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-  output_tokens?: number;
-  reasoning_output_tokens?: number;
-  total_tokens?: number;
-  spent_tokens?: number;
-  cumulative_tokens?: number;
-  source?: string;
+  total_tokens: number;
+  spent_tokens: number;
 }
 
 export interface Snapshot {
@@ -144,6 +107,22 @@ export interface Snapshot {
   agents: AgentView[];
   sessions: SessionView[];
   turns: TurnView[];
+}
+
+export interface ConfigView {
+  path?: string;
+  mode: string; // raw config mode: "visibility" | "alert" | "enforcement"
+  usage_enabled: boolean;
+  warn_turn_tokens: number;
+  kill_turn_tokens: number;
+  usage_window_seconds: number;
+  usage_scan_seconds: number;
+  lookback_seconds: number;
+  process_warn_seconds: number;
+  process_kill_seconds: number;
+  ack_extension_seconds: number;
+  local_notifications: boolean;
+  agents: ConfigAgentView[];
 }
 
 export interface ConfigAgentView {
@@ -155,25 +134,12 @@ export interface ConfigAgentView {
   description: string;
 }
 
-export interface ConfigView {
-  path?: string;
-  machine_id?: string;
-  mode: string;
-  usage_enabled: boolean;
-  warn_turn_tokens: number;
-  kill_turn_tokens: number;
-  usage_window_seconds: number;
-  usage_scan_seconds: number;
-  lookback_seconds: number;
-  process_warn_seconds: number;
-  process_kill_seconds: number;
-  ack_extension_seconds: number;
-  local_notifications: boolean;
-  ledger_forward_url?: string;
-  agents: ConfigAgentView[];
-}
-
-export type ConfigUpdate = Partial<Omit<ConfigView, "path" | "machine_id" | "ledger_forward_url" | "agents">>;
+export type ConfigUpdate = Partial<
+  Pick<
+    ConfigView,
+    "mode" | "warn_turn_tokens" | "kill_turn_tokens" | "local_notifications"
+  >
+>;
 
 export interface NotificationView {
   enabled: boolean;
@@ -182,30 +148,6 @@ export interface NotificationView {
   message: string;
   last_test_at?: string;
   last_error?: string;
-}
-
-export interface OnboardingView {
-  required: boolean;
-  config_path?: string;
-  mode: string;
-  action: string;
-  mode_can_terminate: boolean;
-  detected_providers: string[];
-  detected_workers: string[];
-  enforceable_agent_types: number;
-  watch_only_agent_types: number;
-  notifications: NotificationView;
-  capabilities: PlatformCapabilities;
-  sources: SourceHealth[];
-  final_sentence: string;
-  steps: OnboardingStepView[];
-}
-
-export interface OnboardingStepView {
-  id: string;
-  label: string;
-  status: string;
-  message: string;
 }
 
 export interface AckView {
@@ -226,14 +168,7 @@ export interface StopExpectedIdentity {
 
 export interface StopView {
   session_key: string;
-  agent_id: string;
   pid: number;
-  started_at: string;
-  owner?: string;
-  executable?: string;
-  bundle_id?: string;
-  team_id?: string;
-  scope: string;
   scope_pids: number[];
   result: {
     soft_signaled?: number[];
@@ -243,32 +178,13 @@ export interface StopView {
   };
 }
 
-export interface AlertView {
-  severity: string;
-  label: string;
-  category: string;
-  message: string;
-  at: string;
-  seq: number;
-  run_id?: string;
-  agent_id?: string;
-  provider?: string;
-  mode?: string;
-  cwd?: string;
-  session_key?: string;
-  session_id?: string;
-  actionable: boolean;
-  can_acknowledge: boolean;
-  explanation: string;
+/** Watch = warn only. Enforce = warn, then stop runaways. */
+export type Mode = "watch" | "enforce";
+
+export function modeFromConfig(raw: string): Mode {
+  return raw === "enforcement" ? "enforce" : "watch";
 }
 
-export interface EventView {
-  seq: number;
-  at: string;
-  category: string;
-  kind: string;
-  message: string;
-  run_id?: string;
-  agent_id?: string;
-  mode?: string;
+export function modeToConfig(mode: Mode): string {
+  return mode === "enforce" ? "enforcement" : "alert";
 }

@@ -1,27 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
-import { formatDuration, formatTokens, relativeTime, stateLabel, statusTone } from "./format";
+import { numberValue, relativeTime, tokens } from "./format";
 
 describe("format helpers", () => {
-  it("formats token counts for dashboard scanning", () => {
-    expect(formatTokens(9999)).toBe("9999");
-    expect(formatTokens(55_323)).toBe("55k");
-    expect(formatTokens(3_500_000)).toBe("3.5M");
+  it("formats token counts on a compact scale", () => {
+    expect(tokens(0)).toBe("0");
+    expect(tokens(920)).toBe("920");
+    expect(tokens(55_323)).toBe("55k");
+    expect(tokens(3_500_000)).toBe("3.5M");
+    expect(tokens(3_000_000)).toBe("3M");
   });
 
-  it("formats durations compactly", () => {
-    expect(formatDuration(42)).toBe("42s");
-    expect(formatDuration(600)).toBe("10m");
-    expect(formatDuration(7_500)).toBe("2h 5m");
-  });
-
-  it("formats relative time without exposing raw timestamps in tables", () => {
-    vi.setSystemTime(new Date("2026-05-21T12:00:00Z"));
-    expect(relativeTime("2026-05-21T11:54:00Z")).toBe("6m ago");
+  it("formats relative time without exposing raw timestamps", () => {
+    vi.setSystemTime(new Date("2026-05-29T12:00:00Z"));
+    expect(relativeTime("2026-05-29T11:54:00Z")).toBe("6m ago");
+    expect(relativeTime("2026-05-29T11:59:50Z")).toBe("just now");
+    expect(relativeTime(undefined)).toBe("—");
     vi.useRealTimers();
   });
 
-  it("keeps usage severity separate from process state", () => {
-    expect(stateLabel("watch-only", "stop")).toBe("watch-only / stop");
-    expect(statusTone("ACTION")).toBe("action");
+  it("coerces form values to finite numbers", () => {
+    expect(numberValue("2000000")).toBe(2_000_000);
+    expect(numberValue("")).toBe(0);
+    expect(numberValue(42)).toBe(42);
   });
 });
