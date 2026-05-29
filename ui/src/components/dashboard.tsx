@@ -98,7 +98,7 @@ function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy }: 
           <dl className="row-facts">
             <Fact label="This turn" value={tokens(session.turn_tokens)} />
             <Fact label="Total spent" value={tokens(session.total_tokens)} />
-            <Fact label="Turns" value={String(session.calls)} />
+            <Fact label="Model calls" value={String(session.calls)} />
             <Fact label="Last activity" value={relativeTime(session.last_activity_at)} />
             {session.models.length ? <Fact label="Model" value={session.models.join(", ")} /> : null}
             {session.pid ? <Fact label="Worker" value={`pid ${session.pid}`} /> : null}
