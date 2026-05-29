@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use curb::config::{Agent, AgentKind, Config, HumanDuration, Match, Mode};
 use curb::ledger;
+use curb::local_enforcer::{self, LocalEnforcer};
 use curb::platform::{Pid, Platform, Process, Snapshot, SystemPlatform};
 use curb::usage::{Event as UsageEvent, EventKind};
 use curb::usagewatch::UsageWatch;
@@ -209,6 +210,25 @@ fn ledger_event_types(cfg: &Config) -> Vec<String> {
         .collect()
 }
 
+/// Drive one policy scan through the local adapter against the real OS: build
+/// the correlated policy inputs from the live snapshot, then evaluate them with
+/// a `LocalEnforcer` that owns the sealed termination and the kill primitive.
+fn local_scan(
+    watch: &mut UsageWatch,
+    cfg: &Config,
+    events: &[UsageEvent],
+    snapshot: &Snapshot,
+    now: DateTime<Utc>,
+) {
+    let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
+    let sessions =
+        local_enforcer::build_policy_sessions(cfg, events, snapshot, now).expect("build sessions");
+    let enforcer = LocalEnforcer::new(cfg, &SystemPlatform, snapshot);
+    watch
+        .scan(cfg, &sessions, &enforcer, window_start, now)
+        .expect("scan");
+}
+
 /// (a) Warn fires, grace elapses, then the exact correlated worker process is
 /// terminated; (b) a plausible app-root-like SIBLING that shares cwd and process
 /// name but carries a different command-line marker is NOT terminated; (c) the
@@ -258,34 +278,29 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
         HumanDuration::seconds(1),
     );
     let mut watch = UsageWatch::default();
-    let platform = SystemPlatform;
 
     // Scan 1: over the kill line — grace starts, nothing terminated yet.
     let now = Utc::now();
     let snapshot = SystemPlatform.capture().expect("capture");
-    watch
-        .scan(
-            &cfg,
-            &[over_kill_event(now, &session_cwd, 250)],
-            &snapshot,
-            &platform,
-            now,
-        )
-        .expect("scan 1");
+    local_scan(
+        &mut watch,
+        &cfg,
+        &[over_kill_event(now, &session_cwd, 250)],
+        &snapshot,
+        now,
+    );
     assert!(is_alive(worker_pid), "worker must survive the grace scan");
 
     // Scan 2: grace has elapsed — terminate the worker tree.
     let after = now + chrono::Duration::seconds(2);
     let snapshot = SystemPlatform.capture().expect("capture");
-    watch
-        .scan(
-            &cfg,
-            &[over_kill_event(after, &session_cwd, 250)],
-            &snapshot,
-            &platform,
-            after,
-        )
-        .expect("scan 2");
+    local_scan(
+        &mut watch,
+        &cfg,
+        &[over_kill_event(after, &session_cwd, 250)],
+        &snapshot,
+        after,
+    );
 
     assert!(
         wait_until_gone(worker_pid, Duration::from_secs(10)),
@@ -335,33 +350,28 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
         HumanDuration::seconds(0), // grace 0: scan 1 starts grace, scan 2 kills
     );
     let mut watch = UsageWatch::default();
-    let platform = SystemPlatform;
 
     let now = Utc::now();
     // Scan 1: grace.
     let snapshot = SystemPlatform.capture().expect("capture");
-    watch
-        .scan(
-            &cfg,
-            &[over_kill_event(now, &session_cwd, 250)],
-            &snapshot,
-            &platform,
-            now,
-        )
-        .expect("scan 1");
+    local_scan(
+        &mut watch,
+        &cfg,
+        &[over_kill_event(now, &session_cwd, 250)],
+        &snapshot,
+        now,
+    );
 
     // Scan 2: terminate.
     let killed_at = now + chrono::Duration::seconds(1);
     let snapshot = SystemPlatform.capture().expect("capture");
-    watch
-        .scan(
-            &cfg,
-            &[over_kill_event(killed_at, &session_cwd, 250)],
-            &snapshot,
-            &platform,
-            killed_at,
-        )
-        .expect("scan 2");
+    local_scan(
+        &mut watch,
+        &cfg,
+        &[over_kill_event(killed_at, &session_cwd, 250)],
+        &snapshot,
+        killed_at,
+    );
     assert!(
         wait_until_gone(worker_pid, Duration::from_secs(10)),
         "worker pid {} was not terminated on scan 2",
@@ -385,15 +395,13 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     // table. Curb must treat the session as dead and not attempt another kill.
     let later = killed_at + chrono::Duration::seconds(1);
     let snapshot = SystemPlatform.capture().expect("capture");
-    watch
-        .scan(
-            &cfg,
-            &[over_kill_event(killed_at, &session_cwd, 250)],
-            &snapshot,
-            &platform,
-            later,
-        )
-        .expect("scan 3");
+    local_scan(
+        &mut watch,
+        &cfg,
+        &[over_kill_event(killed_at, &session_cwd, 250)],
+        &snapshot,
+        later,
+    );
 
     // No new termination lifecycle was appended: the session was not re-killed.
     assert_eq!(

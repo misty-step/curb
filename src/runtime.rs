@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::config::Config;
+use crate::local_enforcer::{self, LocalEnforcer};
 use crate::onboarding::{self, NotificationView, OnboardingView};
 use crate::platform::{Platform, PlatformError};
 use crate::service::{
@@ -215,10 +216,13 @@ impl<P: Platform> Runtime<P> {
         let scan = self.reader.scan_since(Some(self.lookback_start(now)))?;
         let processes = self.platform.capture()?;
         let cfg = self.config();
+        let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
+        let sessions = local_enforcer::build_policy_sessions(&cfg, &scan.events, &processes, now)?;
+        let enforcer = LocalEnforcer::new(&cfg, &self.platform, &processes);
         self.usagewatch
             .lock()
             .expect("usage watcher mutex poisoned")
-            .scan(&cfg, &scan.events, &processes, &self.platform, now)?;
+            .scan(&cfg, &sessions, &enforcer, window_start, now)?;
         self.rescan(now)
     }
 

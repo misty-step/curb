@@ -715,13 +715,6 @@ pub(crate) struct Session {
     turns: Vec<TurnView>,
 }
 
-impl Session {
-    pub(crate) fn recent_usage(&self, window_start: DateTime<Utc>) -> bool {
-        self.last_usage
-            .is_some_and(|last_usage| last_usage >= window_start)
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct ProcessMatch {
     agent: Agent,

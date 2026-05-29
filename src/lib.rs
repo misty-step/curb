@@ -10,6 +10,7 @@ pub mod config;
 pub mod dashboard;
 pub mod http;
 pub mod ledger;
+pub mod local_enforcer;
 pub mod onboarding;
 pub mod platform;
 pub mod runtime;
