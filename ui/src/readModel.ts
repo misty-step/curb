@@ -1,8 +1,13 @@
 import type { SessionView, Snapshot } from "./types";
 
-// Turns the service snapshot into exactly what the dashboard renders: a list of
-// agents that need your eyes (working or over a line), and a quiet pile of idle
-// ones folded into a count. No policy is recomputed here — only arranged.
+// Turns the service snapshot into what the dashboard renders. Three buckets:
+//
+//   active  - spending now, or sitting over a line. These get rows.
+//   idle    - an agent you are still using: it has a live worker, or it spent
+//             something within the live window, but it is not spending now.
+//   (ended) - last activity older than the window with no live worker. These
+//             are finished runs, not agents. They are dropped, not shown — that
+//             is the difference between an idle agent and a dead session.
 
 export interface DashboardModel {
   active: SessionView[];
@@ -12,18 +17,31 @@ export interface DashboardModel {
 
 const ALERT_RANK: Record<string, number> = { kill: 0, warn: 1, ok: 2 };
 
-export function selectDashboard(snapshot: Snapshot): DashboardModel {
+export function selectDashboard(snapshot: Snapshot, liveWindowSeconds: number): DashboardModel {
+  const now = Date.parse(snapshot.overview.last_scan) || Date.now();
+  const live = (session: SessionView) => isLive(session, now, liveWindowSeconds);
   const sessions = [...snapshot.sessions];
   return {
     active: sessions.filter(isActive).sort(compareSessions),
-    idle: sessions.filter((session) => !isActive(session)).sort(compareSessions),
+    idle: sessions.filter((session) => !isActive(session) && live(session)).sort(compareSessions),
     headline: snapshot.overview.message,
   };
 }
 
-/** A session earns a row when it is spending now or sitting over a line. */
+/** Spending now, or over a line — needs a row. */
 export function isActive(session: SessionView): boolean {
   return session.status === "working" || session.alert !== "ok";
+}
+
+/** A still-relevant agent has spent something within the live window. Recency
+ * alone — not process correlation — decides this: correlation is cwd-based, so
+ * a long-finished run in an active repo would otherwise borrow the liveness of
+ * whatever agent is running there now and never age out. Anything older is a
+ * finished run, not an idle agent. */
+export function isLive(session: SessionView, now: number, liveWindowSeconds: number): boolean {
+  if (!session.last_activity_at) return false;
+  const age = now - Date.parse(session.last_activity_at);
+  return Number.isFinite(age) && age <= liveWindowSeconds * 1000;
 }
 
 /** Most urgent first: kill before warn before ok, then working, then spend. */

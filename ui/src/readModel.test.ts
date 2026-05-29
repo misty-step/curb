@@ -23,11 +23,19 @@ function session(overrides: Partial<SessionView>): SessionView {
 }
 
 describe("selectDashboard", () => {
-  it("splits working/alerting agents from idle ones", () => {
-    const model = selectDashboard(demoSnapshot);
+  it("splits working/alerting agents from recently-idle ones", () => {
+    const model = selectDashboard(demoSnapshot, 900);
     expect(model.active.map((entry) => entry.id)).toEqual(["gradient", "curb"]);
     expect(model.idle.map((entry) => entry.id)).toEqual(["daybook"]);
-    expect(model.headline).toBe("1 agent past your warn line");
+    expect(model.headline).toBe("1 over the warn line");
+  });
+
+  it("drops finished sessions: old activity, no live worker, is not an agent", () => {
+    const dead = session({ id: "dead", key: "codex:dead", last_activity_at: "2026-05-28T17:00:00Z" });
+    const snapshot = { ...demoSnapshot, sessions: [...demoSnapshot.sessions, dead] };
+    const model = selectDashboard(snapshot, 900);
+    expect(model.idle.map((entry) => entry.id)).toEqual(["daybook"]);
+    expect([...model.active, ...model.idle].some((entry) => entry.id === "dead")).toBe(false);
   });
 });
 

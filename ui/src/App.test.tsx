@@ -37,17 +37,19 @@ describe("Curb dashboard", () => {
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("1 agent past your warn line");
+    expect(page).toContain("1 over the warn line");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
     expect(page).toContain("over warn");
     expect(page).toContain("Limits & mode");
     // Idle agents fold into a count rather than cluttering the list.
     expect(page).toContain("idle agent");
-    // The old vocabulary is gone.
+    // Redundant and confusing copy is gone.
+    expect(page).not.toContain("all within limits");
     expect(page).not.toContain("checkpoint");
     expect(page).not.toContain("window spend");
-    expect(page).not.toContain("Unmatched logs");
+    // The Advanced/token field was removed.
+    expect(page).not.toContain("api.token");
   });
 
   it("acknowledges a warning session through the ack endpoint", async () => {

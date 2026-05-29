@@ -1,6 +1,6 @@
 import { CircleDot, OctagonX, ShieldCheck, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
-import { numberValue, relativeTime, tokens } from "../format";
+import { commas, numberValue, relativeTime, tokens } from "../format";
 import { fillRatio, warnRatio } from "../readModel";
 import {
   type ConfigUpdate,
@@ -80,7 +80,7 @@ function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy }: 
         <div className="row-id">
           <span className="row-project">{session.project ?? session.id}</span>
           <span className="row-meta">
-            {providerLabel(session.provider)} · {session.cwd ?? "—"}
+            {providerLabel(session.provider)} · {relativeTime(session.last_activity_at)}
           </span>
         </div>
         <SpendBar session={session} config={config} />
@@ -100,6 +100,7 @@ function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy }: 
             {session.models.length ? <Fact label="Model" value={session.models.join(", ")} /> : null}
             {session.pid ? <Fact label="Worker" value={`pid ${session.pid}`} /> : null}
           </dl>
+          {session.cwd ? <p className="row-cwd">{session.cwd}</p> : null}
           <div className="row-actions">
             {session.can_acknowledge ? (
               <button type="button" className="btn btn-ack" onClick={() => onAck(session)}>
@@ -163,7 +164,8 @@ export function AgentList(props: AgentListProps): ReactNode {
       {idle.length ? (
         <details className="idle-fold">
           <summary>
-            {idle.length} idle {idle.length === 1 ? "agent" : "agents"} within your limits
+            {idle.length} idle {idle.length === 1 ? "agent" : "agents"} — active in the last{" "}
+            {Math.max(1, Math.round(config.usage_window_seconds / 60))} min, not spending now
           </summary>
           <div className="idle-list">
             {idle.map((session) => (
@@ -193,34 +195,21 @@ export function Settings({ config, notifications, message, onSave, onTestNotific
   const mode = modeFromConfig(config.mode);
   return (
     <div className="settings">
-      <div className="setting">
-        <label htmlFor="warn">Warn at</label>
-        <div className="token-input">
-          <input
-            id="warn"
-            type="number"
-            min={0}
-            step={100_000}
-            defaultValue={config.warn_turn_tokens}
-            onBlur={(event) => onSave({ warn_turn_tokens: numberValue(event.target.value) })}
-          />
-          <span>tokens / turn</span>
-        </div>
-      </div>
-      <div className="setting">
-        <label htmlFor="kill">Kill at</label>
-        <div className="token-input">
-          <input
-            id="kill"
-            type="number"
-            min={0}
-            step={100_000}
-            defaultValue={config.kill_turn_tokens}
-            onBlur={(event) => onSave({ kill_turn_tokens: numberValue(event.target.value) })}
-          />
-          <span>tokens / turn</span>
-        </div>
-      </div>
+      <p className="setting-hint">
+        A turn is the work an agent does between your inputs. Limits apply to each turn.
+      </p>
+      <LimitField
+        id="warn"
+        label="Warn at"
+        value={config.warn_turn_tokens}
+        onSave={(value) => onSave({ warn_turn_tokens: value })}
+      />
+      <LimitField
+        id="kill"
+        label="Kill at"
+        value={config.kill_turn_tokens}
+        onSave={(value) => onSave({ kill_turn_tokens: value })}
+      />
       <div className="setting">
         <span className="setting-label">When an agent crosses the kill line</span>
         <ModeToggle mode={mode} onChange={(next) => onSave({ mode: modeToConfig(next) })} />
@@ -239,6 +228,40 @@ export function Settings({ config, notifications, message, onSave, onTestNotific
         <span className={`note ${notifications.available ? "" : "note-warn"}`}>{notifications.message}</span>
       </div>
       {message ? <p className="settings-msg">{message}</p> : null}
+    </div>
+  );
+}
+
+// A token limit shown with thousands separators (1,000,000) and parsed back to
+// a plain number on blur.
+function LimitField({
+  id,
+  label,
+  value,
+  onSave,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  onSave: (value: number) => void;
+}): ReactNode {
+  return (
+    <div className="setting">
+      <label htmlFor={id}>{label}</label>
+      <div className="token-input">
+        <input
+          id={id}
+          type="text"
+          inputMode="numeric"
+          defaultValue={commas(value)}
+          onBlur={(event) => {
+            const parsed = numberValue(event.target.value.replace(/[^0-9]/g, ""));
+            event.target.value = commas(parsed);
+            onSave(parsed);
+          }}
+        />
+        <span>tokens / turn</span>
+      </div>
     </div>
   );
 }

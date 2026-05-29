@@ -5,6 +5,7 @@ import type { ConfigView, NotificationView, Snapshot } from "./types";
 
 const NOW = "2026-05-29T17:00:00Z";
 const A_MINUTE_AGO = "2026-05-29T16:59:00Z";
+const MINUTES_AGO = "2026-05-29T16:53:00Z";
 const AN_HOUR_AGO = "2026-05-29T16:00:00Z";
 
 export const demoConfig: ConfigView = {
@@ -38,7 +39,7 @@ export const demoSnapshot: Snapshot = {
   overview: {
     mode: "watch",
     status: "WATCH",
-    message: "1 agent past your warn line",
+    message: "1 over the warn line",
     working: 2,
     warn: 1,
     kill: 0,
@@ -66,8 +67,8 @@ export const demoSnapshot: Snapshot = {
     },
   },
   agents: [
-    { id: "claude-code", provider: "claude", label: "Claude Code", status: "working", pid: 4242, process_started_at: AN_HOUR_AGO, running_for_seconds: 3600, project: "gradient", cwd: "/Users/you/dev/gradient", session_key: "claude:gradient", turn_tokens: 1_400_000, explanation: "Past your warn line since your last input." },
-    { id: "codex-cli", provider: "codex", label: "Codex CLI", status: "working", pid: 5310, process_started_at: A_MINUTE_AGO, running_for_seconds: 240, project: "curb", cwd: "/Users/you/dev/curb", session_key: "codex:curb", turn_tokens: 320_000, explanation: "Working, within your limits." },
+    { id: "claude-code", provider: "claude", label: "Claude Code", status: "working", pid: 4242, process_started_at: AN_HOUR_AGO, running_for_seconds: 3600, project: "gradient", cwd: "/Users/you/dev/gradient", session_key: "claude:gradient", turn_tokens: 1_400_000, explanation: "Over your warn line this turn." },
+    { id: "codex-cli", provider: "codex", label: "Codex CLI", status: "working", pid: 5310, process_started_at: A_MINUTE_AGO, running_for_seconds: 240, project: "curb", cwd: "/Users/you/dev/curb", session_key: "codex:curb", turn_tokens: 320_000, explanation: "Working." },
   ],
   sessions: [
     {
@@ -90,7 +91,7 @@ export const demoSnapshot: Snapshot = {
       process_started_at: AN_HOUR_AGO,
       owner: "you",
       executable: "/usr/local/bin/claude",
-      explanation: "Past your warn line since your last input.",
+      explanation: "Over your warn line this turn.",
     },
     {
       key: "codex:curb",
@@ -129,8 +130,8 @@ export const demoSnapshot: Snapshot = {
       turn_context_tokens: 120_000,
       total_tokens: 2_300_000,
       calls: 64,
-      last_activity_at: AN_HOUR_AGO,
-      explanation: "Idle.",
+      last_activity_at: MINUTES_AGO,
+      explanation: "Idle between turns.",
     },
   ],
   turns: [],

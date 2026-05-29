@@ -30,3 +30,9 @@ export function numberValue(value: number | string): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
+
+/** Full number with thousands separators: 1,000,000. For limit fields where
+ * the exact value matters and should be readable. */
+export function commas(value: number): string {
+  return Math.round(value).toLocaleString("en-US");
+}
