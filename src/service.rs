@@ -1531,7 +1531,7 @@ impl<'a, P: Platform> Service<'a, P> {
             ));
         }
         let agent = correlation.agent.as_ref().expect("matched agent");
-        if !agent.termination_allowed() {
+        if !agent.can_terminate(self.cfg.usage.escalate_supervised) {
             return Err(ServiceError::StopConflict(
                 "matched agent is watch-only".to_string(),
             ));
@@ -1699,9 +1699,26 @@ pub fn build_snapshot_with_processes(
     sources: Vec<SourceReport>,
     now: DateTime<Utc>,
 ) -> Snapshot {
+    build_snapshot_filtered(cfg, processes, events, sources, now, &BTreeSet::new())
+}
+
+/// Like [`build_snapshot_with_processes`], but drops sessions Curb has already
+/// terminated (`terminated`) so a killed agent leaves the dashboard at once
+/// instead of lingering on log recency until the window expires.
+pub fn build_snapshot_filtered(
+    cfg: &Config,
+    processes: Option<&platform::Snapshot>,
+    events: &[Event],
+    sources: Vec<SourceReport>,
+    now: DateTime<Utc>,
+    terminated: &BTreeSet<String>,
+) -> Snapshot {
     let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
     let fresh_start = usage_activity_start(cfg, now);
-    let sessions = build_sessions(events, window_start);
+    let sessions = build_sessions(events, window_start)
+        .into_iter()
+        .filter(|session| !terminated.contains(&session.key))
+        .collect::<Vec<_>>();
     let matches = processes
         .map(|snapshot| process_matches(cfg, snapshot))
         .unwrap_or_default();
@@ -2077,7 +2094,8 @@ fn build_session_view(
     let enforceable = correlation
         .agent
         .as_ref()
-        .is_some_and(Agent::termination_allowed);
+        .is_some_and(|agent| agent.can_terminate(cfg.usage.escalate_supervised));
+    let supervised = correlation.agent.as_ref().is_some_and(Agent::is_supervised);
     let acknowledged_until = active_session_ack(&cfg.service.state_dir, &session.key, now)
         .ok()
         .flatten()
@@ -2100,11 +2118,14 @@ fn build_session_view(
     let explanation = session_explanation(
         alert,
         status,
-        correlation.matched,
-        enforceable,
-        cfg.mode,
-        acknowledged,
-        recent && (over_kill || over_warn),
+        &Explanation {
+            matched: correlation.matched,
+            enforceable,
+            supervised,
+            mode: cfg.mode,
+            acknowledged,
+            over_limit: recent && (over_kill || over_warn),
+        },
     );
     let process = correlation.process.as_ref();
 
@@ -2135,24 +2156,29 @@ fn build_session_view(
     }
 }
 
-/// One plain sentence explaining the row's `alert`/`status`. This is the only
-/// place state is turned into prose, so the language stays consistent.
-fn session_explanation(
-    alert: &str,
-    status: &str,
+/// Inputs for the one-line row explanation, grouped to keep the signature small.
+struct Explanation {
     matched: bool,
     enforceable: bool,
+    supervised: bool,
     mode: Mode,
     acknowledged: bool,
     over_limit: bool,
-) -> String {
-    if acknowledged && over_limit {
+}
+
+/// One plain sentence explaining the row's `alert`/`status`. This is the only
+/// place state is turned into prose, so the language stays consistent.
+fn session_explanation(alert: &str, status: &str, ctx: &Explanation) -> String {
+    if ctx.acknowledged && ctx.over_limit {
         return "Over your limit, but acknowledged.".to_string();
     }
     match alert {
-        "kill" if !matched => "Over your kill line, but no live process matched to stop.",
-        "kill" if !enforceable => "Over your kill line, but this is a watch-only desktop app.",
-        "kill" if mode != Mode::Enforcement => "Over your kill line. Watch mode only warns.",
+        "kill" if !ctx.matched => "Over your kill line, but no live process matched to stop.",
+        "kill" if ctx.supervised && !ctx.enforceable => {
+            "Over your kill line, but a desktop app supervises this task and would respawn it — Curb can warn but not stop it."
+        }
+        "kill" if !ctx.enforceable => "Over your kill line, but this is a watch-only desktop app.",
+        "kill" if ctx.mode != Mode::Enforcement => "Over your kill line. Watch mode only warns.",
         "kill" => "Over your kill line — stopping after the grace period.",
         "warn" => "Over your warn line this turn.",
         _ => match status {
@@ -3046,6 +3072,27 @@ mod tests {
         assert_eq!(snapshot.overview.status, "OK");
         assert_eq!(snapshot.sessions[0].alert, "ok");
         assert_eq!(snapshot.sessions[0].status, "idle");
+    }
+
+    #[test]
+    fn terminated_sessions_are_dropped_from_the_snapshot() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let events = [
+            event("codex", "s1", now, 250),
+            event("codex", "s2", now, 150),
+        ];
+
+        let full = build_snapshot_with_processes(&cfg, None, &events, Vec::new(), now);
+        assert_eq!(full.sessions.len(), 2);
+
+        let terminated: std::collections::BTreeSet<String> =
+            ["codex:s1".to_string()].into_iter().collect();
+        let filtered = build_snapshot_filtered(&cfg, None, &events, Vec::new(), now, &terminated);
+        assert_eq!(filtered.sessions.len(), 1);
+        assert_eq!(filtered.sessions[0].key, "codex:s2");
     }
 
     #[test]

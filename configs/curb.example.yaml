@@ -17,6 +17,11 @@ usage:
   warn_turn_tokens: 1000000
   kill_turn_tokens: 3000000
   grace_period: 10s
+  # Power-user opt-in. Desktop agents (e.g. the Codex app) supervise their task
+  # workers and respawn them, so killing the leaf is futile — by default Curb
+  # treats them as watch-only. Set true to kill the supervisor instead, which
+  # stops every concurrent task under that desktop app.
+  escalate_supervised: false
 
 defaults:
   warn_after: 90m

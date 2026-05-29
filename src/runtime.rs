@@ -379,12 +379,18 @@ impl<P: Platform> Runtime<P> {
                 None
             }
         };
-        let mut snapshot = service::build_snapshot_with_processes(
+        let terminated = self
+            .usagewatch
+            .lock()
+            .expect("usage watcher mutex poisoned")
+            .terminated_keys();
+        let mut snapshot = service::build_snapshot_filtered(
             &cfg,
             captured.as_ref(),
             &scan.events,
             sources,
             now,
+            &terminated,
         );
         snapshot.overview.capabilities = service::platform_capabilities(
             &cfg,

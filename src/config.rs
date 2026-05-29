@@ -570,6 +570,10 @@ pub struct UsageConfig {
     pub warn_turn_tokens: i64,
     pub kill_turn_tokens: i64,
     pub grace_period: HumanDuration,
+    /// Opt-in: when a supervised desktop worker blows past the kill line, kill
+    /// the supervisor process instead of the leaf (which would just respawn).
+    /// Off by default — it stops every concurrent task under that supervisor.
+    pub escalate_supervised: bool,
 }
 
 impl Default for UsageConfig {
@@ -582,6 +586,7 @@ impl Default for UsageConfig {
             warn_turn_tokens: 0,
             kill_turn_tokens: 0,
             grace_period: HumanDuration::ZERO,
+            escalate_supervised: false,
         }
     }
 }
@@ -641,6 +646,22 @@ impl Agent {
                     && self.matcher.app_paths.is_empty()
             }
         }
+    }
+
+    /// A real (terminable) worker spawned — and respawned — by a long-lived
+    /// desktop supervisor (e.g. the Codex desktop app's `app-server`). Killing
+    /// the leaf is futile because the supervisor restarts it, so these are
+    /// watch-only by default. Detected by the established "desktop" id
+    /// convention; excludes App-kind GUI agents, which are watch-only outright.
+    pub fn is_supervised(&self) -> bool {
+        self.termination_allowed() && self.id.to_lowercase().contains("desktop")
+    }
+
+    /// Whether Curb may terminate a matched worker for this agent. Supervised
+    /// desktop workers are watch-only unless the operator opts into escalation,
+    /// which targets the supervisor process instead of the respawning leaf.
+    pub fn can_terminate(&self, escalate_supervised: bool) -> bool {
+        self.termination_allowed() && (escalate_supervised || !self.is_supervised())
     }
 }
 
@@ -1203,6 +1224,26 @@ agents:
         };
 
         assert!(!agent.termination_allowed());
+    }
+
+    #[test]
+    fn supervised_desktop_worker_is_watch_only_unless_escalated() {
+        let worker = default_process_agents()
+            .into_iter()
+            .find(|agent| agent.id == "codex-desktop-worker")
+            .expect("codex-desktop-worker is a default agent");
+        // It is a real process, but supervised — futile to kill the leaf.
+        assert!(worker.termination_allowed());
+        assert!(worker.is_supervised());
+        assert!(!worker.can_terminate(false));
+        assert!(worker.can_terminate(true));
+
+        let cli = default_process_agents()
+            .into_iter()
+            .find(|agent| agent.id == "codex-cli")
+            .expect("codex-cli is a default agent");
+        assert!(!cli.is_supervised());
+        assert!(cli.can_terminate(false));
     }
 
     #[test]

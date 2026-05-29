@@ -86,6 +86,35 @@ impl Snapshot {
         })
     }
 
+    /// Walk up from a leaf worker to the nearest ancestor of the same process
+    /// family — the supervisor that respawns the leaf — and target its whole
+    /// tree. Used for opt-in escalation against supervised desktop workers
+    /// (killing the leaf alone is futile; the supervisor restarts it). Returns
+    /// `None` when no same-family ancestor exists (e.g. a plain CLI worker).
+    pub fn supervisor_target(
+        &self,
+        leaf: &Process,
+        family_names: &[String],
+    ) -> Option<TerminationTarget> {
+        let mut current = leaf;
+        let mut seen = HashSet::new();
+        seen.insert(current.pid);
+        while let Some(ppid) = current.ppid {
+            if !seen.insert(ppid) {
+                break;
+            }
+            let parent = self.processes.get(&ppid)?;
+            if family_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&parent.name))
+            {
+                return self.termination_target(parent);
+            }
+            current = parent;
+        }
+        None
+    }
+
     fn process_tree(&self, root: Pid) -> Vec<Pid> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();

@@ -25,6 +25,12 @@ pub struct UsageWatch {
     warned: HashSet<String>,
     grace: HashMap<String, DateTime<Utc>>,
     targets: HashMap<String, platform::Process>,
+    /// Sessions whose worker Curb has terminated, keyed to the kill time. The
+    /// read model drops these rows so a killed agent leaves the dashboard at
+    /// once instead of lingering on log recency, and the scan stops re-warning
+    /// or re-killing them. Cleared when the session resumes (new activity after
+    /// the kill) or ages out of the window.
+    terminated: HashMap<String, DateTime<Utc>>,
 }
 
 impl UsageWatch {
@@ -45,6 +51,10 @@ impl UsageWatch {
             self.clear();
             return Ok(());
         }
+        // Forget kills that have aged out of the window — beyond it the session
+        // is a finished run the read model drops on recency anyway.
+        self.terminated
+            .retain(|_, killed_at| *killed_at >= window_start);
         let matches = service::process_matches(cfg, processes);
         let mut active_keys = BTreeSet::new();
         for session in sessions {
@@ -53,6 +63,16 @@ impl UsageWatch {
             {
                 self.suppress(&session.key);
                 continue;
+            }
+            // A killed session that has logged no new activity is still dead —
+            // skip it so Curb does not re-warn, re-kill, or spam "stop blocked".
+            // Fresh activity after the kill means it came back: clear and re-arm.
+            if let Some(killed_at) = self.terminated.get(&session.key).copied() {
+                if session.last_usage.is_some_and(|last| last > killed_at) {
+                    self.terminated.remove(&session.key);
+                } else {
+                    continue;
+                }
             }
             active_keys.insert(session.key.clone());
             if service::active_session_ack(&cfg.service.state_dir, &session.key, now)?.is_some() {
@@ -111,21 +131,27 @@ impl UsageWatch {
         let Some(agent) = &correlation.agent else {
             return Ok(());
         };
-        if !agent.termination_allowed() {
+        if !agent.can_terminate(cfg.usage.escalate_supervised) {
             let blocked_key = format!("watch-only:{key}");
             if self.warned.insert(blocked_key) {
-                notify_user(
-                    cfg,
-                    platform,
-                    "Curb stop blocked",
-                    "Usage threshold exceeded, but the matched process is watch-only.",
-                )?;
+                let (title, detail) = if agent.is_supervised() {
+                    (
+                        "Curb can't stop this agent",
+                        "Over the kill line, but a desktop app supervises this task and would respawn it. Enable escalate_supervised to stop it.",
+                    )
+                } else {
+                    (
+                        "Curb stop blocked",
+                        "Usage threshold exceeded, but the matched process is watch-only.",
+                    )
+                };
+                notify_user(cfg, platform, title, detail)?;
                 append_event(
                     cfg,
                     "usage_kill_blocked",
                     session,
                     correlation,
-                    "usage threshold exceeded but matched agent is watch-only",
+                    detail,
                     None,
                 )?;
             }
@@ -177,7 +203,17 @@ impl UsageWatch {
             .unwrap_or_else(|| process.clone());
         let mut termination_correlation = correlation.clone();
         termination_correlation.process = Some(target_process.clone());
-        let Some(target) = processes.termination_target(&target_process) else {
+        // Supervised desktop workers respawn when their leaf is killed; with the
+        // escalate opt-in we target the supervisor's whole tree instead.
+        let escalate = agent.is_supervised() && cfg.usage.escalate_supervised;
+        let resolved_target = if escalate {
+            processes
+                .supervisor_target(&target_process, &agent.matcher.process_names)
+                .or_else(|| processes.termination_target(&target_process))
+        } else {
+            processes.termination_target(&target_process)
+        };
+        let Some(target) = resolved_target else {
             notify_user(
                 cfg,
                 platform,
@@ -212,7 +248,18 @@ impl UsageWatch {
             &message,
             Some(json!(result)),
         )?;
+        // Mark the session killed so the read model drops its row immediately
+        // and the next scan stops re-warning or re-killing a dead worker.
+        self.terminated.insert(key.to_string(), now);
+        self.grace.remove(key);
+        self.targets.remove(key);
         Ok(())
+    }
+
+    /// Sessions Curb has terminated and that have not resumed — the read model
+    /// drops their rows so a killed agent leaves the dashboard at once.
+    pub fn terminated_keys(&self) -> BTreeSet<String> {
+        self.terminated.keys().cloned().collect()
     }
 
     fn suppress(&mut self, key: &str) {
@@ -222,6 +269,7 @@ impl UsageWatch {
         self.warned.remove(&format!("watch-only:{key}"));
         self.grace.remove(key);
         self.targets.remove(key);
+        self.terminated.remove(key);
     }
 
     fn retain_active(&mut self, active_keys: &BTreeSet<String>) {
@@ -241,6 +289,7 @@ impl UsageWatch {
         self.warned.clear();
         self.grace.clear();
         self.targets.clear();
+        self.terminated.clear();
     }
 }
 
@@ -541,5 +590,166 @@ mod tests {
             )
             .unwrap();
         assert!(platform.terminated.lock().unwrap().is_empty());
+    }
+
+    /// A leaf worker spawned by the Codex desktop `app-server` supervisor.
+    fn desktop_leaf(now: DateTime<Utc>, pid: i32, ppid: i32, cwd: &str) -> Process {
+        Process {
+            pid: Pid::new(pid),
+            ppid: Some(Pid::new(ppid)),
+            name: "codex".to_string(),
+            executable: Some("/Applications/Codex.app/Contents/Resources/codex".into()),
+            command:
+                "/Applications/Codex.app/Contents/Resources/codex app-server --listen stdio://"
+                    .to_string(),
+            cwd: Some(cwd.into()),
+            started_at: Some(now - chrono::Duration::minutes(5)),
+            username: Some("tester".to_string()),
+            bundle_id: None,
+            team_id: None,
+        }
+    }
+
+    /// The persistent supervisor that respawns leaf workers.
+    fn desktop_supervisor(now: DateTime<Utc>, pid: i32) -> Process {
+        Process {
+            pid: Pid::new(pid),
+            ppid: None,
+            name: "codex".to_string(),
+            executable: Some("/Applications/Codex.app/Contents/Resources/codex".into()),
+            command: "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"
+                .to_string(),
+            cwd: None,
+            started_at: Some(now - chrono::Duration::minutes(30)),
+            username: Some("tester".to_string()),
+            bundle_id: None,
+            team_id: None,
+        }
+    }
+
+    #[test]
+    fn supervised_desktop_worker_is_watch_only_by_default() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([
+            desktop_supervisor(now, 3032),
+            desktop_leaf(now, 7731, 3032, "/repo"),
+        ]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        for at in [now, now + chrono::Duration::seconds(5)] {
+            watch
+                .scan(
+                    &cfg,
+                    &[over_kill_event(at, "/repo", 250)],
+                    &processes,
+                    &platform,
+                    at,
+                )
+                .unwrap();
+        }
+        // Killing the leaf is futile (it respawns), so Curb refuses by default.
+        assert!(platform.terminated.lock().unwrap().is_empty());
+        assert!(watch.terminated_keys().is_empty());
+    }
+
+    #[test]
+    fn escalate_supervised_kills_the_supervisor() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.usage.escalate_supervised = true;
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([
+            desktop_supervisor(now, 3032),
+            desktop_leaf(now, 7731, 3032, "/repo"),
+        ]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        for at in [now, now + chrono::Duration::seconds(5)] {
+            watch
+                .scan(
+                    &cfg,
+                    &[over_kill_event(at, "/repo", 250)],
+                    &processes,
+                    &platform,
+                    at,
+                )
+                .unwrap();
+        }
+        // With escalation on, Curb targets the supervisor's whole tree.
+        let killed = platform.terminated.lock().unwrap().clone();
+        assert!(
+            killed.contains(&3032),
+            "supervisor not terminated: {killed:?}"
+        );
+        assert!(killed.contains(&7731), "leaf not terminated: {killed:?}");
+    }
+
+    #[test]
+    fn killed_worker_is_marked_terminated_and_not_rekilled() {
+        let state = tempdir().unwrap();
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.mode = Mode::Enforcement;
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        cfg.usage.grace_period = HumanDuration::seconds(0);
+        cfg.service.state_dir = state.path().to_path_buf();
+        cfg.ledger.path = state.path().join("runs.ndjson");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 16, 0, 0).unwrap();
+        let processes = Snapshot::new([codex_process(now, 4242, "/repo")]);
+        let platform = KillPlatform::default();
+        let mut watch = UsageWatch::default();
+
+        // scan 1: grace starts. scan 2: terminate. scan 3: already dead (no new
+        // activity since the kill) — skip, do not kill again.
+        let killed_at = now + chrono::Duration::seconds(5);
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(now, "/repo", 250)],
+                &processes,
+                &platform,
+                now,
+            )
+            .unwrap();
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(killed_at, "/repo", 250)],
+                &processes,
+                &platform,
+                killed_at,
+            )
+            .unwrap();
+        watch
+            .scan(
+                &cfg,
+                &[over_kill_event(killed_at, "/repo", 250)],
+                &processes,
+                &platform,
+                killed_at + chrono::Duration::seconds(5),
+            )
+            .unwrap();
+        // Killed exactly once, and remembered so the read model drops its row.
+        assert_eq!(*platform.terminated.lock().unwrap(), vec![4242]);
+        assert!(watch.terminated_keys().contains("codex:s1"));
     }
 }
