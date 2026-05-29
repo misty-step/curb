@@ -30,10 +30,13 @@ export function providerLabel(provider: string): string {
   return provider;
 }
 
-function tone(session: SessionView): "kill" | "warn" | "working" | "idle" {
+// Active rows are running agents, so an in-limits row is "working" (green) for
+// its whole on-screen life — it does not gray out between model calls. Quiet
+// agents live in the idle fold, which does not use this.
+function tone(session: SessionView): "kill" | "warn" | "working" {
   if (session.alert === "kill") return "kill";
   if (session.alert === "warn") return "warn";
-  return session.status === "working" ? "working" : "idle";
+  return "working";
 }
 
 function SpendBar({ session, config }: { session: SessionView; config: ConfigView }): ReactNode {
@@ -59,7 +62,7 @@ function SpendBar({ session, config }: { session: SessionView; config: ConfigVie
 function StatusChip({ session }: { session: SessionView }): ReactNode {
   if (session.acknowledged_until) return <span className="chip chip-ack">acknowledged</span>;
   const state = tone(session);
-  const label = state === "kill" ? "over kill" : state === "warn" ? "over warn" : state;
+  const label = state === "kill" ? "over kill" : state === "warn" ? "over warn" : "working";
   return <span className={`chip chip-${state}`}>{label}</span>;
 }
 
@@ -146,7 +149,7 @@ export function AgentList(props: AgentListProps): ReactNode {
   return (
     <section className="agents">
       {active.length === 0 ? (
-        <p className="empty">No agents are working right now. Curb is watching.</p>
+        <EmptyState config={config} />
       ) : (
         active.map((session) => (
           <AgentRow
@@ -180,6 +183,27 @@ export function AgentList(props: AgentListProps): ReactNode {
         </details>
       ) : null}
     </section>
+  );
+}
+
+// The calm, good state: nothing is spending. Instead of a bare line, it
+// confirms Curb is armed — what it watches and at what limits — so the quiet is
+// reassuring rather than ambiguous (is it working? is it connected?).
+function EmptyState({ config }: { config: ConfigView }): ReactNode {
+  const enforce = modeFromConfig(config.mode) === "enforce";
+  return (
+    <div className="empty">
+      <span className="empty-gauge" aria-hidden="true">
+        <span className="empty-gauge-tick" />
+      </span>
+      <p className="empty-title">
+        <ShieldCheck size={15} /> Nothing spending right now
+      </p>
+      <p className="empty-sub">
+        Watching Codex and Claude Code. Curb warns over {commas(config.warn_turn_tokens)} tokens a
+        turn{enforce ? ` and stops a runaway over ${commas(config.kill_turn_tokens)}` : ""}.
+      </p>
+    </div>
   );
 }
 

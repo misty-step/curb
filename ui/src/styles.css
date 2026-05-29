@@ -194,12 +194,53 @@ button {
   gap: var(--s2);
 }
 .empty {
-  padding: var(--s6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s6) var(--s5);
   text-align: center;
-  color: var(--text-muted);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
+}
+/* a flat spend gauge reading zero — the product's instrument, at rest */
+.empty-gauge {
+  position: relative;
+  width: 180px;
+  height: 6px;
+  margin-bottom: var(--s2);
+  border-radius: 999px;
+  background: var(--track);
+  border: 1px solid var(--border);
+}
+.empty-gauge-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 33%;
+  width: 1.5px;
+  background: var(--text-faint);
+  opacity: 0.6;
+}
+.empty-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+  font-size: 15px;
+  font-weight: 640;
+  color: var(--text);
+}
+.empty-title svg {
+  color: var(--ok);
+}
+.empty-sub {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
 }
 .row {
   background: var(--surface);

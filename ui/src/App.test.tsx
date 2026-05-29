@@ -52,6 +52,23 @@ describe("Curb dashboard", () => {
     expect(page).not.toContain("api.token");
   });
 
+  it("shows an informative empty state — armed limits — when nothing is spending", async () => {
+    const idleOnly: Snapshot = {
+      ...demoSnapshot,
+      overview: { ...demoSnapshot.overview, status: "OK", message: "Nothing spending" },
+      sessions: demoSnapshot.sessions.filter((session) => session.id === "daybook"),
+    };
+    installFetch(idleOnly);
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const page = document.body.textContent ?? "";
+    expect(page).toContain("Nothing spending right now");
+    expect(page).toContain("Watching Codex and Claude Code");
+    expect(page).toContain("1,000,000"); // the warn limit, armed
+  });
+
   it("acknowledges a warning session through the ack endpoint", async () => {
     const requests = installFetch(demoSnapshot);
     const { App } = await import("./App");

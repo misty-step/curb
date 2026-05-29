@@ -2229,12 +2229,18 @@ fn overview_message(status: &str, working: usize, warn: usize, kill: usize) -> S
     }
 }
 
-/// A checkpoint is "fresh" (the agent is spending now) if it landed within a
-/// few scan intervals. The floor keeps a worker from flickering to idle between
-/// model calls; lower is snappier at calling a finished agent idle.
+/// An agent is "working" while it is in a turn — chewing tokens since your last
+/// input — not just at the instant of a model call. A turn is one continuous
+/// spending episode with gaps between model calls (tool runs, thinking), so the
+/// freshness window spans those gaps: a worker stays "working" until it has been
+/// quiet for the whole window, rather than flickering idle between calls. The
+/// trade-off is that a finished agent reads "working" until the window elapses.
+const FRESH_WINDOW_SECS: u64 = 120;
+
 fn usage_activity_start(cfg: &Config, now: DateTime<Utc>) -> DateTime<Utc> {
     let scan = cfg.usage.scan_interval.as_std();
-    let freshness = std::time::Duration::from_secs(scan.as_secs().saturating_mul(3).max(15));
+    let freshness =
+        std::time::Duration::from_secs(scan.as_secs().saturating_mul(3).max(FRESH_WINDOW_SECS));
     now - chrono::Duration::from_std(freshness).unwrap()
 }
 

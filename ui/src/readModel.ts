@@ -17,13 +17,22 @@ export interface DashboardModel {
 
 const ALERT_RANK: Record<string, number> = { kill: 0, warn: 1, ok: 2 };
 
+// A working agent's checkpoints arrive in bursts with gaps between model calls
+// (tool runs, thinking). Keep its row on screen across those gaps so it does not
+// flicker in and out; only when it has been quiet this long does it fall to the
+// idle fold. This is row-presence, distinct from the tighter "spending now" pulse.
+const ACTIVE_WINDOW_SECONDS = 120;
+
 export function selectDashboard(snapshot: Snapshot, liveWindowSeconds: number): DashboardModel {
   const now = Date.parse(snapshot.overview.last_scan) || Date.now();
-  const live = (session: SessionView) => isLive(session, now, liveWindowSeconds);
+  // On screen as a row: spending, over a line, or active in the last ~2 min.
+  const onScreen = (session: SessionView) => isActive(session) || isLive(session, now, ACTIVE_WINDOW_SECONDS);
   const sessions = [...snapshot.sessions];
   return {
-    active: sessions.filter(isActive).sort(compareSessions),
-    idle: sessions.filter((session) => !isActive(session) && live(session)).sort(compareSessions),
+    active: sessions.filter(onScreen).sort(compareSessions),
+    idle: sessions
+      .filter((session) => !onScreen(session) && isLive(session, now, liveWindowSeconds))
+      .sort(compareSessions),
     headline: snapshot.overview.message,
   };
 }
