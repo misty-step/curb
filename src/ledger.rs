@@ -714,8 +714,14 @@ mod tests {
                 ("stopping", "stopping"),
                 "{started:?} should classify as stopping, not grace"
             );
-            assert!(class.actionable);
         }
+        // The live (emitted) start event is actionable; the legacy read-compat
+        // alias is not — preserve that distinction.
+        assert!(
+            LedgerEvent::UsageTerminationStarted
+                .alert_class()
+                .actionable
+        );
 
         let done = LedgerEvent::UsageTerminationCompleted.alert_class();
         assert_eq!((done.category, done.label), ("stopped", "stopped"));
