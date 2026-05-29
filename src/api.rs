@@ -1697,6 +1697,7 @@ mod tests {
             process_kill_seconds: 120 * 60,
             ack_extension_seconds: 30 * 60,
             local_notifications,
+            escalate_supervised: false,
             ledger_forward_url: None,
             agents: Vec::new(),
         }

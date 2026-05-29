@@ -122,6 +122,7 @@ export interface ConfigView {
   process_kill_seconds: number;
   ack_extension_seconds: number;
   local_notifications: boolean;
+  escalate_supervised: boolean;
   agents: ConfigAgentView[];
 }
 
@@ -137,7 +138,7 @@ export interface ConfigAgentView {
 export type ConfigUpdate = Partial<
   Pick<
     ConfigView,
-    "mode" | "warn_turn_tokens" | "kill_turn_tokens" | "local_notifications"
+    "mode" | "warn_turn_tokens" | "kill_turn_tokens" | "local_notifications" | "escalate_supervised"
   >
 >;
 

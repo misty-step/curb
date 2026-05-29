@@ -340,6 +340,7 @@ pub struct ConfigView {
     pub process_kill_seconds: i64,
     pub ack_extension_seconds: i64,
     pub local_notifications: bool,
+    pub escalate_supervised: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ledger_forward_url: Option<String>,
     pub agents: Vec<ConfigAgentView>,
@@ -368,6 +369,7 @@ pub struct ConfigUpdate {
     pub process_warn_seconds: Option<i64>,
     pub process_kill_seconds: Option<i64>,
     pub local_notifications: Option<bool>,
+    pub escalate_supervised: Option<bool>,
 }
 
 pub fn config_view(path: Option<&Path>, cfg: &Config) -> ConfigView {
@@ -384,6 +386,7 @@ pub fn config_view(path: Option<&Path>, cfg: &Config) -> ConfigView {
         process_kill_seconds: seconds(cfg.defaults.kill_after),
         ack_extension_seconds: seconds(cfg.defaults.ack_extension),
         local_notifications: cfg.alerts.local_notifications,
+        escalate_supervised: cfg.usage.escalate_supervised,
         ledger_forward_url: (!cfg.ledger.forward_url.is_empty())
             .then(|| cfg.ledger.forward_url.clone()),
         agents: cfg
@@ -438,6 +441,9 @@ pub fn apply_config_update(cfg: &mut Config, update: ConfigUpdate) -> Result<(),
     }
     if let Some(enabled) = update.local_notifications {
         cfg.alerts.local_notifications = enabled;
+    }
+    if let Some(enabled) = update.escalate_supervised {
+        cfg.usage.escalate_supervised = enabled;
     }
     cfg.validate()
         .map_err(|error| ServiceError::InvalidConfig(error.to_string()))

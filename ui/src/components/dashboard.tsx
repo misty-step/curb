@@ -239,6 +239,22 @@ export function Settings({ config, notifications, message, onSave, onTestNotific
       <div className="setting">
         <span className="setting-label">When an agent crosses the kill line</span>
         <ModeToggle mode={mode} onChange={(next) => onSave({ mode: modeToConfig(next) })} />
+        {mode === "enforce" ? (
+          <label className="setting-check">
+            <input
+              type="checkbox"
+              checked={config.escalate_supervised}
+              onChange={(event) => onSave({ escalate_supervised: event.target.checked })}
+            />
+            <span className="setting-check-text">
+              Also stop supervised desktop agents
+              <span className="note">
+                Desktop apps like Codex respawn killed tasks. This stops the app's supervisor
+                instead — ending every task running under it.
+              </span>
+            </span>
+          </label>
+        ) : null}
       </div>
       <div className="setting setting-row">
         <label htmlFor="notify">Notify me</label>

@@ -693,6 +693,30 @@ button {
   align-items: center;
   gap: var(--s3);
 }
+/* a sub-option that appears under the mode toggle in enforce mode */
+.setting-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text);
+  animation: detailIn 0.24s var(--ease-out) both;
+}
+.setting-check input {
+  margin-top: 1px;
+  flex: none;
+}
+.setting-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 52ch;
+}
+.setting-check-text .note {
+  line-height: 1.45;
+}
 .toggle {
   display: inline-flex;
   width: fit-content;

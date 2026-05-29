@@ -21,6 +21,7 @@ export const demoConfig: ConfigView = {
   process_kill_seconds: 7_200,
   ack_extension_seconds: 1_800,
   local_notifications: true,
+  escalate_supervised: false,
   agents: [
     { id: "codex-cli", label: "Codex CLI", family: "codex", kind: "process", terminates: true, description: "Codex CLI worker" },
     { id: "claude-code", label: "Claude Code", family: "claude", kind: "process", terminates: true, description: "Claude Code worker" },
