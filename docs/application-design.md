@@ -231,6 +231,13 @@ facts.
 - `working`: a fresh usage checkpoint landed within the activity window.
 - `idle`: alive or recently seen, but not spending now.
 
+The dashboard separates a live **idle agent** from a finished run. An agent is
+still shown — working or idle — only while it has a live correlated worker or
+activity within the live window (the rolling policy window). A session whose
+last activity is older than that, with no live worker, is a completed run, not
+an agent: it drops off the dashboard rather than lingering as "idle." History
+lives in the ledger, not the live view.
+
 `alert` — where does the current turn sit against your lines?
 
 - `ok`: within limits (or acknowledged).
