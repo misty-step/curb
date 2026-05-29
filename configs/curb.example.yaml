@@ -13,10 +13,10 @@ usage:
   enabled: true
   scan_interval: 2s
   lookback: 24h
-  window: 15m
+  window: 5m
   warn_turn_tokens: 1000000
   kill_turn_tokens: 3000000
-  grace_period: 60s
+  grace_period: 10s
 
 defaults:
   warn_after: 90m

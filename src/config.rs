@@ -594,14 +594,14 @@ impl UsageConfig {
     fn set_defaults(&mut self) {
         self.scan_interval.default_to(HumanDuration::seconds(5));
         self.lookback.default_to(HumanDuration::hours(24));
-        self.window.default_to(HumanDuration::minutes(15));
+        self.window.default_to(HumanDuration::minutes(5));
         if self.warn_turn_tokens == 0 {
             self.warn_turn_tokens = 1_000_000;
         }
         if self.kill_turn_tokens == 0 {
             self.kill_turn_tokens = 3_000_000;
         }
-        self.grace_period.default_to(HumanDuration::seconds(60));
+        self.grace_period.default_to(HumanDuration::seconds(10));
     }
 }
 

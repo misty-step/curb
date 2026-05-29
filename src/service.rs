@@ -3055,7 +3055,7 @@ mod tests {
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
-        let stale_but_in_window = now - chrono::Duration::minutes(10);
+        let stale_but_in_window = now - chrono::Duration::minutes(3);
         let processes = process_snapshot(now, "codex", "/repo");
         let snapshot = build_snapshot_with_processes(
             &cfg,
