@@ -45,3 +45,45 @@ jobs:
 
       - name: Run repository gate
         run: bash scripts/validate.sh
+
+  coverage:
+    name: coverage
+    # Generates Rust line coverage and fails below a calibrated floor.
+    # Baseline measured 2026-05-29 with cargo-llvm-cov 0.8.7 on the full suite
+    # (lib + bins + integration tests): TOTAL line coverage 86.37%.
+    # Floor = floor(86.37) - 2 = 84, a small margin so it passes on creation.
+    #
+    # THE FLOOR RATCHETS UP. As coverage rises, raise this number. NEVER lower it
+    # to get a red build green — that defeats the regression guard.
+    #
+    # Coverage runs on ubuntu-latest only; it need not run on both OSes. The
+    # crate compiles without a UI build because build.rs embeds web/dist, which
+    # is committed to the repo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (llvm-tools-preview)
+        run: rustup component add llvm-tools-preview
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate coverage and enforce the floor
+        # Prints the per-file + TOTAL summary to the job log and exits non-zero
+        # if TOTAL line coverage drops below the floor.
+        run: cargo llvm-cov --summary-only --fail-under-lines 84
+
+      - name: Generate lcov report
+        if: always()
+        run: cargo llvm-cov --lcov --output-path lcov.info
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
