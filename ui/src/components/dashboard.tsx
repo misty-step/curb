@@ -485,8 +485,8 @@ export function OperatorSummary({
                   <span>window spend</span>
                 </span>
                 <span>
-                  <strong>{formatDuration(row.runningForSeconds)}</strong>
-                  <span>running</span>
+                  <strong>{relativeTime(session.last_usage_at || session.last_seen_at)}</strong>
+                  <span>last checkpoint</span>
                 </span>
               </button>
             );

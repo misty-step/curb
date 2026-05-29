@@ -15,7 +15,6 @@ export interface SessionActivityRow {
   session: SessionView;
   workerCount: number;
   workerLabel: string;
-  runningForSeconds: number;
 }
 
 export interface OperatorSummaryModel {
@@ -89,7 +88,6 @@ export function sessionActivityRows(sessions: SessionView[], agents: AgentView[]
         session,
         workerCount: Math.max(workers.length, session.correlated_pid ? 1 : 0),
         workerLabel: workerLabel(workers, session),
-        runningForSeconds: workers.reduce((max, agent) => Math.max(max, agent.running_for_seconds ?? 0), 0),
       };
     })
     .sort((left, right) => {

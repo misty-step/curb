@@ -268,7 +268,7 @@ describe("read model selectors", () => {
     );
 
     expect(rows.map((row) => row.session.id)).toEqual(["active", "quiet"]);
-    expect(rows[0].runningForSeconds).toBe(42);
+    expect(rows[0]).toMatchObject({ workerCount: 1, workerLabel: "Codex Desktop Worker" });
   });
 
   it("matches an agent to its exact latest session before pid fallback", () => {
