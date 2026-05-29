@@ -1,9 +1,12 @@
 # Curb
 
-Curb is a local endpoint agent for AI-assisted engineering work. One local service
-on the machine owns usage ingestion, process correlation, notifications,
-policy, enforcement, and the audit ledger; the CLI and embedded UI are thin
-clients of that local service.
+**A local watchdog for AI coding agents.** Curb watches how much every agent on
+your machine is spending — tokens, per turn, since your last input — and warns
+you, or stops it, when a run goes off the rails. One local service owns usage
+ingestion, process correlation, notifications, policy, enforcement, and an
+append-only audit ledger; the CLI and embedded dashboard are thin clients of it.
+Everything stays on your machine, and no prompt or response content is ever read
+or stored.
 
 Curb measures one thing: **tokens an agent has spent since your last input** —
 the runaway signal. When that turn spend crosses your warn line, Curb tells you;
