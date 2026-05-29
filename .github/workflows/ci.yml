@@ -1,0 +1,47 @@
+name: CI
+
+# Runs the repository gate (scripts/validate.sh) on every PR and on pushes to
+# master, across macOS and Linux. This is the automated enforcement of the gate
+# that previously only ran when a human remembered to.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (rustfmt + clippy)
+        run: rustup component add rustfmt clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm ci
+        working-directory: ui
+
+      - name: Run repository gate
+        run: bash scripts/validate.sh
