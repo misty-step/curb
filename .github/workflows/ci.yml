@@ -56,10 +56,11 @@ jobs:
     # THE FLOOR RATCHETS UP. As coverage rises, raise this number. NEVER lower it
     # to get a red build green — that defeats the regression guard.
     #
-    # Coverage runs on ubuntu-latest only; it need not run on both OSes. The
-    # crate compiles without a UI build because build.rs embeds web/dist, which
-    # is committed to the repo.
-    runs-on: ubuntu-latest
+    # Coverage runs on macOS because the real-process e2e enforcement test is
+    # macOS-gated (see tests/e2e_enforcement.rs / backlog 014); running coverage
+    # there includes it and matches the measured baseline. The crate compiles
+    # without a UI build because build.rs embeds the committed web/dist.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
