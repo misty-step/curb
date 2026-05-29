@@ -426,10 +426,7 @@ impl<B: Backend> Server<B> {
 }
 
 fn token_cookie(token: &str, secure: bool) -> String {
-    let mut cookie = format!(
-        "{}={}; Path=/v1/; HttpOnly; SameSite=Strict",
-        TOKEN_COOKIE, token
-    );
+    let mut cookie = format!("{TOKEN_COOKIE}={token}; Path=/v1/; HttpOnly; SameSite=Strict");
     if secure {
         cookie.push_str("; Secure");
     }

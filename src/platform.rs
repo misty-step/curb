@@ -1011,7 +1011,7 @@ mod tests {
                 degrade_side_expected in any::<bool>(),
             ) {
                 let mut expected = process.clone();
-                let mut current = process.clone();
+                let mut current = process;
                 let target = if degrade_side_expected {
                     &mut expected
                 } else {

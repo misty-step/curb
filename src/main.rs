@@ -251,7 +251,7 @@ fn run() -> Result<()> {
             if action.as_deref() == Some("set") {
                 config_set_command(args)?;
             } else if !args.is_empty() {
-                bail!("unexpected config arguments after {:?}", action);
+                bail!("unexpected config arguments after {action:?}");
             } else {
                 config_command(action)?;
             }
@@ -270,7 +270,7 @@ fn run() -> Result<()> {
                 home,
                 limit,
                 json,
-            )?
+            )?;
         }
         Some(Command::Doctor {
             config,
@@ -390,7 +390,7 @@ fn run() -> Result<()> {
             false,
         )?,
         Some(Command::App { config, addr, home }) => {
-            serve_dashboard(config.unwrap_or_else(default_config_path), addr, home, true)?
+            serve_dashboard(config.unwrap_or_else(default_config_path), addr, home, true)?;
         }
         Some(Command::Watch { config, home, once }) => watch_command(config, home, once)?,
         None => watch_command(None, None, false)?,
@@ -426,7 +426,7 @@ fn watch_command(config: Option<PathBuf>, home: Option<PathBuf>, once: bool) -> 
         .context("home directory is required for usage log discovery")?;
     let interval = cfg.usage.scan_interval.as_std();
     let runtime = curb::runtime::Runtime::new(cfg.clone(), home, curb::platform::SystemPlatform)
-        .with_config_path(config.clone());
+        .with_config_path(config);
     println!("curb watcher");
     println!("  mode: {}", cfg.mode);
     println!(

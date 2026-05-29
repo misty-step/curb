@@ -671,7 +671,7 @@ mod tests {
             Err(ServiceError::StopConflict(_))
         ));
 
-        let mut uncorrelated_cfg = alert_cfg.clone();
+        let mut uncorrelated_cfg = alert_cfg;
         uncorrelated_cfg.mode = crate::config::Mode::Enforcement;
         let other = process(now, 100, "codex", "/other");
         let uncorrelated_platform = FakePlatform::new(platform::Snapshot::new([other.clone()]));

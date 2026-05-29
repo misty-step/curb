@@ -33,3 +33,24 @@ assert_cmd = "2.1.1"
 predicates = "3.1.3"
 proptest = "1.11.0"
 tempfile = "3.24.0"
+
+# Curated high-signal clippy lints layered on top of the default `-D warnings`
+# baseline. We deliberately avoid wholesale `pedantic`/`nursery` (noise > signal
+# for a process-watchdog: ~270 pedantic warnings here, mostly cast/doc churn).
+# Each lint below was chosen for low violation count and real defect/clarity
+# value on this codebase; see backlog.d/010-strict-lint-pass.md.
+[lints.clippy]
+# Modernize `format!("{}", x)` to inline `format!("{x}")` for readability.
+uninlined_format_args = "deny"
+# Require trailing `;` on unit-returning tail statements for consistent blocks.
+semicolon_if_nothing_returned = "deny"
+# Prefer `let ... else { return }` over manual match-and-bail control flow.
+manual_let_else = "deny"
+# Catch `.clone()` whose result is dropped unused (real wasted allocation).
+redundant_clone = "deny"
+# Prefer `for x in &xs` over `for x in xs.iter()` for idiomatic iteration.
+explicit_iter_loop = "deny"
+# Considered but omitted (would exceed this ticket's small-diff bound or hurt
+# clarity): map_unwrap_or (25 hits, stylistic map_or preference),
+# match_same_arms (6 hits, intentional route/status tables),
+# needless_continue (3 hits, explicit skip-iteration markers read clearer).

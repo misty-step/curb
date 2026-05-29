@@ -31,9 +31,8 @@ fn main() {
 
 fn collect_assets(root: &Path, dir: &Path, assets: &mut Vec<(String, PathBuf)>) {
     println!("cargo:rerun-if-changed={}", dir.display());
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
     };
     for entry in entries.flatten() {
         let path = entry.path();

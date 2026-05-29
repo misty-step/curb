@@ -239,10 +239,7 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
     // Resolve the real, OS-normalized cwd from the captured process so the
     // synthetic session correlates by exact working directory.
     let (_, worker_process) = observe(worker_pid);
-    let session_cwd = worker_process
-        .cwd
-        .clone()
-        .expect("worker has a captured cwd");
+    let session_cwd = worker_process.cwd.expect("worker has a captured cwd");
     // Sanity: both spawned in the same dir, so the sibling shares the cwd.
     let (_, sibling_process) = observe(sibling_pid);
     assert_eq!(
@@ -326,7 +323,7 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     let worker_pid = worker.pid();
 
     let (_, worker_process) = observe(worker_pid);
-    let session_cwd = worker_process.cwd.clone().expect("worker cwd");
+    let session_cwd = worker_process.cwd.expect("worker cwd");
 
     let state = TempDir::new().expect("state dir");
     let cfg = enforcement_config(

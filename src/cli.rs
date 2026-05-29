@@ -86,13 +86,13 @@ pub fn config_set_command(args: Vec<String>) -> Result<()> {
             "--scan" => updates.scan = Some(next_duration(&mut iter, "--scan")?),
             "--usage" => updates.usage = Some(next_bool(&mut iter, "--usage")?),
             "--warn-turn-tokens" => {
-                updates.warn_turn_tokens = Some(next_i64(&mut iter, "--warn-turn-tokens")?)
+                updates.warn_turn_tokens = Some(next_i64(&mut iter, "--warn-turn-tokens")?);
             }
             "--kill-turn-tokens" => {
-                updates.kill_turn_tokens = Some(next_i64(&mut iter, "--kill-turn-tokens")?)
+                updates.kill_turn_tokens = Some(next_i64(&mut iter, "--kill-turn-tokens")?);
             }
             "--usage-window" => {
-                updates.usage_window = Some(next_duration(&mut iter, "--usage-window")?)
+                updates.usage_window = Some(next_duration(&mut iter, "--usage-window")?);
             }
             "--usage-scan" => updates.usage_scan = Some(next_duration(&mut iter, "--usage-scan")?),
             "--ledger-forward-url" => {

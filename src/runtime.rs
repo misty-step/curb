@@ -620,7 +620,7 @@ mod tests {
             )
             .unwrap();
         let snapshot = runtime.snapshot(now).unwrap();
-        let events = crate::ledger::read(runtime.config().ledger.path.clone()).unwrap();
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
 
         assert_eq!(ack.session_key, "codex:s1");
         assert_eq!(ack.extend_seconds, 60);
@@ -653,7 +653,7 @@ mod tests {
             *runtime.platform.terminated.lock().unwrap(),
             vec![vec![100]]
         );
-        let events = crate::ledger::read(runtime.config().ledger.path.clone()).unwrap();
+        let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
         assert_eq!(events[0].event_type, "manual_stop_started");
         assert_eq!(events[1].event_type, "manual_stop_completed");
     }
@@ -1098,7 +1098,7 @@ mod tests {
 
         runtime.usage_scan(now).unwrap();
         assert!(
-            crate::ledger::read(runtime.config().ledger.path.clone())
+            crate::ledger::read(runtime.config().ledger.path)
                 .unwrap()
                 .is_empty()
         );
