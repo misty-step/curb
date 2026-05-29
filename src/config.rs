@@ -460,6 +460,12 @@ fn validate_regexes(
     Ok(())
 }
 
+/// The runtime makes one decision from mode: enforce (stop runaways) or not.
+/// `Visibility` and `Alert` are both "watch" — they never terminate; they
+/// differ only in config defaults and whether notifications are wired
+/// (`alerts.local_notifications`), not in any branch the policy engine takes.
+/// The product surfaces just two modes: Watch (Visibility/Alert) and Enforce.
+/// See `service::mode_label`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Mode {
     #[default]
@@ -696,6 +702,8 @@ pub struct Match {
 }
 
 impl Match {
+    /// Only positive matchers count. An exclude-only matcher matches nothing,
+    /// so it is "empty" by design and rejected as a misconfiguration.
     pub fn is_empty(&self) -> bool {
         self.bundle_ids.is_empty()
             && self.code_signatures.is_empty()
@@ -717,6 +725,13 @@ pub struct CodeSignature {
     pub team_id: String,
 }
 
+/// Per-run policy. Curb now enforces on token turn-spend, not wall-clock, so
+/// only `ack_extension` is consumed by the runtime (it bounds an acknowledgement
+/// window). The duration fields below (`warn_after`, `kill_after`,
+/// `kill_grace_period`, `cooldown_after_kill`, `min_lifetime`, `max_run_gap`)
+/// and `allow_app_root_kill` are accepted for config-file compatibility and
+/// validated for sanity, but no runtime path reads them; token thresholds live
+/// in `UsageConfig`. Treat them as a deletion candidate, not active controls.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Policy {

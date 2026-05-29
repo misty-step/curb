@@ -33,8 +33,20 @@ pub enum UsageError {
     Scan(String),
 }
 
+/// What a normalized usage row represents. Token checkpoints carry spend; a
+/// user-input boundary marks where one human turn ends and the next begins.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    #[default]
+    TokenCheckpoint,
+    UserInput,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Event {
+    #[serde(default)]
+    pub kind: EventKind,
     pub provider: String,
     pub source: String,
     pub source_path: PathBuf,
@@ -62,6 +74,16 @@ pub struct Event {
 
 impl Event {
     fn dedup_key(&self) -> String {
+        if matches!(self.kind, EventKind::UserInput) {
+            return format!(
+                "ui:{}:{}:{}",
+                self.provider,
+                self.session_id.as_deref().unwrap_or_default(),
+                self.timestamp
+                    .map(|timestamp| timestamp.to_rfc3339())
+                    .unwrap_or_default(),
+            );
+        }
         match self.provider.as_str() {
             "codex" if self.cumulative_tokens != 0 || self.total_tokens != 0 => format!(
                 "codex:{}:{}:{}",
@@ -189,84 +211,43 @@ impl Reader {
     pub fn scan_since(&self, since: Option<DateTime<Utc>>) -> Result<Scan, UsageError> {
         let mut state = self.state.lock().expect("usage reader mutex poisoned");
         state.load(self.state_dir.as_deref())?;
-        let codex_archived_root = self.home.join(".codex").join("archived_sessions");
-        let codex_live_root = self.home.join(".codex").join("sessions");
-        let claude_root = self.home.join(".claude").join("projects");
+        let mut events = Vec::new();
+        let mut sources = Vec::new();
         let mut errors = Vec::new();
-        let (mut events, codex_archived_report) = match codex_sessions_since_cached(
-            &mut state,
-            self.state_dir.as_deref(),
-            &codex_archived_root,
-            CodexSessionLayout::Archived,
-            since,
-        ) {
-            Ok((events, report)) => (events, report),
-            Err(error) => {
-                let error = error.to_string();
-                errors.push(error.clone());
-                (
-                    Vec::new(),
-                    SourceReport {
-                        provider: "codex".to_string(),
+        // One pass per registered provider. A provider that errors becomes a
+        // source-health error and never blocks the others. Adding GrokBuild,
+        // Antigravity CLI, Pi, or OpenCode means adding to `providers()` — this
+        // loop does not change.
+        for provider in providers() {
+            match scan_provider(
+                &mut state,
+                self.state_dir.as_deref(),
+                &self.home,
+                &provider,
+                since,
+            ) {
+                Ok((provider_events, report)) => {
+                    events.extend(provider_events);
+                    sources.push(report);
+                }
+                Err(error) => {
+                    let error = error.to_string();
+                    errors.push(error.clone());
+                    sources.push(SourceReport {
+                        provider: provider.id.to_string(),
                         files: 0,
                         events: 0,
                         error: Some(error),
-                    },
-                )
+                    });
+                }
             }
-        };
-        let (codex_live, codex_live_report) = match codex_sessions_since_cached(
-            &mut state,
-            self.state_dir.as_deref(),
-            &codex_live_root,
-            CodexSessionLayout::Live,
-            since,
-        ) {
-            Ok((events, report)) => (events, report),
-            Err(error) => {
-                let error = error.to_string();
-                errors.push(error.clone());
-                (
-                    Vec::new(),
-                    SourceReport {
-                        provider: "codex".to_string(),
-                        files: 0,
-                        events: 0,
-                        error: Some(error),
-                    },
-                )
-            }
-        };
-        events.extend(codex_live);
-        let codex_report = combine_source_reports(codex_archived_report, codex_live_report);
-        let (claude, claude_report) = match claude_projects_since_cached(
-            &mut state,
-            self.state_dir.as_deref(),
-            &claude_root,
-            since,
-        ) {
-            Ok((events, report)) => (events, report),
-            Err(error) => {
-                let error = error.to_string();
-                errors.push(error.clone());
-                (
-                    Vec::new(),
-                    SourceReport {
-                        provider: "claude".to_string(),
-                        files: 0,
-                        events: 0,
-                        error: Some(error),
-                    },
-                )
-            }
-        };
-        events.extend(claude);
+        }
         let mut events = dedupe(events);
         events.retain(|event| event_is_since(event, since));
         sort_events(&mut events);
         Ok(Scan {
             events,
-            sources: vec![codex_report, claude_report],
+            sources,
             error: if errors.is_empty() {
                 None
             } else {
@@ -314,7 +295,7 @@ struct PersistedReaderState {
     files: HashMap<PathBuf, CachedFile>,
 }
 
-const PERSISTED_READER_STATE_VERSION: u8 = 1;
+const PERSISTED_READER_STATE_VERSION: u8 = 2;
 
 impl ReaderState {
     fn load(&mut self, state_dir: Option<&Path>) -> Result<(), UsageError> {
@@ -417,65 +398,127 @@ pub fn codex_archived_sessions_since(
     Ok((events, report))
 }
 
+/// How a provider's log files are laid out under a root directory.
 #[derive(Clone, Copy)]
-enum CodexSessionLayout {
-    Archived,
-    Live,
+enum Layout {
+    /// `*.jsonl` directly in the root (e.g. Codex archived sessions).
+    OneLevel,
+    /// `*.jsonl` anywhere beneath the root (e.g. Codex live sessions, Claude
+    /// projects).
+    Recursive,
 }
 
-impl CodexSessionLayout {
-    fn paths(self, root: &Path) -> Result<Vec<PathBuf>, UsageError> {
-        match self {
-            Self::Archived => jsonl_files_one_level(root),
-            Self::Live => jsonl_files_recursive(root),
-        }
-    }
+/// One log directory a provider writes to.
+struct ProviderRoot {
+    path: PathBuf,
+    layout: Layout,
+    /// When true, a live scan (`since` set) reads only the tail of large files
+    /// instead of the whole thing. Codex live sessions grow without bound.
+    tailable: bool,
 }
 
-fn codex_sessions_since_cached(
+/// Reads one file into events, creating/refreshing its incremental cache entry.
+type FileReader = fn(&mut ReaderState, Option<&Path>, &Path) -> Result<Vec<Event>, UsageError>;
+/// Reads only the tail of a large, still-growing live file.
+type FileTailer = fn(&Path) -> Result<Vec<Event>, UsageError>;
+
+/// A usage provider Curb ingests. Curb ships **Codex** and **Claude Code**.
+///
+/// Adding another agent — GrokBuild CLI, Antigravity CLI, Pi, OpenCode — means
+/// appending one `Provider` to `providers()` with its log roots and a file
+/// parser that emits [`Event`]s (token checkpoints + user-input boundaries).
+/// Nothing in the scan loop, cache, dedupe, or read model changes.
+struct Provider {
+    /// Stable id used as the source name and as the session-key prefix.
+    id: &'static str,
+    /// Where this provider writes logs, relative to the user's home.
+    roots: fn(&Path) -> Vec<ProviderRoot>,
+    /// Read one file into events, refreshing the incremental cache.
+    read_file: FileReader,
+    /// Read only the tail of a large live file. Used when a root is `tailable`.
+    tail_file: FileTailer,
+}
+
+/// The registered providers, in display order. This is the one place to extend
+/// when adding a new agent.
+fn providers() -> Vec<Provider> {
+    vec![
+        Provider {
+            id: "codex",
+            roots: |home| {
+                vec![
+                    ProviderRoot {
+                        path: home.join(".codex").join("archived_sessions"),
+                        layout: Layout::OneLevel,
+                        tailable: false,
+                    },
+                    ProviderRoot {
+                        path: home.join(".codex").join("sessions"),
+                        layout: Layout::Recursive,
+                        tailable: true,
+                    },
+                ]
+            },
+            read_file: read_codex_cached,
+            tail_file: read_codex_live_tail,
+        },
+        Provider {
+            id: "claude",
+            roots: |home| {
+                vec![ProviderRoot {
+                    path: home.join(".claude").join("projects"),
+                    layout: Layout::Recursive,
+                    tailable: false,
+                }]
+            },
+            read_file: read_claude_cached,
+            tail_file: |path| parse_claude_file(path, 0),
+        },
+    ]
+}
+
+/// Discover, prune, and read every file across a provider's roots into one
+/// deduped, time-sorted event list plus a source-health report.
+fn scan_provider(
     state: &mut ReaderState,
     state_dir: Option<&Path>,
-    root: &Path,
-    layout: CodexSessionLayout,
+    home: &Path,
+    provider: &Provider,
     since: Option<DateTime<Utc>>,
 ) -> Result<(Vec<Event>, SourceReport), UsageError> {
-    let mut paths = layout.paths(root)?;
-    paths.retain(|path| modified_since(path, since).unwrap_or(true));
-    prune_missing(state, state_dir, root, &paths)?;
     let mut events = Vec::new();
-    for path in &paths {
-        let read = match layout {
-            CodexSessionLayout::Archived => read_codex_cached(state, state_dir, path),
-            CodexSessionLayout::Live if since.is_some() => read_codex_live_tail(path),
-            CodexSessionLayout::Live => read_codex_cached(state, state_dir, path),
+    let mut file_count = 0;
+    for root in (provider.roots)(home) {
+        let mut paths = match root.layout {
+            Layout::OneLevel => jsonl_files_one_level(&root.path)?,
+            Layout::Recursive => jsonl_files_recursive(&root.path)?,
         };
-        match read {
-            Ok(file_events) => events.extend(file_events),
-            Err(error) if error.is_not_found() => continue,
-            Err(error) => return Err(error),
+        paths.retain(|path| modified_since(path, since).unwrap_or(true));
+        prune_missing(state, state_dir, &root.path, &paths)?;
+        file_count += paths.len();
+        for path in &paths {
+            let read = if root.tailable && since.is_some() {
+                (provider.tail_file)(path)
+            } else {
+                (provider.read_file)(state, state_dir, path)
+            };
+            match read {
+                Ok(file_events) => events.extend(file_events),
+                Err(error) if error.is_not_found() => continue,
+                Err(error) => return Err(error),
+            }
         }
     }
     let mut events = dedupe(events);
     events.retain(|event| event_is_since(event, since));
     sort_events(&mut events);
     let report = SourceReport {
-        provider: "codex".to_string(),
-        files: paths.len(),
+        provider: provider.id.to_string(),
+        files: file_count,
         events: events.len(),
         error: None,
     };
     Ok((events, report))
-}
-
-fn combine_source_reports(mut left: SourceReport, right: SourceReport) -> SourceReport {
-    left.files += right.files;
-    left.events += right.events;
-    left.error = match (left.error.take(), right.error) {
-        (None, None) => None,
-        (Some(error), None) | (None, Some(error)) => Some(error),
-        (Some(left), Some(right)) => Some(format!("{left}; {right}")),
-    };
-    left
 }
 
 pub fn claude_projects_since(
@@ -488,35 +531,6 @@ pub fn claude_projects_since(
     let mut events = Vec::new();
     for path in &paths {
         events.extend(parse_claude_file(path, 0)?);
-    }
-    let mut events = dedupe(events);
-    events.retain(|event| event_is_since(event, since));
-    sort_events(&mut events);
-    let report = SourceReport {
-        provider: "claude".to_string(),
-        files: paths.len(),
-        events: events.len(),
-        error: None,
-    };
-    Ok((events, report))
-}
-
-fn claude_projects_since_cached(
-    state: &mut ReaderState,
-    state_dir: Option<&Path>,
-    root: &Path,
-    since: Option<DateTime<Utc>>,
-) -> Result<(Vec<Event>, SourceReport), UsageError> {
-    let mut paths = jsonl_files_recursive(root)?;
-    paths.retain(|path| modified_since(path, since).unwrap_or(true));
-    prune_missing(state, state_dir, root, &paths)?;
-    let mut events = Vec::new();
-    for path in &paths {
-        match read_claude_cached(state, state_dir, path) {
-            Ok(file_events) => events.extend(file_events),
-            Err(error) if error.is_not_found() => continue,
-            Err(error) => return Err(error),
-        }
     }
     let mut events = dedupe(events);
     events.retain(|event| event_is_since(event, since));
@@ -849,21 +863,40 @@ fn parse_codex_file(
             }
             continue;
         }
+        if row.row_type == "event_msg"
+            && row.payload.payload_type.as_deref() == Some("user_message")
+        {
+            out.push(user_input_event(
+                "codex",
+                "codex.sessions",
+                path,
+                session_id.clone(),
+                cwd.clone(),
+                parse_time(row.timestamp.as_deref()),
+            ));
+            continue;
+        }
         if row.row_type != "event_msg" || row.payload.payload_type.as_deref() != Some("token_count")
         {
             continue;
         }
         let info = row.payload.info.unwrap_or_default();
         let last = info.last_token_usage;
+        // Codex reports the full prompt as `input_tokens`, with `cached_input_tokens`
+        // a subset of it. So `total` already counts cached input once (inside
+        // `input_tokens`); the fallback must not add it again.
         let total = if last.total_tokens != 0 {
             last.total_tokens
         } else {
-            last.input_tokens
-                + last.cached_input_tokens
-                + last.output_tokens
-                + last.reasoning_output_tokens
+            last.input_tokens + last.output_tokens + last.reasoning_output_tokens
         };
+        // Spend is fresh work only: drop the cached prefix the model re-reads each
+        // call. Without this, a turn's many tool calls each re-count the whole
+        // cached context and turn spend balloons. (Mirrors Claude excluding
+        // cache_read.)
+        let uncached_input = (last.input_tokens - last.cached_input_tokens).max(0);
         out.push(Event {
+            kind: EventKind::TokenCheckpoint,
             provider: "codex".to_string(),
             source: "codex.archived_sessions".to_string(),
             source_path: path.to_path_buf(),
@@ -879,8 +912,7 @@ fn parse_codex_file(
             output_tokens: last.output_tokens,
             reasoning_output_tokens: last.reasoning_output_tokens,
             total_tokens: total,
-            spent_tokens: (last.input_tokens + last.output_tokens + last.reasoning_output_tokens)
-                .min(total),
+            spent_tokens: uncached_input + last.output_tokens + last.reasoning_output_tokens,
             cumulative_tokens: info.total_token_usage.total_tokens,
             model_context_window: info.model_context_window,
         });
@@ -913,11 +945,28 @@ fn parse_claude_file(path: &Path, offset: u64) -> Result<Vec<Event>, UsageError>
             path: path.to_path_buf(),
             source,
         })?;
+        if row.row_type.as_deref() == Some("user") {
+            if row.tool_use_result.is_none()
+                && !row.is_sidechain
+                && claude_is_human_content(row.message.content.as_ref())
+            {
+                out.push(user_input_event(
+                    "claude",
+                    "claude.projects",
+                    path,
+                    row.session_id.clone(),
+                    row.cwd.clone().map(PathBuf::from),
+                    parse_time(row.timestamp.as_deref()),
+                ));
+            }
+            continue;
+        }
         let Some(usage) = row.message.usage else {
             continue;
         };
         let request_id = row.request_id.or_else(|| row.message.id.clone());
         out.push(Event {
+            kind: EventKind::TokenCheckpoint,
             provider: "claude".to_string(),
             source: "claude.projects".to_string(),
             source_path: path.to_path_buf(),
@@ -944,6 +993,50 @@ fn parse_claude_file(path: &Path, offset: u64) -> Result<Vec<Event>, UsageError>
         });
     }
     Ok(out)
+}
+
+fn user_input_event(
+    provider: &str,
+    source: &str,
+    path: &Path,
+    session_id: Option<String>,
+    cwd: Option<PathBuf>,
+    timestamp: Option<DateTime<Utc>>,
+) -> Event {
+    Event {
+        kind: EventKind::UserInput,
+        provider: provider.to_string(),
+        source: source.to_string(),
+        source_path: path.to_path_buf(),
+        session_id,
+        turn_id: None,
+        request_id: None,
+        model: None,
+        cwd,
+        timestamp,
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 0,
+        spent_tokens: 0,
+        cumulative_tokens: 0,
+        model_context_window: 0,
+    }
+}
+
+/// A Claude `user` row is a real human turn only when its content is typed text
+/// (a string, or content blocks of type `text`). Tool results and injected
+/// system strings are mid-turn, not boundaries.
+fn claude_is_human_content(content: Option<&serde_json::Value>) -> bool {
+    match content {
+        Some(serde_json::Value::String(_)) => true,
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .any(|item| item.get("type").and_then(|kind| kind.as_str()) == Some("text")),
+        _ => false,
+    }
 }
 
 fn dedupe(events: Vec<Event>) -> Vec<Event> {
@@ -1115,6 +1208,8 @@ struct CodexTokenUsage {
 struct ClaudeRow {
     #[serde(default)]
     timestamp: Option<String>,
+    #[serde(default, rename = "type")]
+    row_type: Option<String>,
     #[serde(default, rename = "requestId")]
     request_id: Option<String>,
     #[serde(default, rename = "sessionId")]
@@ -1123,6 +1218,10 @@ struct ClaudeRow {
     uuid: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default, rename = "isSidechain")]
+    is_sidechain: bool,
+    #[serde(default, rename = "toolUseResult")]
+    tool_use_result: Option<serde_json::Value>,
     #[serde(default)]
     message: ClaudeMessage,
 }
@@ -1133,6 +1232,8 @@ struct ClaudeMessage {
     id: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    content: Option<serde_json::Value>,
     #[serde(default)]
     usage: Option<ClaudeUsage>,
 }
@@ -1185,7 +1286,7 @@ mod tests {
         assert_eq!(event.output_tokens, 5);
         assert_eq!(event.reasoning_output_tokens, 2);
         assert_eq!(event.total_tokens, 107);
-        assert_eq!(event.spent_tokens, 107);
+        assert_eq!(event.spent_tokens, 87); // uncached input (100-20) + output 5 + reasoning 2
         assert_eq!(event.cwd.as_deref(), Some(Path::new("/repo")));
         assert_eq!(event.model_context_window, 258400);
     }
@@ -1567,6 +1668,108 @@ mod tests {
         let (events, _) = restarted.events_since(None).unwrap();
 
         assert_eq!(events.len(), 1);
+    }
+
+    fn spent_after_last_boundary(events: &[Event]) -> i64 {
+        let start = events
+            .iter()
+            .rposition(|event| matches!(event.kind, EventKind::UserInput))
+            .map_or(0, |index| index + 1);
+        events[start..]
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::TokenCheckpoint))
+            .map(|event| event.spent_tokens)
+            .sum()
+    }
+
+    #[test]
+    fn codex_user_message_emits_a_turn_boundary() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        fs::write(
+            &path,
+            format!(
+                r#"{{"timestamp":"2026-05-29T16:00:00Z","type":"session_meta","payload":{{"id":"s","cwd":"/repo"}}}}
+{{"timestamp":"2026-05-29T16:00:01Z","type":"event_msg","payload":{{"type":"user_message"}}}}
+{}{}"#,
+                codex_token_row("2026-05-29T16:00:02Z", 100, 100),
+                codex_token_row("2026-05-29T16:00:03Z", 200, 300),
+            ),
+        )
+        .unwrap();
+
+        let parsed = parse_codex_file(&path, 0, None, None).unwrap();
+        let boundaries = parsed
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::UserInput))
+            .count();
+
+        assert_eq!(boundaries, 1);
+        // Both checkpoints land after the boundary → one turn's spend. Each
+        // fixture row spends uncached input (100-20) + output 5 + reasoning 2 = 87,
+        // independent of the cached context size: 87 + 87 = 174.
+        assert_eq!(spent_after_last_boundary(&parsed.events), 174);
+    }
+
+    #[test]
+    fn codex_turn_spend_excludes_re_read_cached_context() {
+        // A realistic tool-loop turn: three model calls, each re-reading a large
+        // cached context. Fresh work each call is tiny (uncached input + output).
+        // Turn spend must reflect only the fresh work, never the cached prefix.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        let row = |at: &str, input: i64, cached: i64, output: i64, total: i64| {
+            format!(
+                r#"{{"timestamp":"{at}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":{input},"cached_input_tokens":{cached},"output_tokens":{output},"reasoning_output_tokens":0,"total_tokens":{total}}},"total_token_usage":{{"total_tokens":{total}}},"model_context_window":258400}}}}}}
+"#
+            )
+        };
+        fs::write(
+            &path,
+            format!(
+                r#"{{"timestamp":"2026-05-29T16:00:00Z","type":"session_meta","payload":{{"id":"s","cwd":"/repo"}}}}
+{{"timestamp":"2026-05-29T16:00:01Z","type":"event_msg","payload":{{"type":"user_message"}}}}
+{}{}{}"#,
+                row("2026-05-29T16:00:02Z", 50_000, 49_000, 200, 50_200),
+                row("2026-05-29T16:00:03Z", 120_000, 119_000, 300, 120_300),
+                row("2026-05-29T16:00:04Z", 260_000, 259_000, 400, 260_400),
+            ),
+        )
+        .unwrap();
+
+        let parsed = parse_codex_file(&path, 0, None, None).unwrap();
+        // Naive sum of per-call totals would be ~430k. True fresh spend is just
+        // (1000+200) + (1000+300) + (1000+400) = 3900.
+        assert_eq!(spent_after_last_boundary(&parsed.events), 3900);
+    }
+
+    #[test]
+    fn claude_human_text_is_a_boundary_but_tool_results_are_not() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("projects");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("session.jsonl");
+        fs::write(
+            &path,
+            r#"{"timestamp":"2026-05-29T20:00:00Z","type":"user","sessionId":"s","cwd":"/repo","message":{"role":"user","content":"do the thing"}}
+{"timestamp":"2026-05-29T20:00:01Z","type":"assistant","sessionId":"s","cwd":"/repo","message":{"id":"m1","model":"claude-opus-4-8","usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":9999,"output_tokens":30}}}
+{"timestamp":"2026-05-29T20:00:02Z","type":"user","sessionId":"s","cwd":"/repo","toolUseResult":{"ok":true},"message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}
+{"timestamp":"2026-05-29T20:00:03Z","type":"assistant","sessionId":"s","cwd":"/repo","message":{"id":"m2","model":"claude-opus-4-8","usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":9999,"output_tokens":40}}}
+"#,
+        )
+        .unwrap();
+
+        let events = parse_claude_file(&path, 0).unwrap();
+        let boundaries = events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::UserInput))
+            .count();
+
+        // The typed message is a boundary; the tool_result is not.
+        assert_eq!(boundaries, 1);
+        // Turn spend excludes cache_read: (10+20+30) + (5+0+40) = 105.
+        assert_eq!(spent_after_last_boundary(&events), 105);
     }
 
     fn codex_fixture(session_id: &str, cwd: &str, at: &str, total: i64, cumulative: i64) -> String {

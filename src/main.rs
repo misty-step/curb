@@ -439,11 +439,11 @@ fn watch_command(config: Option<PathBuf>, home: Option<PathBuf>, once: bool) -> 
     loop {
         let snapshot = runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
         println!(
-            "scan: status={} active={} warn={} stop={}",
+            "scan: status={} working={} warn={} kill={}",
             snapshot.overview.status,
-            snapshot.overview.active_sessions,
-            snapshot.overview.warning_sessions,
-            snapshot.overview.stop_sessions
+            snapshot.overview.working,
+            snapshot.overview.warn,
+            snapshot.overview.kill
         );
         if once {
             break;

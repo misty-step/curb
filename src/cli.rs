@@ -154,28 +154,19 @@ pub fn scan_command(config_path: PathBuf, home: PathBuf, json: bool) -> Result<(
         println!("  no configured agent workers matched");
         return Ok(());
     }
-    println!(
-        "  {:<22} {:<7} {:<11} {:<10} {:<7} EVIDENCE",
-        "AGENT", "PID", "TARGET", "STATE", "SCORE"
-    );
+    println!("  {:<22} {:<7} {:<9} PROJECT", "AGENT", "PID", "STATUS");
     for agent in &snapshot.agents {
-        let target = if agent.state == "watch-only" {
-            "watch-only"
-        } else {
-            "enforceable"
-        };
-        let evidence = if agent.matched_by.is_empty() {
-            "-".to_string()
-        } else {
-            agent.matched_by.join(", ")
-        };
         println!(
-            "  {:<22} {:<7} {:<11} {:<10} {:<7} {}",
-            agent.id, agent.pid, target, agent.process_state, agent.confidence, evidence
+            "  {:<22} {:<7} {:<9} {}",
+            agent.id,
+            agent.pid,
+            agent.status,
+            agent
+                .cwd
+                .as_deref()
+                .map(compact_home)
+                .unwrap_or_else(|| "-".to_string()),
         );
-        if let Some(cwd) = &agent.cwd {
-            println!("    cwd: {}", compact_home(cwd));
-        }
     }
     Ok(())
 }
@@ -196,18 +187,15 @@ pub fn status_command(config_path: PathBuf, home: PathBuf, json: bool) -> Result
         snapshot.overview.status, snapshot.overview.message
     );
     println!(
-        "  sessions: {} active, {} warning, {} stop, {} idle-high",
-        snapshot.overview.active_sessions,
-        snapshot.overview.warning_sessions,
-        snapshot.overview.stop_sessions,
-        snapshot.overview.idle_high_sessions
+        "  agents: {} working, {} warn, {} kill",
+        snapshot.overview.working, snapshot.overview.warn, snapshot.overview.kill
     );
     println!(
-        "  usage: {} in window, {} lookback",
-        token_count(snapshot.overview.window_tokens),
-        token_count(snapshot.overview.lookback_tokens)
+        "  mode: {} · warn {} · kill {} per turn",
+        snapshot.overview.mode,
+        token_count(cfg.usage.warn_turn_tokens),
+        token_count(cfg.usage.kill_turn_tokens)
     );
-    println!("  action: {}", snapshot.overview.action);
     println!("  ledger: {}", compact_home(&cfg.ledger.path));
     let attention = attention_sessions(&snapshot.sessions);
     if !attention.is_empty() {
@@ -231,10 +219,7 @@ pub fn runs_command(
     let snapshot = runtime.rescan(Utc::now()).map_err(anyhow::Error::msg)?;
     let mut sessions = snapshot.sessions;
     if active_only {
-        sessions.retain(|session| {
-            matches!(session.usage_state.as_str(), "spending" | "warn" | "stop")
-                || session.process_state == "running"
-        });
+        sessions.retain(|session| session.status == "working" || session.alert != "ok");
     }
     if let Some(provider) = provider {
         sessions.retain(|session| session.provider == provider);
@@ -616,32 +601,19 @@ fn compact_home(path: &Path) -> String {
 fn attention_sessions(sessions: &[SessionView]) -> Vec<&SessionView> {
     sessions
         .iter()
-        .filter(|session| {
-            matches!(session.usage_state.as_str(), "warn" | "stop")
-                || session.actionable
-                || session.can_acknowledge
-        })
+        .filter(|session| session.alert != "ok" || session.can_acknowledge)
         .collect()
 }
 
 fn session_matches_state(session: &SessionView, state: &str) -> bool {
     match state {
-        "attention" => {
-            matches!(session.usage_state.as_str(), "warn" | "stop")
-                || session.actionable
-                || session.can_acknowledge
-        }
-        "active" => {
-            matches!(session.usage_state.as_str(), "spending" | "warn" | "stop")
-                || session.process_state == "running"
-        }
-        "warning" | "warn" => session.usage_state == "warn",
-        "stop" => session.usage_state == "stop",
-        "acknowledged" | "ack" => session.acknowledged,
-        "idle-high" => session.usage_state == "quiet-high",
-        other => {
-            session.state == other || session.usage_state == other || session.action_state == other
-        }
+        "attention" => session.alert != "ok" || session.can_acknowledge,
+        "active" | "working" => session.status == "working" || session.alert != "ok",
+        "warning" | "warn" => session.alert == "warn",
+        "stop" | "kill" => session.alert == "kill",
+        "acknowledged" | "ack" => session.acknowledged_until.is_some(),
+        "idle" => session.status == "idle",
+        other => session.status == other || session.alert == other,
     }
 }
 
@@ -653,17 +625,17 @@ fn print_session_table<'a>(
     let sessions = sessions.into_iter().take(limit).collect::<Vec<_>>();
     println!("{label}");
     println!(
-        "  {:<12} {:<9} {:<13} {:<12} {:<12} SESSION",
-        "PROVIDER", "STATE", "ACTION", "SPENT", "WINDOW"
+        "  {:<12} {:<8} {:<7} {:<12} {:<12} SESSION",
+        "PROVIDER", "STATUS", "ALERT", "TURN", "TOTAL"
     );
     for session in sessions {
         println!(
-            "  {:<12} {:<9} {:<13} {:<12} {:<12} {}",
+            "  {:<12} {:<8} {:<7} {:<12} {:<12} {}",
             session.provider,
-            session.usage_state,
-            session.action_state,
-            token_count(session.latest_spent_tokens),
-            token_count(session.window_spent_tokens),
+            session.status,
+            session.alert,
+            token_count(session.turn_tokens),
+            token_count(session.total_tokens),
             session.key,
         );
         println!("    {}", session.explanation);

@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::config::{Agent, Config, HumanDuration, Mode};
 use crate::ledger::{self, Ledger};
 use crate::platform::{self, NotificationCapability, Platform, TerminationCapability};
-use crate::usage::{Event, SourceReport};
+use crate::usage::{Event, EventKind, SourceReport};
 
 #[derive(Debug, Error)]
 pub enum ServiceError {
@@ -50,19 +50,18 @@ pub struct Snapshot {
     pub turns: Vec<TurnView>,
 }
 
+/// Machine-wide rollup. `status` is the single colour of the dashboard and is
+/// exactly the worst `SessionView.alert` raised to upper case: no session over a
+/// line → `OK`, any `warn` → `WATCH`, any `kill` → `ACTION`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Overview {
     pub mode: String,
-    pub action: String,
     pub status: String,
     pub message: String,
-    pub active_agents: usize,
-    pub active_sessions: usize,
-    pub warning_sessions: usize,
-    pub stop_sessions: usize,
-    pub idle_high_sessions: usize,
-    pub window_tokens: i64,
-    pub lookback_tokens: i64,
+    pub working: usize,
+    pub warn: usize,
+    pub kill: usize,
+    pub busiest_turn_tokens: i64,
     pub last_scan: DateTime<Utc>,
     pub sources: Vec<SourceReport>,
     pub changes: OverviewDelta,
@@ -80,74 +79,58 @@ pub struct OverviewDelta {
     pub source_errors: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// One agent working in one directory — the unit the dashboard shows.
+///
+/// Three facts answer everything: `turn_tokens` (what it has spent since you
+/// last steered it), `status` (`working` or `idle`), and `alert` (`ok`, `warn`,
+/// or `kill`). The process-identity fields are present only when Curb has
+/// matched a live worker, and exist solely so a stop can be revalidated.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionView {
     pub key: String,
     pub id: String,
     pub provider: String,
-    pub state: String,
-    pub activity_state: String,
-    pub data_recency: String,
-    pub activity_basis: String,
-    pub process_state: String,
-    pub usage_state: String,
-    pub action_state: String,
-    pub actionable: bool,
+    pub status: String,
+    pub alert: String,
+    pub can_stop: bool,
     pub can_acknowledge: bool,
-    pub acknowledged: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acknowledged_until: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_state: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
     pub models: Vec<String>,
-    pub last_seen_at: DateTime<Utc>,
-    pub last_usage_at: Option<DateTime<Utc>>,
-    pub calls: usize,
-    pub latest_turn_tokens: i64,
-    pub latest_spent_tokens: i64,
-    pub window_tokens: i64,
-    pub window_spent_tokens: i64,
+    pub turn_tokens: i64,
+    pub turn_context_tokens: i64,
     pub total_tokens: i64,
-    pub total_spent_tokens: i64,
+    pub calls: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_agent_id: Option<String>,
+    pub last_activity_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_pid: Option<i32>,
+    pub pid: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_process_started_at: Option<DateTime<Utc>>,
+    pub process_started_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_owner: Option<String>,
+    pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_executable: Option<PathBuf>,
+    pub executable: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_bundle_id: Option<String>,
+    pub bundle_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlated_team_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub correlation_reason: Option<String>,
-    pub correlation_score: i64,
-    pub confidence: i64,
-    pub matched_by: Vec<String>,
-    pub risk_rank: i64,
+    pub team_id: Option<String>,
     pub explanation: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// A live worker process Curb matched. Most are correlated to a session and
+/// shown through it; this view backs the "N agents running" count and the
+/// terminal dashboard.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentView {
     pub id: String,
     pub provider: String,
     pub label: String,
-    pub state: String,
-    pub activity_state: String,
-    pub data_recency: String,
-    pub activity_basis: String,
-    pub process_state: String,
-    pub usage_state: String,
-    pub action_state: String,
-    pub actionable: bool,
+    pub status: String,
     pub pid: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_started_at: Option<DateTime<Utc>>,
@@ -157,14 +140,9 @@ pub struct AgentView {
     pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
-    pub matched_by: Vec<String>,
-    pub confidence: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_session_id: Option<String>,
-    pub latest_turn_tokens: i64,
-    pub latest_spent_tokens: i64,
-    pub window_tokens: i64,
-    pub window_spent_tokens: i64,
+    pub session_key: Option<String>,
+    pub turn_tokens: i64,
     pub explanation: String,
 }
 
@@ -933,8 +911,7 @@ fn build_overview_delta(previous: &Snapshot, next: &Snapshot) -> OverviewDelta {
 }
 
 fn is_alerting_session(session: &SessionView) -> bool {
-    matches!(session.usage_state.as_str(), "warn" | "stop")
-        || matches!(session.state.as_str(), "warn" | "stop")
+    session.alert != "ok"
 }
 
 fn turn_key(turn: &TurnView) -> String {
@@ -1570,7 +1547,7 @@ impl<'a, P: Platform> Service<'a, P> {
             fresh_start,
             now,
         );
-        if view.usage_state != "stop" || !view.actionable {
+        if view.alert != "kill" || !view.can_stop {
             return Err(ServiceError::StopConflict(
                 "session is not an actionable stop candidate".to_string(),
             ));
@@ -1678,10 +1655,8 @@ pub(crate) struct Session {
     pub(crate) calls: usize,
     pub(crate) latest_turn_tokens: i64,
     pub(crate) latest_spent_tokens: i64,
-    pub(crate) window_tokens: i64,
     pub(crate) window_spent_tokens: i64,
     pub(crate) total_tokens: i64,
-    pub(crate) total_spent_tokens: i64,
     turns: Vec<TurnView>,
 }
 
@@ -1697,7 +1672,6 @@ pub(crate) struct ProcessMatch {
     agent: Agent,
     process: platform::Process,
     confidence: i64,
-    evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1707,8 +1681,6 @@ pub(crate) struct Correlation {
     pub(crate) process: Option<platform::Process>,
     pub(crate) score: i64,
     pub(crate) reason: String,
-    confidence: i64,
-    evidence: Vec<String>,
 }
 
 pub fn build_snapshot(
@@ -1760,7 +1732,7 @@ pub fn build_snapshot_with_processes(
         .iter()
         .flat_map(|session| session.turns.clone())
         .collect::<Vec<_>>();
-    let overview = build_overview(cfg, &agent_views, &session_views, sources, now);
+    let overview = build_overview(cfg, &session_views, sources, now);
     Snapshot {
         overview,
         agents: agent_views,
@@ -1800,33 +1772,37 @@ pub(crate) fn build_sessions(events: &[Event], window_start: DateTime<Utc>) -> V
             calls: 0,
             latest_turn_tokens: 0,
             latest_spent_tokens: 0,
-            window_tokens: 0,
             window_spent_tokens: 0,
             total_tokens: 0,
-            total_spent_tokens: 0,
             turns: Vec::new(),
         });
         if session.cwd.is_none() {
             session.cwd = event.cwd.clone();
         }
-        if let Some(model) = &event.model {
-            session.models.insert(model.clone());
-        }
         if event.timestamp > session.last {
             session.last = event.timestamp;
         }
+        // A user-input boundary ends the previous turn. The next checkpoints
+        // accumulate into a fresh turn, so `latest_*` always reflects spend
+        // since the human last steered the agent.
+        if matches!(event.kind, EventKind::UserInput) {
+            session.latest_turn_tokens = 0;
+            session.latest_spent_tokens = 0;
+            continue;
+        }
+        if let Some(model) = &event.model {
+            session.models.insert(model.clone());
+        }
         if event.total_tokens > 0 && event.timestamp >= session.last_usage {
             session.last_usage = event.timestamp;
-            session.latest_turn_tokens = event.total_tokens;
-            session.latest_spent_tokens = spent_tokens;
         }
+        session.latest_turn_tokens += event.total_tokens;
+        session.latest_spent_tokens += spent_tokens;
         if event.timestamp.is_some_and(|at| at >= window_start) {
-            session.window_tokens += spent_tokens;
             session.window_spent_tokens += spent_tokens;
         }
         session.calls += 1;
         session.total_tokens += spent_tokens;
-        session.total_spent_tokens += spent_tokens;
         session.turns.push(TurnView {
             id: event.turn_id.clone(),
             request_id: event.request_id.clone(),
@@ -2094,229 +2070,168 @@ fn build_session_view(
     fresh_start: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> SessionView {
-    let in_policy_window = session.last_usage.is_some_and(|last| last >= window_start);
-    let fresh_usage = session.last_usage.is_some_and(|last| last >= fresh_start);
-    let data_recency = usage_recency(session.last_usage, window_start, fresh_start);
-    let activity_basis = usage_activity_basis(data_recency, correlation.matched);
-    let activity_state = if fresh_usage { "spending" } else { "idle" };
-    let over_stop = session.latest_spent_tokens >= cfg.usage.kill_turn_tokens;
+    let recent = session.last_usage.is_some_and(|last| last >= window_start);
+    let working = session.last_usage.is_some_and(|last| last >= fresh_start);
+    let over_kill = session.latest_spent_tokens >= cfg.usage.kill_turn_tokens;
     let over_warn = session.latest_spent_tokens >= cfg.usage.warn_turn_tokens;
-    let matched_agent = correlation.agent.as_ref();
-    let termination_allowed = matched_agent.is_some_and(Agent::termination_allowed);
-    let ack_until = active_session_ack(&cfg.service.state_dir, &session.key, now)
+    let enforceable = correlation
+        .agent
+        .as_ref()
+        .is_some_and(Agent::termination_allowed);
+    let acknowledged_until = active_session_ack(&cfg.service.state_dir, &session.key, now)
         .ok()
         .flatten()
         .map(|ack| ack.until);
-    let (mut state, usage_state, mut action_state, mut risk_rank, mut explanation) =
-        if in_policy_window && over_stop {
-            let state = match (correlation.matched, termination_allowed) {
-                (false, _) => "uncorrelated",
-                (true, false) => "watch-only",
-                (true, true) => "stop",
-            };
-            (
-                state,
-                "stop",
-                if state == "stop" && cfg.mode == Mode::Enforcement {
-                    "stop-pending"
-                } else if state == "stop" {
-                    "would-stop"
-                } else {
-                    "blocked"
-                },
-                if state == "stop" && cfg.mode == Mode::Enforcement {
-                    0
-                } else {
-                    1
-                },
-                match state {
-                    "uncorrelated" => {
-                        "usage crossed threshold, but no live process matched; Curb will not stop anything"
-                    }
-                    "watch-only" => {
-                        "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
-                    }
-                    _ => "latest checkpoint crossed the stop threshold",
-                },
-            )
-        } else if in_policy_window && over_warn {
-            let state = if !correlation.matched {
-                "uncorrelated"
-            } else if !termination_allowed {
-                "watch-only"
-            } else {
-                "warn"
-            };
-            (
-                state,
-                "warn",
-                "acknowledge",
-                1,
-                match state {
-                    "uncorrelated" => {
-                        "usage crossed threshold, but no live process matched; Curb will not stop anything"
-                    }
-                    "watch-only" => {
-                        "usage crossed threshold, but matched agent is watch-only; Curb will not stop desktop apps"
-                    }
-                    _ => "latest checkpoint crossed the warning threshold",
-                },
-            )
-        } else if in_policy_window {
-            (
-                "active",
-                if fresh_usage { "spending" } else { "quiet" },
-                "none",
-                1,
-                if fresh_usage {
-                    "fresh usage checkpoint is within policy"
-                } else {
-                    "usage is within the policy window, but no fresh checkpoint is visible"
-                },
-            )
-        } else if over_stop || over_warn {
-            (
-                "idle-high",
-                "quiet-high",
-                "none",
-                3,
-                "historically high usage is quiet in the policy window",
-            )
-        } else {
-            ("quiet", "quiet", "none", 5, "no recent token usage")
-        };
-    if ack_until.is_some() && matches!(usage_state, "warn" | "stop") {
-        state = "acknowledged";
-        action_state = "acknowledged";
-        risk_rank = 2;
-        explanation = "usage crossed threshold, but this session is acknowledged";
-    }
-    let process_state = session_process_state(state, usage_state, correlation);
-    let agent_state = session_agent_state(state);
+    let acknowledged = acknowledged_until.is_some();
+
+    let alert = if acknowledged {
+        "ok"
+    } else if recent && over_kill {
+        "kill"
+    } else if recent && over_warn {
+        "warn"
+    } else {
+        "ok"
+    };
+    let status = if working { "working" } else { "idle" };
+    let can_stop =
+        alert == "kill" && cfg.mode == Mode::Enforcement && correlation.matched && enforceable;
+    let can_acknowledge = !acknowledged && recent && (over_kill || over_warn);
+    let explanation = session_explanation(
+        alert,
+        status,
+        correlation.matched,
+        enforceable,
+        cfg.mode,
+        acknowledged,
+        recent && (over_kill || over_warn),
+    );
+    let process = correlation.process.as_ref();
+
     SessionView {
         key: session.key.clone(),
         id: session.id.clone(),
         provider: session.provider.clone(),
-        state: state.to_string(),
-        activity_state: activity_state.to_string(),
-        data_recency: data_recency.to_string(),
-        activity_basis: activity_basis.to_string(),
-        process_state: process_state.to_string(),
-        usage_state: usage_state.to_string(),
-        action_state: action_state.to_string(),
-        actionable: action_state == "stop-pending",
-        can_acknowledge: ack_until.is_none() && matches!(usage_state, "warn" | "stop"),
-        acknowledged: ack_until.is_some(),
-        acknowledged_until: ack_until,
-        agent_state: Some(agent_state.to_string()),
+        status: status.to_string(),
+        alert: alert.to_string(),
+        can_stop,
+        can_acknowledge,
+        acknowledged_until,
         project: session.cwd.as_ref().and_then(|cwd| project_name(cwd)),
         cwd: session.cwd.clone(),
         models: session.models.iter().cloned().collect(),
-        last_seen_at: session.last.unwrap_or(window_start),
-        last_usage_at: session.last_usage,
-        calls: session.calls,
-        latest_turn_tokens: session.latest_turn_tokens,
-        latest_spent_tokens: session.latest_spent_tokens,
-        window_tokens: session.window_tokens,
-        window_spent_tokens: session.window_spent_tokens,
+        turn_tokens: session.latest_spent_tokens,
+        turn_context_tokens: session.latest_turn_tokens,
         total_tokens: session.total_tokens,
-        total_spent_tokens: session.total_spent_tokens,
-        correlated_agent_id: matched_agent.map(|agent| agent.id.clone()),
-        correlated_pid: correlation
-            .process
-            .as_ref()
-            .map(|process| process.pid.get()),
-        correlated_process_started_at: correlation
-            .process
-            .as_ref()
-            .and_then(|process| process.started_at),
-        correlated_owner: correlation
-            .process
-            .as_ref()
-            .and_then(|process| process.username.clone()),
-        correlated_executable: correlation
-            .process
-            .as_ref()
-            .and_then(|process| process.executable.clone()),
-        correlated_bundle_id: correlation
-            .process
-            .as_ref()
-            .and_then(|process| process.bundle_id.clone()),
-        correlated_team_id: correlation
-            .process
-            .as_ref()
-            .and_then(|process| process.team_id.clone()),
-        correlation_reason: correlation.matched.then(|| correlation.reason.clone()),
-        correlation_score: correlation.score,
-        confidence: correlation.confidence,
-        matched_by: correlation.evidence.clone(),
-        risk_rank,
-        explanation: explanation.to_string(),
+        calls: session.calls,
+        last_activity_at: session.last_usage.or(session.last),
+        pid: process.map(|process| process.pid.get()),
+        process_started_at: process.and_then(|process| process.started_at),
+        owner: process.and_then(|process| process.username.clone()),
+        executable: process.and_then(|process| process.executable.clone()),
+        bundle_id: process.and_then(|process| process.bundle_id.clone()),
+        team_id: process.and_then(|process| process.team_id.clone()),
+        explanation,
     }
+}
+
+/// One plain sentence explaining the row's `alert`/`status`. This is the only
+/// place state is turned into prose, so the language stays consistent.
+fn session_explanation(
+    alert: &str,
+    status: &str,
+    matched: bool,
+    enforceable: bool,
+    mode: Mode,
+    acknowledged: bool,
+    over_limit: bool,
+) -> String {
+    if acknowledged && over_limit {
+        return "Past your limit, but you acknowledged this run.".to_string();
+    }
+    match alert {
+        "kill" if !matched => {
+            "Past your kill line, but no live process matched — Curb won't stop anything."
+        }
+        "kill" if !enforceable => {
+            "Past your kill line, but this is a watch-only desktop app — Curb won't stop it."
+        }
+        "kill" if mode != Mode::Enforcement => {
+            "Past your kill line. Watch mode only warns; switch to Enforce to stop runaways."
+        }
+        "kill" => "Past your kill line — Curb will stop this worker after the grace period.",
+        "warn" => "Past your warn line since your last input.",
+        _ => match status {
+            "working" => "Working, within your limits.",
+            _ => "Idle.",
+        },
+    }
+    .to_string()
 }
 
 fn build_overview(
     cfg: &Config,
-    agents: &[AgentView],
     sessions: &[SessionView],
     sources: Vec<SourceReport>,
     now: DateTime<Utc>,
 ) -> Overview {
-    let active_sessions = sessions
+    let working = sessions
         .iter()
-        .filter(|session| {
-            session.process_state == "running" && session.activity_state == "spending"
-        })
+        .filter(|session| session.status == "working")
         .count();
-    let warning_sessions = sessions
+    let warn = sessions
         .iter()
-        .filter(|session| {
-            matches!(session.usage_state.as_str(), "warn" | "stop") && !session.actionable
-        })
+        .filter(|session| session.alert == "warn")
         .count();
-    let stop_sessions = sessions
+    let kill = sessions
         .iter()
-        .filter(|session| session.usage_state == "stop" && session.actionable)
+        .filter(|session| session.alert == "kill")
         .count();
-    let idle_high_sessions = sessions
+    let busiest_turn_tokens = sessions
         .iter()
-        .filter(|session| session.usage_state == "quiet-high")
-        .count();
-    let status = if stop_sessions > 0 {
+        .filter(|session| session.status == "working")
+        .map(|session| session.turn_tokens)
+        .max()
+        .unwrap_or(0);
+    let status = if kill > 0 {
         "ACTION"
-    } else if warning_sessions > 0 {
+    } else if warn > 0 {
         "WATCH"
-    } else if active_sessions > 0 {
-        "ACTIVE"
     } else {
         "OK"
     };
-    let message = match status {
-        "ACTION" => "usage is over a stop threshold",
-        "WATCH" => "usage is over a warning threshold",
-        "ACTIVE" => "fresh usage checkpoints observed within policy",
-        _ => "no fresh over-budget usage",
-    };
     Overview {
-        mode: cfg.mode.to_string(),
-        action: action_label(&cfg.mode.to_string()),
+        mode: mode_label(cfg.mode),
         status: status.to_string(),
-        message: message.to_string(),
-        active_agents: agents.len(),
-        active_sessions,
-        warning_sessions,
-        stop_sessions,
-        idle_high_sessions,
-        window_tokens: sessions
-            .iter()
-            .filter(|session| session.process_state == "running")
-            .map(|session| session.window_tokens)
-            .sum(),
-        lookback_tokens: sessions.iter().map(|session| session.total_tokens).sum(),
+        message: overview_message(status, working, warn, kill),
+        working,
+        warn,
+        kill,
+        busiest_turn_tokens,
         last_scan: now,
         sources,
         changes: OverviewDelta::default(),
         capabilities: PlatformCapabilities::default(),
+    }
+}
+
+/// The two operating modes the product exposes: watch (warn only) and enforce
+/// (warn, then stop runaways).
+pub(crate) fn mode_label(mode: Mode) -> String {
+    match mode {
+        Mode::Enforcement => "enforce",
+        _ => "watch",
+    }
+    .to_string()
+}
+
+fn overview_message(status: &str, working: usize, warn: usize, kill: usize) -> String {
+    let plural = |count: usize| if count == 1 { "agent" } else { "agents" };
+    match status {
+        "ACTION" => format!("{kill} {} past your kill line", plural(kill)),
+        "WATCH" => format!("{warn} {} past your warn line", plural(warn)),
+        _ if working > 0 => format!("{working} {} working, all within limits", plural(working)),
+        _ => "No agents over your limits".to_string(),
     }
 }
 
@@ -2326,42 +2241,16 @@ fn usage_activity_start(cfg: &Config, now: DateTime<Utc>) -> DateTime<Utc> {
     now - chrono::Duration::from_std(freshness).unwrap()
 }
 
-fn usage_recency(
-    last_usage: Option<DateTime<Utc>>,
-    window_start: DateTime<Utc>,
-    fresh_start: DateTime<Utc>,
-) -> &'static str {
-    match last_usage {
-        Some(last) if last >= fresh_start => "fresh",
-        Some(last) if last >= window_start => "recent",
-        Some(_) => "historical",
-        None => "none",
-    }
-}
-
-fn usage_activity_basis(data_recency: &str, process_matched: bool) -> &'static str {
-    match (data_recency, process_matched) {
-        ("fresh", true) => "fresh completed usage checkpoint correlated to a live worker",
-        ("fresh", false) => "fresh completed usage checkpoint with no correlated worker",
-        ("recent", true) => "recent completed usage checkpoint correlated to a live worker",
-        ("recent", false) => "recent completed usage checkpoint with no correlated worker",
-        ("historical", true) => "historical usage checkpoint; worker is still alive",
-        ("historical", false) => "historical usage checkpoint with no correlated worker",
-        _ => "no usage checkpoint observed",
-    }
-}
-
 pub(crate) fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Vec<ProcessMatch> {
     let mut matches = Vec::new();
     for process in snapshot.processes() {
         for agent in &cfg.agents {
-            let (confidence, evidence) = match_agent(agent, process, snapshot);
+            let confidence = match_agent(agent, process, snapshot);
             if confidence >= cfg.service.min_confidence {
                 matches.push(ProcessMatch {
                     agent: agent.clone(),
                     process: process.clone(),
                     confidence,
-                    evidence,
                 });
             }
         }
@@ -2375,51 +2264,40 @@ pub(crate) fn process_matches(cfg: &Config, snapshot: &platform::Snapshot) -> Ve
     matches
 }
 
-fn match_agent(
-    agent: &Agent,
-    process: &platform::Process,
-    snapshot: &platform::Snapshot,
-) -> (i64, Vec<String>) {
+/// Score how strongly a process looks like a configured agent. Exclusion and
+/// require filters veto a match (score 0); positive signals add confidence.
+fn match_agent(agent: &Agent, process: &platform::Process, snapshot: &platform::Snapshot) -> i64 {
     let matcher = &agent.matcher;
-    if matcher
+    let excluded = matcher
         .exclude_names
         .iter()
         .any(|name| name.eq_ignore_ascii_case(&process.name))
-    {
-        return (0, Vec::new());
-    }
-    if any_regex_matches(&matcher.exclude_command_regex, &process.command) {
-        return (0, Vec::new());
-    }
-    if process
-        .ppid
-        .and_then(|pid| snapshot.process(pid))
-        .is_some_and(|parent| any_regex_matches(&matcher.exclude_parent_regex, &parent.command))
-    {
-        return (0, Vec::new());
-    }
-    if !matcher.require_command_regex.is_empty()
+        || any_regex_matches(&matcher.exclude_command_regex, &process.command)
+        || process
+            .ppid
+            .and_then(|pid| snapshot.process(pid))
+            .is_some_and(|parent| {
+                any_regex_matches(&matcher.exclude_parent_regex, &parent.command)
+            });
+    let missing_required = !matcher.require_command_regex.is_empty()
         && !matcher
             .require_command_regex
             .iter()
-            .all(|pattern| regex_matches(pattern, &process.command))
-    {
-        return (0, Vec::new());
+            .all(|pattern| regex_matches(pattern, &process.command));
+    if excluded || missing_required {
+        return 0;
     }
 
     let mut confidence = 0;
-    let mut evidence = Vec::new();
     if matcher
         .process_names
         .iter()
         .any(|name| name.eq_ignore_ascii_case(&process.name))
     {
         confidence += 50;
-        evidence.push("process_name".to_string());
     }
     if any_regex_matches(&matcher.command_regex, &process.command) {
         confidence += 40;
-        evidence.push("command_regex".to_string());
     }
     if process.executable.as_ref().is_some_and(|executable| {
         matcher
@@ -2428,7 +2306,6 @@ fn match_agent(
             .any(|path| std::path::Path::new(path) == executable.as_path())
     }) {
         confidence += 80;
-        evidence.push("executable_path".to_string());
     }
     if process.bundle_id.as_ref().is_some_and(|bundle_id| {
         matcher
@@ -2437,9 +2314,8 @@ fn match_agent(
             .any(|expected| expected == bundle_id)
     }) {
         confidence += 80;
-        evidence.push("bundle_id".to_string());
     }
-    (confidence, evidence)
+    confidence
 }
 
 fn any_regex_matches(patterns: &[String], value: &str) -> bool {
@@ -2480,8 +2356,6 @@ pub(crate) fn correlate(session: &Session, matches: &[ProcessMatch]) -> Correlat
                 process: Some(matched.process.clone()),
                 score,
                 reason: reason.to_string(),
-                confidence: matched.confidence,
-                evidence: matched.evidence.clone(),
             };
         }
     }
@@ -2512,71 +2386,18 @@ fn build_agent_view(
     session: Option<&SessionView>,
     now: DateTime<Utc>,
 ) -> AgentView {
-    let mut state = if matched.agent.termination_allowed() {
-        "running"
-    } else {
-        "watch-only"
+    let working = session.is_some_and(|session| session.status == "working");
+    let explanation = match session {
+        Some(session) if working => session.explanation.clone(),
+        Some(_) => "Running; its session is not spending right now.".to_string(),
+        None if matched.agent.termination_allowed() => "Running, no usage matched yet.".to_string(),
+        None => "Watch-only desktop app.".to_string(),
     };
-    let mut explanation = if matched.agent.termination_allowed() {
-        "process is running with no correlated usage"
-    } else {
-        "matched agent is watch-only"
-    };
-    let mut activity_state = "idle";
-    let mut data_recency = "none";
-    let mut activity_basis = "process is running with no correlated usage";
-    let mut usage_state = "quiet";
-    let mut action_state = "none";
-    let mut actionable = false;
-    let mut latest_session_id = None;
-    let mut latest_turn_tokens = 0;
-    let mut latest_spent_tokens = 0;
-    let mut window_tokens = 0;
-    let mut window_spent_tokens = 0;
-    if let Some(session) = session {
-        state = if matched.agent.termination_allowed() {
-            match session.state.as_str() {
-                "active" => "spending",
-                "idle-high" | "quiet" => "idle",
-                other => other,
-            }
-        } else {
-            "watch-only"
-        };
-        activity_state = &session.activity_state;
-        data_recency = &session.data_recency;
-        activity_basis = &session.activity_basis;
-        usage_state = &session.usage_state;
-        action_state = &session.action_state;
-        actionable = session.actionable;
-        latest_session_id = Some(session.id.clone());
-        latest_turn_tokens = session.latest_turn_tokens;
-        latest_spent_tokens = session.latest_spent_tokens;
-        window_tokens = session.window_tokens;
-        window_spent_tokens = session.window_spent_tokens;
-        explanation = if state == "idle" {
-            "process is running; correlated session is not currently spending"
-        } else {
-            &session.explanation
-        };
-    }
     AgentView {
         id: matched.agent.id.clone(),
         provider: matched.agent.family.clone(),
         label: matched.agent.label.clone(),
-        state: state.to_string(),
-        activity_state: activity_state.to_string(),
-        data_recency: data_recency.to_string(),
-        activity_basis: activity_basis.to_string(),
-        process_state: if matched.agent.termination_allowed() {
-            "running"
-        } else {
-            "watch-only"
-        }
-        .to_string(),
-        usage_state: usage_state.to_string(),
-        action_state: action_state.to_string(),
-        actionable,
+        status: if working { "working" } else { "idle" }.to_string(),
         pid: matched.process.pid.get(),
         process_started_at: matched.process.started_at,
         running_for_seconds: running_for_seconds(matched.process.started_at, now),
@@ -2586,22 +2407,9 @@ fn build_agent_view(
             .as_ref()
             .and_then(|cwd| project_name(cwd)),
         cwd: matched.process.cwd.clone(),
-        matched_by: matched.evidence.clone(),
-        confidence: matched.confidence,
-        latest_session_id,
-        latest_turn_tokens,
-        latest_spent_tokens,
-        window_tokens,
-        window_spent_tokens,
-        explanation: explanation.to_string(),
-    }
-}
-
-fn session_agent_state(state: &str) -> &str {
-    match state {
-        "active" => "spending",
-        "idle-high" | "quiet" => "idle",
-        other => other,
+        session_key: session.map(|session| session.key.clone()),
+        turn_tokens: session.map_or(0, |session| session.turn_tokens),
+        explanation,
     }
 }
 
@@ -2622,48 +2430,32 @@ fn project_name(path: &Path) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// Most urgent first: anything past kill, then warn, then working, then idle;
+/// ties broken by current turn spend. Spend always outranks runtime.
 fn sort_session_views(sessions: &mut [SessionView]) {
+    let alert_rank = |alert: &str| match alert {
+        "kill" => 0,
+        "warn" => 1,
+        _ => 2,
+    };
+    let status_rank = |status: &str| usize::from(status != "working");
     sessions.sort_by(|left, right| {
-        left.risk_rank
-            .cmp(&right.risk_rank)
-            .then_with(|| right.latest_turn_tokens.cmp(&left.latest_turn_tokens))
-            .then_with(|| right.window_tokens.cmp(&left.window_tokens))
-            .then_with(|| right.last_seen_at.cmp(&left.last_seen_at))
+        alert_rank(&left.alert)
+            .cmp(&alert_rank(&right.alert))
+            .then_with(|| status_rank(&left.status).cmp(&status_rank(&right.status)))
+            .then_with(|| right.turn_tokens.cmp(&left.turn_tokens))
+            .then_with(|| right.last_activity_at.cmp(&left.last_activity_at))
     });
 }
 
 fn sort_agent_views(agents: &mut [AgentView]) {
-    let priority = |state: &str| match state {
-        "stop" => 0,
-        "warn" => 1,
-        "spending" => 2,
-        "running" => 3,
-        "watch-only" => 4,
-        "idle" => 5,
-        _ => 6,
-    };
+    let rank = |status: &str| usize::from(status != "working");
     agents.sort_by(|left, right| {
-        priority(&left.state)
-            .cmp(&priority(&right.state))
+        rank(&left.status)
+            .cmp(&rank(&right.status))
             .then_with(|| left.project.cmp(&right.project))
             .then_with(|| left.id.cmp(&right.id))
     });
-}
-
-fn session_process_state(
-    state: &str,
-    usage_state: &str,
-    correlation: &Correlation,
-) -> &'static str {
-    if state == "watch-only" {
-        "watch-only"
-    } else if correlation.matched {
-        "running"
-    } else if state == "uncorrelated" || matches!(usage_state, "warn" | "stop") {
-        "unknown"
-    } else {
-        "no-process"
-    }
 }
 
 fn same_provider(left: &str, right: &str) -> bool {
@@ -2679,12 +2471,10 @@ fn clean_path(path: Option<&PathBuf>) -> Option<PathBuf> {
     }
 }
 
-fn path_contains(parent: &std::path::Path, child: &std::path::Path) -> bool {
-    child.starts_with(parent)
-}
-
+/// Correlate by working directory only when both paths are specific enough that
+/// one containing the other is meaningful — never `/` or `/Users`.
 fn safe_cwd_prefix_match(parent: &std::path::Path, child: &std::path::Path) -> bool {
-    path_specificity(parent) >= 2 && path_specificity(child) >= 2 && path_contains(parent, child)
+    path_specificity(parent) >= 2 && path_specificity(child) >= 2 && child.starts_with(parent)
 }
 
 fn path_specificity(path: &std::path::Path) -> usize {
@@ -2785,12 +2575,9 @@ mod tests {
         );
 
         assert_eq!(snapshot.overview.status, "ACTION");
-        assert_eq!(snapshot.sessions[0].usage_state, "stop");
-        assert_eq!(snapshot.sessions[0].action_state, "stop-pending");
-        assert!(snapshot.sessions[0].actionable);
-        assert_eq!(snapshot.sessions[0].process_state, "running");
-        assert_eq!(snapshot.sessions[0].correlated_pid, Some(100));
-        assert_eq!(snapshot.sessions[0].agent_state.as_deref(), Some("stop"));
+        assert_eq!(snapshot.sessions[0].alert, "kill");
+        assert!(snapshot.sessions[0].can_stop);
+        assert_eq!(snapshot.sessions[0].pid, Some(100));
         assert_eq!(snapshot.sessions[0].project.as_deref(), Some("repo"));
         assert_eq!(snapshot.agents[0].project.as_deref(), Some("repo"));
         assert_eq!(snapshot.agents[0].running_for_seconds, Some(600));
@@ -2812,8 +2599,8 @@ mod tests {
             now,
         );
 
-        assert_eq!(snapshot.sessions[0].action_state, "would-stop");
-        assert!(!snapshot.sessions[0].actionable);
+        assert_eq!(snapshot.sessions[0].alert, "kill");
+        assert!(!snapshot.sessions[0].can_stop);
     }
 
     #[test]
@@ -2825,11 +2612,10 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
         let snapshot = build_snapshot(&cfg, &[event("codex", "s1", now, 250)], Vec::new(), now);
 
-        assert_eq!(snapshot.overview.status, "WATCH");
-        assert_eq!(snapshot.sessions[0].state, "uncorrelated");
-        assert_eq!(snapshot.sessions[0].process_state, "unknown");
-        assert_eq!(snapshot.sessions[0].action_state, "blocked");
-        assert!(!snapshot.sessions[0].actionable);
+        assert_eq!(snapshot.overview.status, "ACTION");
+        assert_eq!(snapshot.sessions[0].alert, "kill");
+        assert_eq!(snapshot.sessions[0].pid, None);
+        assert!(!snapshot.sessions[0].can_stop);
     }
 
     #[test]
@@ -2859,11 +2645,10 @@ mod tests {
             now,
         );
 
-        assert_eq!(snapshot.sessions[0].state, "watch-only");
-        assert_eq!(snapshot.sessions[0].process_state, "watch-only");
-        assert_eq!(snapshot.sessions[0].action_state, "blocked");
-        assert!(!snapshot.sessions[0].actionable);
-        assert_eq!(snapshot.agents[0].state, "watch-only");
+        assert_eq!(snapshot.sessions[0].alert, "kill");
+        assert!(!snapshot.sessions[0].can_stop);
+        assert_eq!(snapshot.sessions[0].pid, Some(100));
+        assert!(snapshot.sessions[0].explanation.contains("watch-only"));
     }
 
     #[test]
@@ -2890,7 +2675,7 @@ mod tests {
             snapshot
                 .sessions
                 .iter()
-                .all(|session| session.correlated_pid == Some(100))
+                .all(|session| session.pid == Some(100))
         );
     }
 
@@ -2914,10 +2699,10 @@ mod tests {
         );
 
         assert_eq!(
-            snapshot.agents[0].latest_session_id.as_deref(),
-            Some("fresh")
+            snapshot.agents[0].session_key.as_deref(),
+            Some("codex:fresh")
         );
-        assert_eq!(snapshot.agents[0].activity_state, "spending");
+        assert_eq!(snapshot.agents[0].status, "working");
     }
 
     #[test]
@@ -3002,11 +2787,7 @@ mod tests {
             now,
         );
 
-        assert_eq!(snapshot.sessions[0].correlated_pid, Some(200));
-        assert_eq!(
-            snapshot.sessions[0].correlation_reason.as_deref(),
-            Some("provider+cwd-prefix")
-        );
+        assert_eq!(snapshot.sessions[0].pid, Some(200));
     }
 
     #[test]
@@ -3030,8 +2811,8 @@ mod tests {
             now,
         );
 
-        assert_eq!(snapshot.sessions[0].correlated_pid, None);
-        assert_eq!(snapshot.sessions[1].correlated_pid, None);
+        assert_eq!(snapshot.sessions[0].pid, None);
+        assert_eq!(snapshot.sessions[1].pid, None);
     }
 
     #[test]
@@ -3070,9 +2851,9 @@ mod tests {
             Vec::new(),
             now,
         );
-        assert_eq!(snapshot.sessions[0].state, "acknowledged");
-        assert_eq!(snapshot.sessions[0].action_state, "acknowledged");
-        assert!(!snapshot.sessions[0].actionable);
+        assert_eq!(snapshot.sessions[0].alert, "ok");
+        assert!(snapshot.sessions[0].acknowledged_until.is_some());
+        assert!(!snapshot.sessions[0].can_stop);
         assert!(!snapshot.sessions[0].can_acknowledge);
     }
 
@@ -3260,9 +3041,8 @@ mod tests {
         let snapshot = build_snapshot(&cfg, &[event("codex", "s1", old, 250)], Vec::new(), now);
 
         assert_eq!(snapshot.overview.status, "OK");
-        assert_eq!(snapshot.overview.idle_high_sessions, 1);
-        assert_eq!(snapshot.sessions[0].usage_state, "quiet-high");
-        assert_eq!(snapshot.sessions[0].action_state, "none");
+        assert_eq!(snapshot.sessions[0].alert, "ok");
+        assert_eq!(snapshot.sessions[0].status, "idle");
     }
 
     #[test]
@@ -3283,10 +3063,32 @@ mod tests {
         );
 
         assert_eq!(snapshot.overview.status, "WATCH");
-        assert_eq!(snapshot.overview.active_sessions, 0);
-        assert_eq!(snapshot.sessions[0].usage_state, "warn");
-        assert_eq!(snapshot.sessions[0].activity_state, "idle");
-        assert_eq!(snapshot.agents[0].activity_state, "idle");
+        assert_eq!(snapshot.overview.working, 0);
+        assert_eq!(snapshot.sessions[0].alert, "warn");
+        assert_eq!(snapshot.sessions[0].status, "idle");
+        assert_eq!(snapshot.agents[0].status, "idle");
+    }
+
+    #[test]
+    fn turn_spend_resets_after_a_user_input_boundary() {
+        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        cfg.usage.scan_interval = HumanDuration::seconds(5);
+        cfg.usage.warn_turn_tokens = 100;
+        cfg.usage.kill_turn_tokens = 200;
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let processes = process_snapshot(now, "codex", "/repo");
+        // An expensive past turn (250 > kill), then the human steered again,
+        // then a cheap fresh turn (40 < warn). Only the fresh turn counts.
+        let events = vec![
+            event("codex", "s1", now - chrono::Duration::seconds(20), 250),
+            user_input("codex", "s1", now - chrono::Duration::seconds(10)),
+            event("codex", "s1", now - chrono::Duration::seconds(2), 40),
+        ];
+        let snapshot =
+            build_snapshot_with_processes(&cfg, Some(&processes), &events, Vec::new(), now);
+
+        assert_eq!(snapshot.sessions[0].turn_tokens, 40);
+        assert_eq!(snapshot.sessions[0].alert, "ok");
     }
 
     #[test]
@@ -3462,6 +3264,7 @@ mod tests {
 
     fn event(provider: &str, session: &str, at: DateTime<Utc>, total: i64) -> Event {
         Event {
+            kind: crate::usage::EventKind::TokenCheckpoint,
             provider: provider.to_string(),
             source: "test".to_string(),
             source_path: "fixture.jsonl".into(),
@@ -3479,6 +3282,30 @@ mod tests {
             total_tokens: total,
             spent_tokens: total,
             cumulative_tokens: total,
+            model_context_window: 0,
+        }
+    }
+
+    fn user_input(provider: &str, session: &str, at: DateTime<Utc>) -> Event {
+        Event {
+            kind: crate::usage::EventKind::UserInput,
+            provider: provider.to_string(),
+            source: "test".to_string(),
+            source_path: "fixture.jsonl".into(),
+            session_id: Some(session.to_string()),
+            turn_id: None,
+            request_id: None,
+            model: None,
+            cwd: Some("/repo".into()),
+            timestamp: Some(at),
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 0,
+            spent_tokens: 0,
+            cumulative_tokens: 0,
             model_context_window: 0,
         }
     }

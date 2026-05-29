@@ -512,8 +512,8 @@ mod tests {
 
         assert_eq!(snapshot.overview.status, "ACTION");
         assert_eq!(snapshot.sessions[0].key, "codex:s1");
-        assert_eq!(snapshot.sessions[0].correlated_pid, Some(100));
-        assert!(snapshot.sessions[0].actionable);
+        assert_eq!(snapshot.sessions[0].pid, Some(100));
+        assert!(snapshot.sessions[0].can_stop);
     }
 
     #[test]
@@ -615,8 +615,8 @@ mod tests {
 
         assert_eq!(ack.session_key, "codex:s1");
         assert_eq!(ack.extend_seconds, 60);
-        assert_eq!(snapshot.sessions[0].state, "acknowledged");
-        assert!(!snapshot.sessions[0].actionable);
+        assert!(snapshot.sessions[0].acknowledged_until.is_some());
+        assert!(!snapshot.sessions[0].can_stop);
         assert_eq!(events[0].event_type, "session_ack_received");
     }
 
@@ -758,7 +758,7 @@ mod tests {
         )
         .with_config_path(&config_path);
         let cached = runtime.snapshot(now).unwrap();
-        assert_eq!(cached.overview.mode, "alert");
+        assert_eq!(cached.overview.mode, "watch");
 
         let view = runtime
             .update_config(ConfigUpdate {
@@ -778,7 +778,7 @@ mod tests {
         assert_eq!(reloaded.mode, Mode::Visibility);
         assert_eq!(reloaded.usage.warn_turn_tokens, 2_000);
         assert_eq!(reloaded.usage.window.as_std().as_secs(), 120);
-        assert_eq!(runtime.snapshot(now).unwrap().overview.mode, "visibility");
+        assert_eq!(runtime.snapshot(now).unwrap().overview.mode, "watch");
     }
 
     #[test]
@@ -861,7 +861,7 @@ mod tests {
 
         let snapshot = runtime.rescan(now).unwrap();
 
-        assert_eq!(snapshot.sessions[0].state, "uncorrelated");
+        assert_eq!(snapshot.sessions[0].pid, None);
         assert_eq!(
             snapshot.overview.capabilities.process_capture.status,
             "error"
@@ -949,7 +949,7 @@ mod tests {
 
         let snapshot = runtime.rescan(now).unwrap();
 
-        assert_eq!(snapshot.overview.action, "enforcement enabled");
+        assert_eq!(snapshot.overview.mode, "enforce");
         assert_eq!(
             snapshot.overview.capabilities.process_capture.status,
             "ready"
@@ -1156,7 +1156,7 @@ mod tests {
 
         let snapshot = runtime.usage_tick(now).unwrap();
 
-        assert_eq!(snapshot.sessions[0].state, "uncorrelated");
+        assert_eq!(snapshot.sessions[0].pid, None);
         let events = crate::ledger::read(runtime.config().ledger.path).unwrap();
         assert_eq!(event_types(&events), ["usage_scan_failed"]);
         assert!(

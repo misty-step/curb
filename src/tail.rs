@@ -258,6 +258,7 @@ mod tests {
 
     fn event(provider: &str, session: &str, total: i64, timestamp: DateTime<Utc>) -> Event {
         Event {
+            kind: crate::usage::EventKind::TokenCheckpoint,
             provider: provider.to_string(),
             source: "test".to_string(),
             source_path: PathBuf::from("usage.jsonl"),

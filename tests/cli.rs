@@ -236,12 +236,10 @@ fn dashboard_prints_service_snapshot_from_synthetic_usage() {
         .arg(home.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("curb dashboard"))
-        .stdout(predicate::str::contains("status:"))
-        .stdout(predicate::str::contains("live agents:"))
-        .stdout(predicate::str::contains("sessions"))
+        .stdout(predicate::str::contains("curb ·"))
         .stdout(predicate::str::contains("codex"))
-        .stdout(predicate::str::contains("session: session_codex"));
+        .stdout(predicate::str::contains("repo"))
+        .stdout(predicate::str::contains("per turn"));
 }
 
 #[test]
@@ -414,7 +412,7 @@ fn status_reports_warning_sessions_from_usage_read_model() {
         .success()
         .stdout(predicate::str::contains("curb status"))
         .stdout(predicate::str::contains("status: WATCH"))
-        .stdout(predicate::str::contains("1 warning"))
+        .stdout(predicate::str::contains("1 warn"))
         .stdout(predicate::str::contains("attention"))
         .stdout(predicate::str::contains("codex:session_codex"))
         .stdout(predicate::str::contains(
@@ -447,7 +445,7 @@ fn runs_prints_and_filters_session_read_model() {
     .stdout(predicate::str::contains("curb runs"))
     .stdout(predicate::str::contains("sessions"))
     .stdout(predicate::str::contains("codex:session_codex"))
-    .stdout(predicate::str::contains("acknowledge"));
+    .stdout(predicate::str::contains("curb ack"));
 }
 
 #[test]
@@ -497,7 +495,9 @@ fn warning_config(root: &std::path::Path) -> std::path::PathBuf {
     let mut cfg =
         curb::config::Config::local_default(curb::config::Mode::Alert, root.join("state"));
     cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
-    cfg.usage.warn_turn_tokens = 100;
+    // Synthetic codex fixture spends 87 tokens/turn (uncached input + output +
+    // reasoning), so warn below that and kill above it to land in the warn band.
+    cfg.usage.warn_turn_tokens = 50;
     cfg.usage.kill_turn_tokens = 300;
     cfg.defaults.ack_extension = curb::config::HumanDuration::seconds(60);
     cfg.save(&config_path).expect("save config");

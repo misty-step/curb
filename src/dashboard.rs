@@ -1,11 +1,13 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-use chrono::{DateTime, Local, Utc};
+use chrono::Local;
 
 use crate::config::Config;
-use crate::service::{AgentView, SessionView, Snapshot};
+use crate::service::{SessionView, Snapshot};
 
+/// Render the terminal dashboard: one status line, one row per agent showing a
+/// spend bar against the warn and kill lines, and a quiet footer.
 pub fn render(
     mut writer: impl Write,
     path: &Path,
@@ -13,175 +15,117 @@ pub fn render(
     snapshot: &Snapshot,
     limit: usize,
 ) -> io::Result<()> {
-    writeln!(writer, "curb dashboard")?;
+    let overview = &snapshot.overview;
+    writeln!(writer, "curb · {} · {}", overview.mode, overview.message)?;
     writeln!(writer, "  config: {}", compact_home(path))?;
-    writeln!(writer, "  action: {}", action_label(&cfg.mode.to_string()))?;
     writeln!(writer)?;
-    render_header(&mut writer, snapshot, cfg)?;
-    render_attention(&mut writer, snapshot)?;
-    render_agents(&mut writer, &snapshot.agents)?;
-    writeln!(writer)?;
-    render_sessions(&mut writer, &snapshot.sessions, limit)
-}
-
-fn render_header(writer: &mut impl Write, snapshot: &Snapshot, cfg: &Config) -> io::Result<()> {
-    let overview = &snapshot.overview;
-    writeln!(
-        writer,
-        "  status: {} - {}",
-        overview.status, overview.message
-    )?;
-    writeln!(
-        writer,
-        "  window tokens: {}; lookback tokens: {}; live agents: {}; active sessions: {}",
-        token_count(overview.window_tokens),
-        token_count(overview.lookback_tokens),
-        overview.active_agents,
-        overview.active_sessions
-    )?;
-    if cfg.usage.enabled() {
-        writeln!(
-            writer,
-            "  policy: warn {}/turn; stop {}/turn",
-            token_count(cfg.usage.warn_turn_tokens),
-            token_count(cfg.usage.kill_turn_tokens)
-        )?;
-    } else {
-        writeln!(writer, "  policy: usage monitoring disabled")?;
-    }
-    writeln!(
-        writer,
-        "  scanned: {}",
-        overview
-            .last_scan
-            .with_timezone(&Local)
-            .format("%Y-%m-%d %H:%M:%S")
-    )?;
-    let sources = overview
-        .sources
-        .iter()
-        .map(|source| match &source.error {
-            Some(_) => format!("{} unavailable", source.provider),
-            None => format!("{} {} events", source.provider, source.events),
-        })
-        .collect::<Vec<_>>();
-    if !sources.is_empty() {
-        writeln!(writer, "  sources: {}", sources.join("; "))?;
-    }
-    writeln!(writer)
-}
-
-fn render_attention(writer: &mut impl Write, snapshot: &Snapshot) -> io::Result<()> {
-    writeln!(writer, "attention")?;
-    let overview = &snapshot.overview;
-    if overview.stop_sessions > 0 {
-        writeln!(
-            writer,
-            "  {} actionable session(s) are over stop thresholds. Curb can stop correlated workers after grace in enforcement mode.",
-            overview.stop_sessions
-        )?;
-    } else if overview.warning_sessions > 0 {
-        writeln!(
-            writer,
-            "  {} session(s) need attention. Check usage state, correlation, and mode before enabling enforcement.",
-            overview.warning_sessions
-        )?;
-    } else {
-        writeln!(
-            writer,
-            "  none. Historical high-turn sessions are visible below, but idle sessions are not treated as runaway spend."
-        )?;
-    }
-    if overview.idle_high_sessions > 0 {
-        writeln!(
-            writer,
-            "  note: {} large historical turn session(s) are idle-high, meaning expensive but not currently spending.",
-            overview.idle_high_sessions
-        )?;
-    }
-    writeln!(writer)
-}
-
-fn render_agents(writer: &mut impl Write, agents: &[AgentView]) -> io::Result<()> {
-    writeln!(writer, "live agents: {}", agents.len())?;
-    if agents.is_empty() {
-        writeln!(writer, "  none matched")?;
-        return Ok(());
-    }
-    writeln!(
-        writer,
-        "  {:<7} {:<22} {:<12} {:<12} {:<12} PROJECT",
-        "PID", "AGENT", "STATE", "USAGE", "LATEST_SPEND"
-    )?;
-    for agent in agents {
-        writeln!(
-            writer,
-            "  {:<7} {:<22} {:<12} {:<12} {:<12} {}",
-            agent.pid,
-            agent.id,
-            agent.state,
-            blank_as_dash(&agent.usage_state),
-            token_or_dash(agent.latest_spent_tokens),
-            project_label(agent.cwd.as_deref(), agent.project.as_deref())
-        )?;
-    }
-    Ok(())
+    render_sessions(&mut writer, cfg, &snapshot.sessions, limit)?;
+    render_footer(&mut writer, cfg, snapshot)
 }
 
 fn render_sessions(
     writer: &mut impl Write,
+    cfg: &Config,
     sessions: &[SessionView],
     limit: usize,
 ) -> io::Result<()> {
-    writeln!(writer, "sessions")?;
     if sessions.is_empty() {
-        writeln!(writer, "  no local usage events found")?;
+        writeln!(writer, "  No agent usage found yet.")?;
         return Ok(());
     }
-    let limit = normalized_limit(limit, sessions.len());
-    writeln!(
-        writer,
-        "  {:<13} {:<8} {:<8} {:<12} {:<10} {:<7} {:<18} WHY",
-        "STATUS", "AGENT", "LAST", "LATEST_SPEND", "TOTAL", "CALLS", "PROJECT"
-    )?;
-    for session in &sessions[..limit] {
+    let warn = cfg.usage.warn_turn_tokens;
+    let kill = cfg.usage.kill_turn_tokens;
+    let shown = normalized_limit(limit, sessions.len());
+    for session in &sessions[..shown] {
         writeln!(
             writer,
-            "  {:<13} {:<8} {:<8} {:<12} {:<10} {:<7} {:<18} {}",
-            session_status(session),
-            session.provider,
-            relative_time(session_display_time(session)),
-            token_or_dash(session.latest_spent_tokens),
-            token_count(session.total_spent_tokens),
-            session.calls,
+            "  {}   {} · {}",
             project_label(session.cwd.as_deref(), session.project.as_deref()),
-            session.explanation
-        )?;
-        if !session.models.is_empty() {
-            writeln!(writer, "    models: {}", session.models.join(", "))?;
-        }
-        writeln!(
-            writer,
-            "    path: {}  session: {}  process: {}",
+            session.provider,
             session
                 .cwd
                 .as_deref()
                 .map(compact_home)
                 .unwrap_or_else(|| "-".to_string()),
-            short_session_id(&session.id),
-            session_process(session)
         )?;
-    }
-    if sessions.len() > limit {
         writeln!(
             writer,
-            "\nshowing {} of {} sessions; use --limit {} or --json for more",
-            limit,
-            sessions.len(),
+            "  {} {:>6}  {}",
+            spend_bar(session.turn_tokens, warn, kill),
+            short_tokens(session.turn_tokens),
+            status_tag(session),
+        )?;
+    }
+    if sessions.len() > shown {
+        writeln!(
+            writer,
+            "  … {} more; use --limit {} or --json",
+            sessions.len() - shown,
             sessions.len()
         )?;
     }
+    writeln!(writer)
+}
+
+fn render_footer(writer: &mut impl Write, cfg: &Config, snapshot: &Snapshot) -> io::Result<()> {
+    let running = snapshot.agents.len();
+    writeln!(
+        writer,
+        "  warn {} · kill {} per turn · {} agent{} running · scanned {}",
+        short_tokens(cfg.usage.warn_turn_tokens),
+        short_tokens(cfg.usage.kill_turn_tokens),
+        running,
+        if running == 1 { "" } else { "s" },
+        snapshot
+            .overview
+            .last_scan
+            .with_timezone(&Local)
+            .format("%H:%M:%S"),
+    )?;
+    let unavailable = snapshot
+        .overview
+        .sources
+        .iter()
+        .filter(|source| source.error.is_some())
+        .map(|source| source.provider.as_str())
+        .collect::<Vec<_>>();
+    if !unavailable.is_empty() {
+        writeln!(writer, "  sources unavailable: {}", unavailable.join(", "))?;
+    }
     Ok(())
+}
+
+/// A fixed-width bar filled in proportion to the kill line, so the eye reads
+/// "how close to a kill" instantly. The warn line is the lighter shaded zone.
+fn spend_bar(turn: i64, warn: i64, kill: i64) -> String {
+    const WIDTH: usize = 24;
+    let scale = kill.max(warn).max(1) as f64;
+    let cell = |tokens: i64| ((tokens as f64 / scale) * WIDTH as f64).round() as usize;
+    let filled = cell(turn).min(WIDTH);
+    let warn_at = cell(warn).min(WIDTH);
+    let mut bar = String::with_capacity(WIDTH);
+    for index in 0..WIDTH {
+        bar.push(if index < filled {
+            '█'
+        } else if index < warn_at {
+            '·'
+        } else {
+            '░'
+        });
+    }
+    format!("[{bar}]")
+}
+
+/// The one-word status shown beside the bar.
+fn status_tag(session: &SessionView) -> &'static str {
+    match (session.alert.as_str(), session.status.as_str()) {
+        ("kill", _) if session.acknowledged_until.is_some() => "kill · acknowledged",
+        ("kill", _) if session.can_stop => "KILL · stop after grace",
+        ("kill", _) => "KILL · warn only",
+        ("warn", _) => "WARN",
+        (_, "working") => "working",
+        _ => "idle",
+    }
 }
 
 fn normalized_limit(limit: usize, len: usize) -> usize {
@@ -192,68 +136,15 @@ fn normalized_limit(limit: usize, len: usize) -> usize {
     }
 }
 
-fn action_label(mode: &str) -> &'static str {
-    match mode {
-        "visibility" => "record only",
-        "alert" => "notify only",
-        "enforcement" => "warn and stop correlated workers",
-        _ => "not configured",
-    }
-}
-
-fn session_status(session: &SessionView) -> String {
-    if !session.usage_state.is_empty() && session.usage_state != session.state {
-        format!("{}/{}", session.state, session.usage_state)
-    } else {
-        session.state.clone()
-    }
-}
-
-fn session_display_time(session: &SessionView) -> DateTime<Utc> {
-    session.last_usage_at.unwrap_or(session.last_seen_at)
-}
-
-fn session_process(session: &SessionView) -> String {
-    match (
-        session.correlated_pid,
-        session.correlation_reason.as_deref(),
-    ) {
-        (Some(pid), Some(reason)) => format!("pid {pid} via {reason}"),
-        (Some(pid), None) => format!("pid {pid}"),
-        _ => "uncorrelated".to_string(),
-    }
-}
-
-fn token_count(value: i64) -> String {
+/// Compact token scale: 920k, 2.4M, 3M. Used everywhere a token count is shown.
+fn short_tokens(value: i64) -> String {
     if value >= 1_000_000 {
-        let millions = value as f64 / 1_000_000.0;
-        let rendered = format!("{millions:.1}");
-        format!("{}M tokens", rendered.trim_end_matches(".0"))
-    } else if value >= 10_000 {
-        format!("{}k tokens", value / 1_000)
+        let millions = format!("{:.1}", value as f64 / 1_000_000.0);
+        format!("{}M", millions.strip_suffix(".0").unwrap_or(&millions))
+    } else if value >= 1_000 {
+        format!("{}k", value / 1_000)
     } else {
-        format!("{value} tokens")
-    }
-}
-
-fn token_or_dash(value: i64) -> String {
-    if value > 0 {
-        token_count(value)
-    } else {
-        "-".to_string()
-    }
-}
-
-fn relative_time(at: DateTime<Utc>) -> String {
-    let elapsed = Utc::now().signed_duration_since(at);
-    if elapsed.num_seconds() < 60 {
-        "now".to_string()
-    } else if elapsed.num_minutes() < 60 {
-        format!("{}m ago", elapsed.num_minutes())
-    } else if elapsed.num_hours() < 24 {
-        format!("{}h ago", elapsed.num_hours())
-    } else {
-        format!("{}d ago", elapsed.num_days())
+        value.to_string()
     }
 }
 
@@ -268,10 +159,6 @@ fn compact_home(path: &Path) -> String {
     rendered
 }
 
-fn blank_as_dash(value: &str) -> &str {
-    if value.is_empty() { "-" } else { value }
-}
-
 fn project_label(cwd: Option<&Path>, project: Option<&str>) -> String {
     if let Some(project) = project.filter(|project| !project.is_empty()) {
         return project.to_string();
@@ -281,23 +168,23 @@ fn project_label(cwd: Option<&Path>, project: Option<&str>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn short_session_id(id: &str) -> String {
-    if id.len() <= 18 {
-        id.to_string()
-    } else {
-        format!("{}...{}", &id[..8], &id[id.len() - 6..])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn token_count_uses_dashboard_scale() {
-        assert_eq!(token_count(9999), "9999 tokens");
-        assert_eq!(token_count(10_000), "10k tokens");
-        assert_eq!(token_count(1_500_000), "1.5M tokens");
-        assert_eq!(token_count(3_000_000), "3M tokens");
+    fn short_tokens_uses_compact_scale() {
+        assert_eq!(short_tokens(920), "920");
+        assert_eq!(short_tokens(920_000), "920k");
+        assert_eq!(short_tokens(2_400_000), "2.4M");
+        assert_eq!(short_tokens(3_000_000), "3M");
+    }
+
+    #[test]
+    fn spend_bar_fills_toward_the_kill_line() {
+        let empty = spend_bar(0, 1_000_000, 3_000_000);
+        assert!(!empty.contains('█'));
+        let over = spend_bar(3_000_000, 1_000_000, 3_000_000);
+        assert_eq!(over.matches('█').count(), 24);
     }
 }

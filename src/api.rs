@@ -1004,11 +1004,7 @@ mod tests {
         assert!(overview.text().contains("\"status\":\"WATCH\""));
         assert!(overview.text().contains("\"changes\""));
         assert!(overview.text().contains("\"capabilities\""));
-        assert!(
-            overview
-                .text()
-                .contains("\"action\":\"notify only; never kill\"")
-        );
+        assert!(overview.text().contains("\"mode\":\"watch\""));
 
         let agents = server.handle(authed("GET", "/v1/agents"), now);
         assert_eq!(agents.status, 200);
@@ -1019,7 +1015,7 @@ mod tests {
         let sessions = server.handle(authed("GET", "/v1/sessions"), now);
         assert_eq!(sessions.status, 200);
         assert!(sessions.text().contains("codex:session/one"));
-        assert!(sessions.text().contains("\"agent_state\":\"warn\""));
+        assert!(sessions.text().contains("\"alert\":\"warn\""));
         assert!(sessions.text().contains("\"project\":\"repo\""));
     }
 
@@ -1709,17 +1705,13 @@ mod tests {
     fn snapshot() -> Snapshot {
         Snapshot {
             overview: Overview {
-                mode: "alert".to_string(),
-                action: "notify only; never kill".to_string(),
+                mode: "watch".to_string(),
                 status: "WATCH".to_string(),
-                message: "usage is over a warning threshold".to_string(),
-                active_agents: 1,
-                active_sessions: 1,
-                warning_sessions: 1,
-                stop_sessions: 0,
-                idle_high_sessions: 0,
-                window_tokens: 789,
-                lookback_tokens: 1000,
+                message: "1 agent past your warn line".to_string(),
+                working: 1,
+                warn: 1,
+                kill: 0,
+                busiest_turn_tokens: 789,
                 last_scan: fixed_now(),
                 sources: Vec::new(),
                 changes: Default::default(),
@@ -1739,71 +1731,38 @@ mod tests {
                 id: "codex-worker".to_string(),
                 provider: "codex".to_string(),
                 label: "Codex Worker".to_string(),
-                state: "warn".to_string(),
-                activity_state: "spending".to_string(),
-                data_recency: "fresh".to_string(),
-                activity_basis: "fresh completed usage checkpoint correlated to a live worker"
-                    .to_string(),
-                process_state: "running".to_string(),
-                usage_state: "warn".to_string(),
-                action_state: "acknowledge".to_string(),
-                actionable: false,
+                status: "working".to_string(),
                 pid: 4242,
                 process_started_at: Some(fixed_now()),
                 running_for_seconds: Some(60),
                 project: Some("repo".to_string()),
                 cwd: Some("/repo".into()),
-                matched_by: vec!["process_name".to_string()],
-                confidence: 90,
-                latest_session_id: Some("session/one".to_string()),
-                latest_turn_tokens: 789,
-                latest_spent_tokens: 789,
-                window_tokens: 789,
-                window_spent_tokens: 789,
-                explanation: "latest checkpoint crossed the warning threshold".to_string(),
+                session_key: Some("codex:session/one".to_string()),
+                turn_tokens: 789,
+                explanation: "Past your warn line since your last input.".to_string(),
             }],
             sessions: vec![SessionView {
                 key: "codex:session/one".to_string(),
                 id: "session/one".to_string(),
                 provider: "codex".to_string(),
-                state: "warn".to_string(),
-                activity_state: "spending".to_string(),
-                data_recency: "fresh".to_string(),
-                activity_basis: "fresh completed usage checkpoint correlated to a live worker"
-                    .to_string(),
-                process_state: "running".to_string(),
-                usage_state: "warn".to_string(),
-                action_state: "acknowledge".to_string(),
-                actionable: false,
+                status: "working".to_string(),
+                alert: "warn".to_string(),
+                can_stop: false,
                 can_acknowledge: true,
-                acknowledged: false,
-                acknowledged_until: None,
-                agent_state: Some("warn".to_string()),
                 project: Some("repo".to_string()),
                 cwd: Some("/repo".into()),
                 models: vec!["model".to_string()],
-                last_seen_at: fixed_now(),
-                last_usage_at: Some(fixed_now()),
-                calls: 1,
-                latest_turn_tokens: 789,
-                latest_spent_tokens: 789,
-                window_tokens: 789,
-                window_spent_tokens: 789,
+                turn_tokens: 789,
+                turn_context_tokens: 789,
                 total_tokens: 1000,
-                total_spent_tokens: 1000,
-                correlated_agent_id: Some("codex-worker".to_string()),
-                correlated_pid: Some(4242),
-                correlated_process_started_at: Some(fixed_now()),
-                correlated_owner: Some("phaedrus".to_string()),
-                correlated_executable: Some("/usr/local/bin/codex".into()),
-                correlated_bundle_id: None,
-                correlated_team_id: None,
-                correlation_reason: Some("provider+cwd".to_string()),
-                correlation_score: 125,
-                confidence: 90,
-                matched_by: vec!["process_name".to_string()],
-                risk_rank: 1,
-                explanation: "latest checkpoint crossed the warning threshold".to_string(),
+                calls: 1,
+                last_activity_at: Some(fixed_now()),
+                pid: Some(4242),
+                process_started_at: Some(fixed_now()),
+                owner: Some("phaedrus".to_string()),
+                executable: Some("/usr/local/bin/codex".into()),
+                explanation: "Past your warn line since your last input.".to_string(),
+                ..Default::default()
             }],
             turns: Vec::new(),
         }

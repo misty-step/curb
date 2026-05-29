@@ -271,17 +271,13 @@ mod tests {
         fn snapshot(&self, _now: DateTime<Utc>) -> Result<Snapshot, ApiError> {
             Ok(Snapshot {
                 overview: Overview {
-                    mode: "visibility".to_string(),
-                    action: "record only; no warnings or kills".to_string(),
+                    mode: "watch".to_string(),
                     status: "OK".to_string(),
-                    message: "ok".to_string(),
-                    active_agents: 0,
-                    active_sessions: 0,
-                    warning_sessions: 0,
-                    stop_sessions: 0,
-                    idle_high_sessions: 0,
-                    window_tokens: 0,
-                    lookback_tokens: 0,
+                    message: "No agents over your limits".to_string(),
+                    working: 0,
+                    warn: 0,
+                    kill: 0,
+                    busiest_turn_tokens: 0,
                     last_scan: fixed_now(),
                     sources: Vec::new(),
                     changes: Default::default(),
