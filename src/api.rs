@@ -10,11 +10,11 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use url::Url;
 
-use crate::config::parse_duration_for_cli;
-use crate::onboarding::{NotificationView, OnboardingView};
-use crate::platform::Platform;
-use crate::runtime::{Runtime, RuntimeError, TurnQuery};
-use crate::service::{
+use curb_core::config::parse_duration_for_cli;
+use curb_core::onboarding::{NotificationView, OnboardingView};
+use curb_core::platform::Platform;
+use curb_core::runtime::{Runtime, RuntimeError, TurnQuery};
+use curb_core::service::{
     AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, ServiceError, SessionView,
     Snapshot, StopRequest, StopView, TurnView,
 };
@@ -459,26 +459,31 @@ impl Request {
         }
     }
 
+    #[cfg(test)]
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    #[cfg(test)]
     pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.body = body.into();
         self
     }
 
+    #[cfg(test)]
     pub fn origin(mut self, origin: impl Into<String>) -> Self {
         self.headers.insert("origin", origin);
         self
     }
 
+    #[cfg(test)]
     pub fn cookie(mut self, cookie: impl Into<String>) -> Self {
         self.headers.insert("cookie", cookie);
         self
     }
 
+    #[cfg(test)]
     pub fn endpoint(mut self, scheme: impl Into<String>, host: impl Into<String>) -> Self {
         self.scheme = scheme.into();
         self.host = host.into();
@@ -520,6 +525,7 @@ impl Response {
         self
     }
 
+    #[cfg(test)]
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).to_string()
     }
@@ -860,8 +866,8 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::onboarding::{CapabilityView, PlatformCapabilities};
-    use crate::service::{AgentView, Overview};
+    use curb_core::onboarding::{CapabilityView, PlatformCapabilities};
+    use curb_core::service::{AgentView, Overview};
 
     #[test]
     fn requires_auth_for_api_routes_and_allows_local_preflight() {
@@ -1582,9 +1588,9 @@ mod tests {
                 team_id: None,
                 scope: "tree".to_string(),
                 scope_pids: vec![4242],
-                result: crate::platform::TerminationResult {
+                result: curb_core::platform::TerminationResult {
                     soft_signaled: vec![4242],
-                    ..crate::platform::TerminationResult::default()
+                    ..curb_core::platform::TerminationResult::default()
                 },
             })
         }

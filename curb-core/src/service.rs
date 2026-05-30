@@ -1409,7 +1409,7 @@ mod tests {
 
     #[test]
     fn active_stop_session_is_actionable_only_in_enforcement_mode() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1434,7 +1434,7 @@ mod tests {
 
     #[test]
     fn alert_mode_reports_would_stop_without_actionability() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Alert;
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1454,7 +1454,7 @@ mod tests {
 
     #[test]
     fn uncorrelated_stop_usage_is_blocked_not_actionable() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1469,7 +1469,7 @@ mod tests {
 
     #[test]
     fn watch_only_app_match_blocks_termination() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.agents = vec![crate::config::Agent {
             id: "codex-desktop".to_string(),
             label: "Codex Desktop".to_string(),
@@ -1502,7 +1502,7 @@ mod tests {
 
     #[test]
     fn multiple_sessions_can_correlate_to_one_worker() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1530,7 +1530,7 @@ mod tests {
 
     #[test]
     fn agent_view_uses_newest_matching_session_when_scores_tie() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.scan_interval = HumanDuration::seconds(5);
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1556,7 +1556,7 @@ mod tests {
 
     #[test]
     fn overview_delta_reports_new_usage_alerts_agents_and_source_errors() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1620,7 +1620,7 @@ mod tests {
 
     #[test]
     fn cwd_correlation_uses_path_components_not_string_prefixes() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1641,7 +1641,7 @@ mod tests {
 
     #[test]
     fn cwd_prefix_correlation_rejects_root_or_top_level_paths() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1666,7 +1666,7 @@ mod tests {
 
     #[test]
     fn old_high_usage_is_idle_high_not_active_stop() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1680,7 +1680,7 @@ mod tests {
 
     #[test]
     fn terminated_sessions_are_dropped_from_the_snapshot() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1701,7 +1701,7 @@ mod tests {
 
     #[test]
     fn stale_policy_warning_is_not_fresh_activity() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.scan_interval = HumanDuration::seconds(5);
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1725,7 +1725,7 @@ mod tests {
 
     #[test]
     fn turn_spend_resets_after_a_user_input_boundary() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.scan_interval = HumanDuration::seconds(5);
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
@@ -1747,7 +1747,7 @@ mod tests {
 
     #[test]
     fn process_matching_applies_parent_command_exclusions_to_parent() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.service.min_confidence = 1;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
         let mut parent = process(now, 100, "codex", "/repo");
@@ -1834,7 +1834,7 @@ mod tests {
 
     #[test]
     fn alert_views_filter_limit_order_and_project_session_actions() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
         let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
@@ -1880,7 +1880,7 @@ mod tests {
 
     #[test]
     fn alert_views_do_not_ack_missing_or_already_acknowledged_sessions() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
         cfg.usage.warn_turn_tokens = 100;

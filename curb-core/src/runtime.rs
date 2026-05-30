@@ -1208,7 +1208,7 @@ mod tests {
     }
 
     fn test_config(home: &Path, mode: Mode) -> Config {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = mode;
         cfg.service.state_dir = home.join(".curb");
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");

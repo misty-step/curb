@@ -15,8 +15,8 @@ fn init_creates_default_user_config_without_synthetic_demo_agent() {
         .stdout(predicate::str::contains("created config:"))
         .stdout(predicate::str::contains("next: curb app"));
 
-    let cfg = curb::config::Config::load(&config).expect("config");
-    assert_eq!(cfg.mode, curb::config::Mode::Visibility);
+    let cfg = curb_core::config::Config::load(&config).expect("config");
+    assert_eq!(cfg.mode, curb_core::config::Mode::Visibility);
     assert_eq!(cfg.agents.len(), 4);
     assert!(cfg.agents.iter().all(|agent| agent.termination_allowed()));
     assert_eq!(
@@ -44,8 +44,8 @@ fn config_presets_update_default_config_path() {
         .stdout(predicate::str::contains("warn: 250k tokens per turn"))
         .stdout(predicate::str::contains("Codex Desktop Worker"));
 
-    let cfg = curb::config::Config::load(&config).expect("config");
-    assert_eq!(cfg.mode, curb::config::Mode::Enforcement);
+    let cfg = curb_core::config::Config::load(&config).expect("config");
+    assert_eq!(cfg.mode, curb_core::config::Mode::Enforcement);
     assert_eq!(cfg.usage.warn_turn_tokens, 250_000);
     assert_eq!(cfg.usage.kill_turn_tokens, 750_000);
     assert_eq!(cfg.usage.scan_interval.as_std().as_secs(), 1);
@@ -95,8 +95,8 @@ fn config_set_updates_first_class_policy_fields() {
         .stdout(predicate::str::contains("warn: 1k tokens per turn"))
         .stdout(predicate::str::contains("stop: 2k tokens per turn"));
 
-    let cfg = curb::config::Config::load(&config).expect("config");
-    assert_eq!(cfg.mode, curb::config::Mode::Enforcement);
+    let cfg = curb_core::config::Config::load(&config).expect("config");
+    assert_eq!(cfg.mode, curb_core::config::Mode::Enforcement);
     assert_eq!(cfg.defaults.warn_after.as_std().as_secs(), 120);
     assert_eq!(cfg.defaults.kill_after.as_std().as_secs(), 240);
     assert_eq!(cfg.defaults.kill_grace_period.as_std().as_secs(), 30);
@@ -222,8 +222,8 @@ fn dashboard_prints_service_snapshot_from_synthetic_usage() {
     let state = tempdir().expect("state");
     let config_path = state.path().join("curb.yaml");
     write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 107);
-    let mut cfg = curb::config::Config::local_default(
-        curb::config::Mode::Visibility,
+    let mut cfg = curb_core::config::Config::local_default(
+        curb_core::config::Mode::Visibility,
         state.path().join("state"),
     );
     cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
@@ -248,8 +248,8 @@ fn dashboard_json_prints_snapshot_read_model() {
     let state = tempdir().expect("state");
     let config_path = state.path().join("curb.yaml");
     write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 107);
-    let cfg = curb::config::Config::local_default(
-        curb::config::Mode::Visibility,
+    let cfg = curb_core::config::Config::local_default(
+        curb_core::config::Mode::Visibility,
         state.path().join("state"),
     );
     cfg.save(&config_path).expect("save config");
@@ -270,8 +270,8 @@ fn dashboard_json_prints_snapshot_read_model() {
 fn doctor_checks_config_state_ledger_and_process_capture() {
     let state = tempdir().expect("state");
     let config_path = state.path().join("curb.yaml");
-    let cfg = curb::config::Config::local_default(
-        curb::config::Mode::Visibility,
+    let cfg = curb_core::config::Config::local_default(
+        curb_core::config::Mode::Visibility,
         state.path().join("state"),
     );
     cfg.save(&config_path).expect("save config");
@@ -287,8 +287,8 @@ fn doctor_checks_config_state_ledger_and_process_capture() {
         .stdout(predicate::str::contains("process_snapshot: ok"))
         .stdout(predicate::str::contains("notifications:"));
 
-    let events =
-        curb::ledger::read(state.path().join("state").join("runs.ndjson")).expect("ledger events");
+    let events = curb_core::ledger::read(state.path().join("state").join("runs.ndjson"))
+        .expect("ledger events");
     assert!(events.iter().any(|event| event.event_type == "doctor"));
 }
 
@@ -345,18 +345,18 @@ fn scan_reports_no_matches_for_unmatched_config() {
     let home = tempdir().expect("home");
     let state = tempdir().expect("state");
     let config_path = state.path().join("curb.yaml");
-    let mut cfg = curb::config::Config::local_default(
-        curb::config::Mode::Visibility,
+    let mut cfg = curb_core::config::Config::local_default(
+        curb_core::config::Mode::Visibility,
         state.path().join("state"),
     );
-    cfg.agents = vec![curb::config::Agent {
+    cfg.agents = vec![curb_core::config::Agent {
         id: "impossible-agent".to_string(),
         label: "Impossible Agent".to_string(),
         family: "test".to_string(),
-        kind: curb::config::AgentKind::Process,
-        matcher: curb::config::Match {
+        kind: curb_core::config::AgentKind::Process,
+        matcher: curb_core::config::Match {
             process_names: vec!["curb-test-process-that-does-not-exist".to_string()],
-            ..curb::config::Match::default()
+            ..curb_core::config::Match::default()
         },
         policy: None,
     }];
@@ -380,7 +380,7 @@ fn watch_once_runs_a_single_usage_policy_scan() {
     let home = tempdir().expect("home");
     let state = tempdir().expect("state");
     let config_path = state.path().join("curb.yaml");
-    let mut cfg = curb::config::Config::load("configs/curb.example.yaml").expect("config");
+    let mut cfg = curb_core::config::Config::load("configs/curb.example.yaml").expect("config");
     cfg.service.state_dir = state.path().join("state");
     cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
     cfg.save(&config_path).expect("save config");
@@ -467,8 +467,8 @@ fn ack_acknowledges_usage_session_and_records_ledger_event() {
         .stdout(predicate::str::contains("extended: 30s"))
         .stdout(predicate::str::contains("reason: still watching"));
 
-    let events =
-        curb::ledger::read(state.path().join("state").join("runs.ndjson")).expect("ledger events");
+    let events = curb_core::ledger::read(state.path().join("state").join("runs.ndjson"))
+        .expect("ledger events");
     assert!(events.iter().any(|event| {
         event.event_type == "session_ack_received"
             && event.message.as_deref() == Some("still watching")
@@ -492,14 +492,16 @@ fn write_synthetic_codex_usage(home: &std::path::Path, session: &str, cwd: &str,
 
 fn warning_config(root: &std::path::Path) -> std::path::PathBuf {
     let config_path = root.join("curb.yaml");
-    let mut cfg =
-        curb::config::Config::local_default(curb::config::Mode::Alert, root.join("state"));
+    let mut cfg = curb_core::config::Config::local_default(
+        curb_core::config::Mode::Alert,
+        root.join("state"),
+    );
     cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
     // Synthetic codex fixture spends 87 tokens/turn (uncached input + output +
     // reasoning), so warn below that and kill above it to land in the warn band.
     cfg.usage.warn_turn_tokens = 50;
     cfg.usage.kill_turn_tokens = 300;
-    cfg.defaults.ack_extension = curb::config::HumanDuration::seconds(60);
+    cfg.defaults.ack_extension = curb_core::config::HumanDuration::seconds(60);
     cfg.save(&config_path).expect("save config");
     config_path
 }

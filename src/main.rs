@@ -1,3 +1,15 @@
+//! Curb transport/presentation shell.
+//!
+//! This binary crate owns the HTTP API, the embedded web UI, the CLI, and the
+//! terminal dashboard. It is one consumer of `curb-core`; the engine never
+//! depends on anything here.
+
+mod api;
+mod cli;
+mod dashboard;
+mod http;
+mod web;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -5,7 +17,8 @@ use std::time::Duration as StdDuration;
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
-use curb::cli::{
+
+use crate::cli::{
     ack_command, config_command, config_set_command, dashboard_command, default_config_path,
     default_home_dir, doctor_command, init_config, install_binary, load_or_default_config,
     runs_command, scan_command, status_command,
@@ -232,7 +245,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::ValidateConfig { path }) => {
-            let cfg = curb::config::Config::load(&path)?;
+            let cfg = curb_core::config::Config::load(&path)?;
             println!(
                 "ok config={} mode={} agents={} ledger={}",
                 path.display(),
@@ -289,11 +302,11 @@ fn run() -> Result<()> {
             let since = if all {
                 None
             } else {
-                let duration =
-                    curb::config::parse_duration_for_cli(&since).map_err(anyhow::Error::msg)?;
+                let duration = curb_core::config::parse_duration_for_cli(&since)
+                    .map_err(anyhow::Error::msg)?;
                 Some(Utc::now() - Duration::from_std(duration)?)
             };
-            let report = curb::usage::Reader::new(home).report_since(since)?;
+            let report = curb_core::usage::Reader::new(home).report_since(since)?;
             if json {
                 serde_json::to_writer_pretty(std::io::stdout(), &report)?;
                 println!();
@@ -326,9 +339,10 @@ fn run() -> Result<()> {
             let home = home
                 .or_else(default_home_dir)
                 .context("home directory is required for usage log discovery")?;
-            let since = curb::config::parse_duration_for_cli(&since).map_err(anyhow::Error::msg)?;
+            let since =
+                curb_core::config::parse_duration_for_cli(&since).map_err(anyhow::Error::msg)?;
             let interval =
-                curb::config::parse_duration_for_cli(&interval).map_err(anyhow::Error::msg)?;
+                curb_core::config::parse_duration_for_cli(&interval).map_err(anyhow::Error::msg)?;
             tail_command(home, since, interval, once)?;
         }
         Some(Command::Status { config, home, json }) => {
@@ -425,8 +439,9 @@ fn watch_command(config: Option<PathBuf>, home: Option<PathBuf>, once: bool) -> 
         .or_else(default_home_dir)
         .context("home directory is required for usage log discovery")?;
     let interval = cfg.usage.scan_interval.as_std();
-    let runtime = curb::runtime::Runtime::new(cfg.clone(), home, curb::platform::SystemPlatform)
-        .with_config_path(config);
+    let runtime =
+        curb_core::runtime::Runtime::new(cfg.clone(), home, curb_core::platform::SystemPlatform)
+            .with_config_path(config);
     println!("curb watcher");
     println!("  mode: {}", cfg.mode);
     println!(
@@ -459,8 +474,8 @@ fn tail_command(
     interval: StdDuration,
     once: bool,
 ) -> Result<()> {
-    let reader = curb::usage::Reader::new(home);
-    let mut state = curb::tail::TailState::default();
+    let reader = curb_core::usage::Reader::new(home);
+    let mut state = curb_core::tail::TailState::default();
     println!("curb tail");
     if once {
         println!(
@@ -477,7 +492,8 @@ fn tail_command(
     loop {
         let now = Utc::now();
         let since_at = now - Duration::from_std(since)?;
-        let scan = curb::tail::scan_once(&reader, &mut state, std::io::stdout(), since_at, now)?;
+        let scan =
+            curb_core::tail::scan_once(&reader, &mut state, std::io::stdout(), since_at, now)?;
         if let Some(error) = scan.source_error {
             eprintln!("curb: tail: {error}");
         }
@@ -495,24 +511,24 @@ fn serve_dashboard(
     home: Option<PathBuf>,
     open_browser: bool,
 ) -> Result<()> {
-    if !curb::http::is_loopback_host(&addr) {
+    if !crate::http::is_loopback_host(&addr) {
         bail!("serve address must be loopback, got {addr:?}");
     }
-    let cfg = curb::config::Config::load(&config)?;
+    let cfg = curb_core::config::Config::load(&config)?;
     let (token, token_path) =
-        curb::api::load_or_create_token(&cfg.service.state_dir).map_err(anyhow::Error::msg)?;
+        crate::api::load_or_create_token(&cfg.service.state_dir).map_err(anyhow::Error::msg)?;
     let home = home
         .or_else(default_home_dir)
         .context("home directory is required for usage log discovery")?;
     let runtime = Arc::new(
-        curb::runtime::Runtime::new(cfg, home, curb::platform::SystemPlatform)
+        curb_core::runtime::Runtime::new(cfg, home, curb_core::platform::SystemPlatform)
             .with_config_path(config),
     );
     runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
     let _watcher = Arc::clone(&runtime).start_usage_watcher();
-    let mut server = curb::api::Server::new(token, runtime).map_err(anyhow::Error::msg)?;
+    let mut server = crate::api::Server::new(token, runtime).map_err(anyhow::Error::msg)?;
     server.serve_ui();
-    let listener = curb::http::bind_loopback(&addr).map_err(anyhow::Error::msg)?;
+    let listener = crate::http::bind_loopback(&addr).map_err(anyhow::Error::msg)?;
     let url = format!("http://{}/", listener.local_addr()?);
     println!("curb rust app");
     println!("  listening: {url}");
@@ -522,7 +538,7 @@ fn serve_dashboard(
     if open_browser && let Err(error) = open_dashboard(&url) {
         eprintln!("curb: could not open dashboard: {error}");
     }
-    curb::http::serve_blocking(listener, &server).map_err(anyhow::Error::msg)
+    crate::http::serve_blocking(listener, &server).map_err(anyhow::Error::msg)
 }
 
 fn open_dashboard(url: &str) -> Result<()> {

@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn acknowledge_session_persists_and_suppresses_actionability() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
         cfg.mode = crate::config::Mode::Enforcement;
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn stop_session_revalidates_identity_and_terminates_tree() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn stop_session_records_structured_termination_result_errors() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn stop_session_treats_process_capture_failure_as_stop_conflict() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn stop_session_rejects_stale_identity_without_terminating() {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = crate::config::Mode::Enforcement;
         cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
@@ -655,7 +655,7 @@ mod tests {
         let events = vec![event("codex", "s1", now, 250)];
         let root = process(now, 100, "codex", "/repo");
 
-        let mut alert_cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut alert_cfg = Config::load(crate::config::example_config_path()).unwrap();
         alert_cfg.mode = crate::config::Mode::Alert;
         alert_cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
         alert_cfg.ledger.path = alert_cfg.service.state_dir.join("runs.ndjson");

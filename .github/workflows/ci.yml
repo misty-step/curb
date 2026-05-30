@@ -50,7 +50,7 @@ jobs:
     name: coverage
     # Generates Rust line coverage and fails below a calibrated floor.
     # Baseline measured 2026-05-29 with cargo-llvm-cov 0.8.7 on the full suite
-    # (lib + bins + integration tests): TOTAL line coverage 86.37%.
+    # (curb-core lib + curb bin + integration tests): TOTAL line coverage 86.37%.
     # Floor = floor(86.37) - 2 = 84, a small margin so it passes on creation.
     #
     # THE FLOOR RATCHETS UP. As coverage rises, raise this number. NEVER lower it
@@ -75,12 +75,13 @@ jobs:
 
       - name: Generate coverage and enforce the floor
         # Prints the per-file + TOTAL summary to the job log and exits non-zero
-        # if TOTAL line coverage drops below the floor.
-        run: cargo llvm-cov --summary-only --fail-under-lines 84
+        # if TOTAL line coverage drops below the floor. --workspace covers both
+        # the curb binary and the curb-core library crate.
+        run: cargo llvm-cov --workspace --summary-only --fail-under-lines 84
 
       - name: Generate lcov report
         if: always()
-        run: cargo llvm-cov --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage artifact
         if: always()

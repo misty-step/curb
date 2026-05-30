@@ -7,12 +7,12 @@ use std::time::Duration as StdDuration;
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
-use crate::config::{Config, HumanDuration, Mode, Preset};
-use crate::ledger::{Event, Ledger};
-use crate::platform::SystemPlatform;
-use crate::platform::{NotificationCapability, PlatformError};
-use crate::runtime::Runtime;
-use crate::service::{AckRequest, SessionView};
+use curb_core::config::{Config, HumanDuration, Mode, Preset};
+use curb_core::ledger::{Event, Ledger};
+use curb_core::platform::SystemPlatform;
+use curb_core::platform::{NotificationCapability, PlatformError};
+use curb_core::runtime::Runtime;
+use curb_core::service::{AckRequest, SessionView};
 
 pub fn init_config(path: PathBuf, force: bool, mode: &str) -> Result<()> {
     let mode = Mode::from_str(mode).map_err(anyhow::Error::msg)?;
@@ -251,7 +251,7 @@ pub fn ack_command(
 ) -> Result<()> {
     let cfg = Config::load(&config_path)?;
     let runtime = Runtime::new(cfg, home, SystemPlatform).with_config_path(&config_path);
-    let extend_seconds = crate::config::parse_duration_for_cli(extend)
+    let extend_seconds = curb_core::config::parse_duration_for_cli(extend)
         .map_err(anyhow::Error::msg)?
         .as_secs() as i64;
     let ack = runtime
@@ -290,17 +290,17 @@ pub trait DoctorPlatform {
 
 impl DoctorPlatform for SystemPlatform {
     fn capture_processes(&self) -> Result<usize, PlatformError> {
-        Ok(<Self as crate::platform::Platform>::capture(self)?
+        Ok(<Self as curb_core::platform::Platform>::capture(self)?
             .processes()
             .count())
     }
 
     fn notification_capability(&self) -> NotificationCapability {
-        <Self as crate::platform::Platform>::notification_capability(self)
+        <Self as curb_core::platform::Platform>::notification_capability(self)
     }
 
     fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError> {
-        <Self as crate::platform::Platform>::notify(self, title, body)
+        <Self as curb_core::platform::Platform>::notify(self, title, body)
     }
 
     fn platform_name(&self) -> &'static str {
@@ -444,7 +444,7 @@ fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 
 fn next_duration(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<StdDuration> {
     let value = next_value(iter, flag)?;
-    crate::config::parse_duration_for_cli(&value).map_err(anyhow::Error::msg)
+    curb_core::config::parse_duration_for_cli(&value).map_err(anyhow::Error::msg)
 }
 
 fn next_bool(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<bool> {
@@ -496,11 +496,7 @@ pub fn default_config_path() -> PathBuf {
     user_config_path().unwrap_or_else(|| PathBuf::from("configs/curb.example.yaml"))
 }
 
-pub fn default_home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-}
+pub use curb_core::config::default_home_dir;
 
 fn print_config_summary(path: &Path, cfg: &Config) {
     println!("curb config");
@@ -733,7 +729,7 @@ mod tests {
 
         doctor_with_platform(config_path, true, &platform).unwrap();
 
-        let events = crate::ledger::read(dir.path().join("state").join("runs.ndjson")).unwrap();
+        let events = curb_core::ledger::read(dir.path().join("state").join("runs.ndjson")).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "doctor");
         assert_eq!(events[0].mode.as_deref(), Some("alert"));

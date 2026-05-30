@@ -1,0 +1,29 @@
+[package]
+name = "curb-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Environment-agnostic governor core for Curb: config, observation, policy, and enforcement"
+
+[lib]
+name = "curb_core"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { version = "0.4.42", features = ["serde"] }
+hex = "0.4.3"
+regex = "1.12.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.148", features = ["preserve_order"] }
+serde_yaml = "0.9.34"
+sha2 = "0.10.9"
+sysinfo = "0.37.2"
+thiserror = "2.0.17"
+url = "2.5.8"
+
+[dev-dependencies]
+proptest = "1.11.0"
+tempfile = "3.24.0"
+
+[lints]
+workspace = true

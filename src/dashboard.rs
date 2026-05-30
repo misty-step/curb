@@ -3,8 +3,8 @@ use std::path::Path;
 
 use chrono::Local;
 
-use crate::config::Config;
-use crate::service::{SessionView, Snapshot};
+use curb_core::config::Config;
+use curb_core::service::{SessionView, Snapshot};
 
 /// Render the terminal dashboard: one status line, one row per agent showing a
 /// spend bar against the warn and kill lines, and a quiet footer.

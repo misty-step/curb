@@ -21,12 +21,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use curb::config::{Agent, AgentKind, Config, HumanDuration, Match, Mode};
-use curb::ledger;
-use curb::local_enforcer::{self, LocalEnforcer};
-use curb::platform::{Pid, Platform, Process, Snapshot, SystemPlatform};
-use curb::usage::{Event as UsageEvent, EventKind};
-use curb::usagewatch::UsageWatch;
+use curb_core::config::{Agent, AgentKind, Config, HumanDuration, Match, Mode};
+use curb_core::ledger;
+use curb_core::local_enforcer::{self, LocalEnforcer};
+use curb_core::platform::{Pid, Platform, Process, Snapshot, SystemPlatform};
+use curb_core::usage::{Event as UsageEvent, EventKind};
+use curb_core::usagewatch::UsageWatch;
 use tempfile::TempDir;
 
 /// Monotonic disambiguator so concurrently-running tests in the same binary

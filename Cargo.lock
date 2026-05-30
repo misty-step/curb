@@ -253,9 +253,23 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "curb-core",
  "getrandom 0.4.2",
  "hex",
  "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "curb-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
  "proptest",
  "regex",
  "serde",

@@ -133,7 +133,7 @@ fn short_session_id(id: &str) -> String {
 
 fn compact_home(path: &Path) -> String {
     let rendered = path.display().to_string();
-    if let Some(home) = crate::cli::default_home_dir() {
+    if let Some(home) = crate::config::default_home_dir() {
         let home = home.display().to_string();
         if let Some(rest) = rendered.strip_prefix(&home) {
             return format!("~{rest}");

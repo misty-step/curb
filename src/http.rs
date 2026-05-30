@@ -170,11 +170,11 @@ mod tests {
 
     use super::*;
     use crate::api::{ApiError, Backend, Server};
-    use crate::onboarding::{
+    use curb_core::onboarding::{
         CapabilityView, NotificationView, OnboardingView, PlatformCapabilities,
     };
-    use crate::runtime::TurnQuery;
-    use crate::service::{
+    use curb_core::runtime::TurnQuery;
+    use curb_core::service::{
         AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, Overview, SessionView,
         Snapshot, StopRequest, StopView, TurnView,
     };

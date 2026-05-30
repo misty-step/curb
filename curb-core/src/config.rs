@@ -954,6 +954,17 @@ fn format_duration(duration: StdDuration) -> String {
     }
 }
 
+/// The user's home directory, derived from the environment.
+///
+/// Prefers `HOME` (Unix) and falls back to `USERPROFILE` (Windows). Returns
+/// `None` when neither is set. Used by path-compaction rendering and by the
+/// binary's CLI to resolve default config/state locations.
+pub fn default_home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
 fn default_state_dir() -> PathBuf {
     if let Ok(xdg) = env::var("XDG_STATE_HOME") {
         return PathBuf::from(xdg).join("curb");
@@ -1035,13 +1046,24 @@ fn default_process_agents() -> Vec<Agent> {
     ]
 }
 
+/// Absolute path to the committed example config, used by unit tests across the
+/// crate. Resolved relative to the workspace root (one level above this crate's
+/// manifest dir) so tests pass regardless of the harness working directory.
+#[cfg(test)]
+pub(crate) fn example_config_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("configs")
+        .join("curb.example.yaml")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn loads_example_config_with_defaults() {
-        let cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let cfg = Config::load(example_config_path()).unwrap();
 
         assert_eq!(cfg.version, 1);
         assert_eq!(cfg.mode, Mode::Visibility);
@@ -1055,7 +1077,7 @@ mod tests {
     fn save_round_trips_yaml_with_lowercase_enums() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("curb.yaml");
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(example_config_path()).unwrap();
         cfg.mode = Mode::Enforcement;
         cfg.usage.warn_turn_tokens = 2_000;
         cfg.usage.kill_turn_tokens = 4_000;
@@ -1133,7 +1155,7 @@ mod tests {
     fn save_validates_before_replacing_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("curb.yaml");
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(example_config_path()).unwrap();
         cfg.save(&path).unwrap();
         let original = std::fs::read(&path).unwrap();
         cfg.usage.warn_turn_tokens = cfg.usage.kill_turn_tokens + 1;

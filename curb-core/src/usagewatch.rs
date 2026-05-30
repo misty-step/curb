@@ -573,7 +573,7 @@ mod tests {
     }
 
     fn enforcement_cfg(state: &std::path::Path) -> Config {
-        let mut cfg = Config::load("configs/curb.example.yaml").unwrap();
+        let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
         cfg.mode = Mode::Enforcement;
         cfg.usage.warn_turn_tokens = 100;
         cfg.usage.kill_turn_tokens = 200;
