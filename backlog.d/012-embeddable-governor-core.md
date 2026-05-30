@@ -21,6 +21,22 @@ Phased; each phase is independently shippable.
 - [ ] **Phase 2 — Generalize identity & observation.** `Snapshot`/`Process` sit behind an identity abstraction so an agent need not have a local PID; an `AgentKind`/matcher path exists for logically-defined agents. A test governs a synthetic non-OS agent (no real PID) through warn→stop via a fake observation source + enforcer, with the safety seal satisfied by environment-appropriate identity evidence.
 - [ ] **Phase 3 — Governor API + reference adapter.** A stable trait surface (`ObservationSource`, `Enforcer`, policy `Engine`) is documented; an example adapter governs an arbitrarily-defined agent end to end. The local-OS path still passes every existing test.
 
+## Status (2026-05-30)
+- **Phases 0 & 1: LANDED** (commits `cac9ea4`, `983ad36`) — the watcher is a pure
+  environment-agnostic policy module, now in an embeddable `curb-core` crate
+  (the bin depends on core, never the reverse). CI green.
+- **Phases 2 & 3: DEFERRED, pending concrete Olympus requirements.** A
+  fresh-context review found Phase 2's oracle is already met by Phase 0: the
+  policy governs synthetic non-OS `AgentTarget`s today (the 11 `usagewatch`
+  tests use `FakeEnforcer`/`FakeToken`, no real PID, with seal revalidation).
+  An `ObservationSource`/governor-API trait now would be a speculative
+  pass-through with no real second consumer — against "no speculative
+  abstractions." Unblock when Olympus provides ONE of: (a) a real non-local
+  observation adapter (k8s/remote/container) to generalize toward; (b) the
+  logical-identity revalidation contract a remote `StopToken` must satisfy; or
+  (c) the governor call shape (who drives the tick loop, sync/async, required
+  observed-session fields). Re-`/shape` Phases 2–3 into concrete tickets then.
+
 ## Notes
 **Why (user direction):** fold Curb into Olympus as a governor for arbitrarily-defined agents in arbitrary environments. The user correctly intuited the prerequisite: properly decouple the engine/enforcement/watcher from the UI/UX.
 
