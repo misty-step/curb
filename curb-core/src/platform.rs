@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use sysinfo::{ProcessRefreshKind, RefreshKind, System, UpdateKind, Users};
+use sysinfo::{ProcessRefreshKind, ProcessStatus, RefreshKind, System, UpdateKind, Users};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -404,7 +404,9 @@ fn pid_alive(pid: i32) -> bool {
     let system = System::new_with_specifics(
         RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
     );
-    system.process(pid).is_some()
+    system
+        .process(pid)
+        .is_some_and(|process| is_live_process_status(process.status()))
 }
 
 fn notification_capability_for(os: &str, exists: impl Fn(&str) -> bool) -> NotificationCapability {
@@ -518,6 +520,9 @@ fn apple_script_string(value: &str) -> String {
 }
 
 fn observed_process(process: &sysinfo::Process, users: &Users) -> Option<Process> {
+    if !is_live_process_status(process.status()) {
+        return None;
+    }
     let pid = convert_pid(process.pid())?;
     let ppid = process.parent().and_then(convert_pid);
     let name = process.name().to_string_lossy().into_owned();
@@ -552,6 +557,10 @@ fn observed_process(process: &sysinfo::Process, users: &Users) -> Option<Process
     } else {
         Some(out)
     }
+}
+
+fn is_live_process_status(status: ProcessStatus) -> bool {
+    !matches!(status, ProcessStatus::Zombie | ProcessStatus::Dead)
 }
 
 fn convert_pid(pid: sysinfo::Pid) -> Option<Pid> {
@@ -795,6 +804,14 @@ mod tests {
                     .to_string()
             ]
         );
+    }
+
+    #[test]
+    fn process_liveness_excludes_exited_unreaped_statuses() {
+        assert!(!is_live_process_status(ProcessStatus::Zombie));
+        assert!(!is_live_process_status(ProcessStatus::Dead));
+        assert!(is_live_process_status(ProcessStatus::Run));
+        assert!(is_live_process_status(ProcessStatus::Sleep));
     }
 
     #[cfg(unix)]
