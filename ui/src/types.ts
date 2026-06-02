@@ -27,6 +27,30 @@ export interface PlatformCapabilities {
   enforcement: CapabilityView;
 }
 
+export interface OnboardingStepView {
+  id: string;
+  label: string;
+  status: string;
+  message: string;
+}
+
+export interface OnboardingView {
+  required: boolean;
+  config_path?: string;
+  mode: string;
+  action: string;
+  mode_can_terminate: boolean;
+  detected_providers: string[];
+  detected_workers: string[];
+  enforceable_agent_types: number;
+  watch_only_agent_types: number;
+  notifications: NotificationView;
+  capabilities: PlatformCapabilities;
+  sources: SourceHealth[];
+  final_sentence: string;
+  steps: OnboardingStepView[];
+}
+
 export interface OverviewDelta {
   new_sessions: number;
   sessions_with_new_turns: number;
@@ -93,13 +117,22 @@ export interface AgentView {
 }
 
 export interface TurnView {
+  id?: string;
+  request_id?: string;
   session_key?: string;
   session_id?: string;
   provider: string;
   at?: string;
   model?: string;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  reasoning_output_tokens: number;
   total_tokens: number;
   spent_tokens: number;
+  cumulative_tokens: number;
+  source: string;
 }
 
 export interface Snapshot {

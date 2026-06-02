@@ -327,8 +327,9 @@ fn hard_terminate(pid: i32) -> Result<(), String> {
 
 #[cfg(unix)]
 fn signal_with_kill(signal: &str, pid: i32) -> Result<(), String> {
-    let status = Command::new("kill")
-        .args([signal, &pid.to_string()])
+    let spec = unix_signal_command(signal, pid);
+    let status = Command::new(&spec.program)
+        .args(&spec.args)
         .status()
         .map_err(|source| source.to_string())?;
     if status.success() {
@@ -338,10 +339,19 @@ fn signal_with_kill(signal: &str, pid: i32) -> Result<(), String> {
     }
 }
 
+#[cfg(unix)]
+fn unix_signal_command(signal: &str, pid: i32) -> CommandSpec {
+    CommandSpec {
+        program: "/bin/kill".to_string(),
+        args: vec![signal.to_string(), pid.to_string()],
+    }
+}
+
 #[cfg(windows)]
 fn soft_terminate(pid: i32) -> Result<(), String> {
-    let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T"])
+    let spec = windows_taskkill_command(pid, false);
+    let status = Command::new(&spec.program)
+        .args(&spec.args)
         .status()
         .map_err(|source| source.to_string())?;
     if status.success() {
@@ -353,14 +363,27 @@ fn soft_terminate(pid: i32) -> Result<(), String> {
 
 #[cfg(windows)]
 fn hard_terminate(pid: i32) -> Result<(), String> {
-    let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+    let spec = windows_taskkill_command(pid, true);
+    let status = Command::new(&spec.program)
+        .args(&spec.args)
         .status()
         .map_err(|source| source.to_string())?;
     if status.success() {
         Ok(())
     } else {
         Err(format!("taskkill /PID {pid} /T /F exited with {status}"))
+    }
+}
+
+#[cfg(windows)]
+fn windows_taskkill_command(pid: i32, force: bool) -> CommandSpec {
+    let mut args = vec!["/PID".to_string(), pid.to_string(), "/T".to_string()];
+    if force {
+        args.push("/F".to_string());
+    }
+    CommandSpec {
+        program: r"C:\Windows\System32\taskkill.exe".to_string(),
+        args,
     }
 }
 
@@ -772,6 +795,27 @@ mod tests {
                     .to_string()
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_termination_command_uses_absolute_kill_path() {
+        let spec = unix_signal_command("-TERM", 42);
+
+        assert_eq!(spec.program, "/bin/kill");
+        assert_eq!(spec.args, vec!["-TERM", "42"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_termination_command_uses_absolute_taskkill_path() {
+        let soft = windows_taskkill_command(42, false);
+        assert_eq!(soft.program, r"C:\Windows\System32\taskkill.exe");
+        assert_eq!(soft.args, vec!["/PID", "42", "/T"]);
+
+        let hard = windows_taskkill_command(42, true);
+        assert_eq!(hard.program, r"C:\Windows\System32\taskkill.exe");
+        assert_eq!(hard.args, vec!["/PID", "42", "/T", "/F"]);
     }
 
     fn process(pid: i32, ppid: Option<Pid>) -> Process {

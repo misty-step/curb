@@ -27,13 +27,13 @@ Curb reads token usage for the agents that expose per-turn metadata locally:
 
 - **Codex** — `~/.codex/sessions` (live) and `~/.codex/archived_sessions`.
 - **Claude Code** — `~/.claude/projects`.
+- **Pi** — `~/.pi/agent/sessions`.
 
-Ingestion is modular: each agent is one `Provider` in `providers()` in
-`src/usage.rs` (log roots + a file parser that emits token checkpoints and
-user-input boundaries). Adding the GrokBuild CLI, Antigravity CLI, Pi, or
-OpenCode is a localized change — the scan loop, cache, dedupe, policy engine,
-and dashboard are provider-agnostic. An agent with no local token ledger (for
-example an editor-embedded one) cannot be metered until such a source exists.
+Provider expansion starts from source evidence, not brand names. OpenCode,
+Antigravity CLI, and GrokBuild are researched in
+[docs/provider-adapter-research.md](docs/provider-adapter-research.md), but they
+are not usage-metered until a provider-specific metadata parser ships. An agent
+with no local token ledger cannot be metered until such a source exists.
 
 Turn spend counts fresh work only: uncached input + cache-creation + output +
 reasoning. Cached/re-read context is excluded for both providers, so a turn's
@@ -129,19 +129,20 @@ kill lines, with idle agents folded into a count. It is built on a token-based
 design system and follows the OS light/dark theme.
 
 `curb watch` runs the policy loop. Each scan rebuilds per-session turn spend
-from the provider logs (Codex `user_message` events and Claude typed-input rows
-mark turn boundaries), excludes cached/read context from spend, and compares the
-current turn against your warn and kill lines. In enforce mode it stops only a
-correlated live worker, after grace, and only after revalidating process
-identity (PID, start time, owner, executable). It never stops a watch-only
-desktop app root.
+from the provider logs (Codex `user_message` events, Claude typed-input rows,
+and Pi user message entries mark turn boundaries), excludes cached/read context
+from spend, and compares the current turn against your warn and kill lines. In
+enforce mode it stops only a correlated live worker, after grace, and only after
+revalidating process identity (PID, start time, owner, executable). It never
+stops a watch-only desktop app root.
 
 The generated default config watches agent worker processes such as Codex
-Desktop workers, Codex CLI, Claude Code, and Anti-Gravity's `agy` CLI. Desktop
+Desktop workers, Codex CLI, Claude Code, and Anti-Gravity's `agy` CLI. Process
+visibility is separate from usage metering: the Antigravity matcher can show a
+live `agy` process, but Curb does not read Antigravity token usage yet. Desktop
 applications such as Codex Desktop and Claude Desktop are not enforcement
 targets; Curb will not terminate the app root.
 
 Curb creates a durable local `machine_id` in the configured state directory and
-adds it to service-owned ledger events. The ledger is local by default. Optional
-HTTP(S) forwarding can export the same metadata-only ledger events, but remote
-systems do not make kill decisions.
+adds it to service-owned ledger events. The ledger is local-only in the launch
+surface; remote collectors are not configured or used for kill decisions.

@@ -10,6 +10,7 @@
 node_modules/
 dist/
 target/
+src-tauri/gen/
 !web/dist/
 !web/dist/**
 artifacts/qa/

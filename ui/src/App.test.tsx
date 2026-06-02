@@ -14,6 +14,11 @@ interface RequestRecord {
   body: string;
 }
 
+interface FetchRoute {
+  match: (url: string) => boolean;
+  response: () => Response;
+}
+
 let root: Root | undefined;
 
 beforeEach(() => {
@@ -88,30 +93,119 @@ describe("Curb dashboard", () => {
 
     expect(requests.some((request) => request.url.includes("/ack") && request.method === "POST")).toBe(true);
   });
+
+  it("opens a selected-session cockpit with turn timeline, evidence, and readiness", async () => {
+    const requests = installFetch(demoSnapshot);
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const head = Array.from(document.querySelectorAll("button.row-head")).find((button) =>
+      button.textContent?.includes("olympus"),
+    );
+    expect(head).toBeTruthy();
+    await actRender(null, () => (head as HTMLButtonElement).click());
+
+    const page = document.body.textContent ?? "";
+    expect(page).toContain("Readiness");
+    expect(page).toContain("First run");
+    expect(page).toContain("identity evidence available");
+    expect(page).toContain("Turn timeline");
+    expect(page).toContain("gpt-5.5");
+    expect(page).toContain("Input 1.2M");
+    expect(page).toContain("Cached 180k");
+    expect(page).toContain("Reasoning 90k");
+    expect(page).toContain("Source codex usage log");
+    expect(page).toContain("PID 7731");
+    expect(page).toContain("Start-time seal");
+    expect(page).toContain("Executable /Applications/Codex.app/Contents/Resources/codex");
+    expect(page).toContain("Stop Unavailable");
+    expect(page).toContain("watch-only");
+    expect(requests.some((request) => request.url.includes("/v1/onboarding"))).toBe(true);
+    expect(requests.some((request) => request.url.includes("/v1/sessions/codex%3Aolympus"))).toBe(true);
+    expect(requests.some((request) => request.url.includes("/v1/sessions/codex%3Aolympus/turns"))).toBe(true);
+  });
 });
 
 function installFetch(snapshot: Snapshot): RequestRecord[] {
   const requests: RequestRecord[] = [];
+  const routes = fetchRoutes(snapshot);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, method: init?.method ?? "GET", body: String(init?.body ?? "") });
-      if (url.includes("/v1/snapshot") || url.includes("/v1/service/rescan")) return jsonResponse(snapshot);
-      if (url.includes("/v1/config")) return jsonResponse(demoConfig);
-      if (url.includes("/v1/notifications")) {
-        return jsonResponse({ enabled: true, available: true, status: "ready", message: "ready" });
-      }
-      if (url.includes("/ack")) {
-        return jsonResponse({ session_key: snapshot.sessions[0].key, extend_seconds: 1800, until: "2026-05-29T18:00:00Z" });
-      }
-      if (url.includes("/stop")) {
-        return jsonResponse({ session_key: snapshot.sessions[0].key, pid: 4242, scope_pids: [4242], result: {} });
-      }
-      return new Response("not found", { status: 404 });
+      return routes.find((route) => route.match(url))?.response() ?? new Response("not found", { status: 404 });
     }),
   );
   return requests;
+}
+
+function fetchRoutes(snapshot: Snapshot): FetchRoute[] {
+  return [
+    { match: (url) => url.includes("/v1/snapshot") || url.includes("/v1/service/rescan"), response: () => jsonResponse(snapshot) },
+    { match: (url) => url.includes("/v1/config"), response: () => jsonResponse(demoConfig) },
+    { match: (url) => url.includes("/v1/onboarding"), response: () => jsonResponse(onboardingFixture(snapshot)) },
+    { match: (url) => url.includes("/v1/notifications"), response: () => jsonResponse(notificationFixture()) },
+    { match: (url) => url.includes("/v1/sessions/") && url.includes("/turns"), response: () => jsonResponse(turnFixtures()) },
+    { match: (url) => url.includes("/v1/sessions/"), response: () => jsonResponse(snapshot.sessions[0]) },
+    { match: (url) => url.includes("/ack"), response: () => jsonResponse(ackFixture(snapshot)) },
+    { match: (url) => url.includes("/stop"), response: () => jsonResponse(stopFixture(snapshot)) },
+  ];
+}
+
+function onboardingFixture(snapshot: Snapshot) {
+  return {
+    required: true,
+    config_path: "/tmp/curb/config.yaml",
+    mode: "alert",
+    action: "notify only; never kill",
+    mode_can_terminate: false,
+    detected_providers: ["codex"],
+    detected_workers: ["Codex Worker"],
+    enforceable_agent_types: 1,
+    watch_only_agent_types: 1,
+    notifications: { enabled: true, available: true, status: "ready", message: "notifications ready" },
+    capabilities: snapshot.overview.capabilities,
+    sources: snapshot.overview.sources,
+    final_sentence: "Curb will notify on high-token turns.",
+    steps: [],
+  };
+}
+
+function notificationFixture() {
+  return { enabled: true, available: true, status: "ready", message: "ready" };
+}
+
+function turnFixtures() {
+  return [
+    {
+      id: "turn-42",
+      request_id: "req-42",
+      session_key: "codex:olympus",
+      session_id: "olympus",
+      provider: "codex",
+      at: "2026-05-29T17:00:00Z",
+      model: "gpt-5.5",
+      input_tokens: 1_200_000,
+      cached_input_tokens: 180_000,
+      cache_creation_input_tokens: 25_000,
+      output_tokens: 240_000,
+      reasoning_output_tokens: 90_000,
+      total_tokens: 1_555_000,
+      spent_tokens: 1_375_000,
+      cumulative_tokens: 3_300_000,
+      source: "codex usage log",
+    },
+  ];
+}
+
+function ackFixture(snapshot: Snapshot) {
+  return { session_key: snapshot.sessions[0].key, extend_seconds: 1800, until: "2026-05-29T18:00:00Z" };
+}
+
+function stopFixture(snapshot: Snapshot) {
+  return { session_key: snapshot.sessions[0].key, pid: 4242, scope_pids: [4242], result: {} };
 }
 
 async function actRender(element: React.ReactElement | null, action?: () => void) {

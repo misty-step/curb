@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { demoSnapshot } from "./demo";
-import { compareSessions, fillRatio, isActive, selectDashboard, warnRatio } from "./readModel";
-import type { SessionView } from "./types";
+import {
+  compareSessions,
+  fillRatio,
+  isActive,
+  selectDashboard,
+  selectReadiness,
+  selectSessionExplanation,
+  warnRatio,
+} from "./readModel";
+import type { NotificationView, OnboardingView, SessionView, TurnView } from "./types";
 
 function session(overrides: Partial<SessionView>): SessionView {
   return {
@@ -70,3 +78,135 @@ describe("bar ratios", () => {
     expect(fillRatio(100, 0)).toBe(0);
   });
 });
+
+describe("selectSessionExplanation", () => {
+  it("builds selected-session evidence and a per-turn token timeline", () => {
+    const selected = selectSessionExplanation(
+      session({
+        alert: "kill",
+        can_stop: false,
+        can_acknowledge: true,
+        pid: 4242,
+        process_started_at: "2026-05-29T16:00:00Z",
+        owner: "phaedrus",
+        executable: "/usr/local/bin/codex",
+        bundle_id: "com.openai.codex",
+        team_id: "OPENAI",
+        explanation: "Over kill, but this is watch-only.",
+      }),
+      [
+        turn({
+          id: "turn-2",
+          request_id: "req-2",
+          model: "gpt-5.5",
+          input_tokens: 100,
+          cached_input_tokens: 25,
+          cache_creation_input_tokens: 5,
+          output_tokens: 40,
+          reasoning_output_tokens: 10,
+          total_tokens: 180,
+          spent_tokens: 150,
+          cumulative_tokens: 330,
+          source: "codex usage log",
+        }),
+      ],
+    );
+
+    expect(selected?.actionEvidence).toContainEqual({ label: "Stop", value: "Unavailable: Over kill, but this is watch-only." });
+    expect(selected?.correlationEvidence.map((entry) => entry.label)).toEqual([
+      "PID",
+      "Start-time seal",
+      "Owner",
+      "Executable",
+      "Bundle",
+      "Team",
+    ]);
+    expect(selected?.turns[0]).toMatchObject({
+      label: "turn-2",
+      model: "gpt-5.5",
+      source: "codex usage log",
+      inputTokens: 100,
+      cachedInputTokens: 25,
+      cacheCreationTokens: 5,
+      outputTokens: 40,
+      reasoningTokens: 10,
+      totalTokens: 180,
+      spentTokens: 150,
+      cumulativeTokens: 330,
+    });
+  });
+});
+
+describe("selectReadiness", () => {
+  it("surfaces first-run, notification, and platform capability state", () => {
+    const model = selectReadiness(onboarding(true), notification(false), onboarding(true).capabilities);
+
+    expect(model.attention).toBe(true);
+    expect(model.summary).toBe("Setup needs attention");
+    expect(model.items.map((item) => item.label)).toEqual([
+      "First run",
+      "Notifications",
+      "Process capture",
+      "Identity",
+      "Enforcement",
+    ]);
+    expect(model.items[0]).toMatchObject({ status: "required", message: "Curb will notify on high-token turns." });
+    expect(model.items[1]).toMatchObject({ status: "disabled", message: "notifications disabled" });
+  });
+});
+
+function turn(overrides: Partial<TurnView>): TurnView {
+  return {
+    id: "turn-1",
+    request_id: "req-1",
+    session_key: "k",
+    session_id: "k",
+    provider: "codex",
+    at: "2026-05-29T17:00:00Z",
+    model: "model",
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    reasoning_output_tokens: 0,
+    total_tokens: 0,
+    spent_tokens: 0,
+    cumulative_tokens: 0,
+    source: "test",
+    ...overrides,
+  };
+}
+
+function onboarding(required: boolean): OnboardingView {
+  return {
+    required,
+    config_path: "/tmp/curb/config.yaml",
+    mode: "alert",
+    action: "notify only; never kill",
+    mode_can_terminate: false,
+    detected_providers: ["codex"],
+    detected_workers: ["Codex Worker"],
+    enforceable_agent_types: 1,
+    watch_only_agent_types: 1,
+    notifications: notification(true),
+    capabilities: {
+      platform: "test",
+      notifications: { available: true, status: "ready", message: "notifications ready" },
+      process_capture: { available: true, status: "ready", message: "process capture available" },
+      process_identity: { available: true, status: "ready", message: "identity evidence available" },
+      enforcement: { available: false, status: "disabled", message: "current mode never terminates processes" },
+    },
+    sources: [],
+    final_sentence: "Curb will notify on high-token turns.",
+    steps: [],
+  };
+}
+
+function notification(available: boolean): NotificationView {
+  return {
+    enabled: available,
+    available,
+    status: available ? "ready" : "disabled",
+    message: available ? "notifications ready" : "notifications disabled",
+  };
+}

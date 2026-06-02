@@ -1,7 +1,7 @@
 import { CircleDot, OctagonX, ShieldCheck, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { commas, numberValue, relativeTime, tokens } from "../format";
-import { fillRatio, warnRatio } from "../readModel";
+import { fillRatio, type SelectedSessionExplanation, warnRatio } from "../readModel";
 import {
   type ConfigUpdate,
   type ConfigView,
@@ -12,6 +12,7 @@ import {
   modeFromConfig,
   modeToConfig,
 } from "../types";
+import { SelectedSessionPanel } from "./sessionPanels";
 
 export function StatusPill({ status }: { status: Status }): ReactNode {
   const icon = status === "ACTION" ? <OctagonX size={14} /> : status === "WATCH" ? <TriangleAlert size={14} /> : <ShieldCheck size={14} />;
@@ -26,6 +27,7 @@ export function StatusPill({ status }: { status: Status }): ReactNode {
 export function providerLabel(provider: string): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
+  if (provider === "pi") return "Pi";
   if (provider === "antigravity") return "Antigravity";
   return provider;
 }
@@ -74,9 +76,10 @@ interface RowProps {
   onAck: (session: SessionView) => void;
   onStop: (session: SessionView) => void;
   busy: string;
+  detail: SelectedSessionExplanation | undefined;
 }
 
-function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy }: RowProps): ReactNode {
+function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy, detail }: RowProps): ReactNode {
   return (
     <div className={`row row-${tone(session)} ${selected ? "row-open" : ""}`}>
       <button type="button" className="row-head" onClick={() => onSelect(selected ? "" : session.key)}>
@@ -105,6 +108,7 @@ function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy }: 
             {session.models.length ? <Fact label="Model" value={session.models.join(", ")} /> : null}
             {session.pid ? <Fact label="Worker" value={`pid ${session.pid}`} /> : null}
           </dl>
+          {detail ? <SelectedSessionPanel detail={detail} /> : <p className="row-busy">Loading session detail…</p>}
           {session.cwd ? <p className="row-cwd">{session.cwd}</p> : null}
           <div className="row-actions">
             {session.can_acknowledge ? (
@@ -144,10 +148,11 @@ interface AgentListProps {
   onStop: (session: SessionView) => void;
   busyKey: string;
   busyMessage: string;
+  selectedDetail: SelectedSessionExplanation | undefined;
 }
 
 export function AgentList(props: AgentListProps): ReactNode {
-  const { active, idle, config, selectedKey, onSelect, onAck, onStop, busyKey, busyMessage } = props;
+  const { active, idle, config, selectedKey, onSelect, onAck, onStop, busyKey, busyMessage, selectedDetail } = props;
   return (
     <section className="agents">
       {active.length === 0 ? (
@@ -163,6 +168,7 @@ export function AgentList(props: AgentListProps): ReactNode {
             onAck={onAck}
             onStop={onStop}
             busy={session.key === busyKey ? busyMessage : ""}
+            detail={session.key === selectedKey ? selectedDetail : undefined}
           />
         ))
       )}

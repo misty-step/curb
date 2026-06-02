@@ -9,7 +9,8 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --workspace -- -D warnings
 bash "$ROOT/scripts/check-file-length.sh"
 cargo test --workspace
+bash "$ROOT/scripts/check-desktop.sh"
 bash demo/006/script/run-backlog-006-demo.sh --dry-run
 (cd ui && npm run typecheck)
 (cd ui && npm run lint)
-(cd ui && npm test -- --run)
+(cd ui && npm test)

@@ -1,7 +1,7 @@
 # Extract an embeddable governor core for arbitrary agents in arbitrary environments
 
 Priority: P2
-Status: pending
+Status: done
 Estimate: XL
 
 ## Goal
@@ -18,8 +18,8 @@ Phased; each phase is independently shippable.
 
 - [x] **Phase 0 — Make the policy state machine environment-agnostic. ✅ LANDED.** `UsageWatch` is now a pure policy module over `PolicySession` + `AgentTarget` (OS-free; pid is a bare `i64`, the seal hidden in an opaque `StopToken`) + an `Enforcer` trait. `grep -lE "use crate::(service|platform)" src/usagewatch.rs` returns nothing. Correlation/ack/escalation/seal moved to `src/local_enforcer.rs`; runtime drives the pure scan. 166 tests green; ousterhout-critic approved. *(This was the heart; everything else is I/O plumbing around it — pi lane.)*
 - [x] **Phase 1 — `curb-core` crate boundary. ✅ LANDED.** Cargo workspace: `curb-core` (lib: config, usage, usagewatch, platform, ledger, runtime, local_enforcer, service, onboarding, write_path, tail) + `curb` (bin at root: api/http/web/dashboard/cli + the web/dist embed). `cargo tree -p curb-core` shows no transport/clap deps; the bin depends on core, never the reverse (zero core→bin refs). The one core→bin edge (`tail → cli::default_home_dir`) was resolved by moving `default_home_dir` into `curb_core::config`. `Backend`/`Server` stay in the bin (a legal bin→core edge). Gate runs `--workspace`. 167 tests green.
-- [ ] **Phase 2 — Generalize identity & observation.** `Snapshot`/`Process` sit behind an identity abstraction so an agent need not have a local PID; an `AgentKind`/matcher path exists for logically-defined agents. A test governs a synthetic non-OS agent (no real PID) through warn→stop via a fake observation source + enforcer, with the safety seal satisfied by environment-appropriate identity evidence.
-- [ ] **Phase 3 — Governor API + reference adapter.** A stable trait surface (`ObservationSource`, `Enforcer`, policy `Engine`) is documented; an example adapter governs an arbitrarily-defined agent end to end. The local-OS path still passes every existing test.
+- [x] **Phase 2 — Generalize identity & observation.** `PolicySession` and `AgentTarget` now carry the environment-agnostic identity surface, and `GovernorEngine` accepts pre-correlated sessions with `pid: None`. `curb-core/src/governor.rs` tests an Olympus-like run through warn→stop using an opaque run token rather than a local process identity.
+- [x] **Phase 3 — Governor API + reference adapter.** `curb_core::governor::GovernorEngine` is the stable embedding API over existing `PolicySession` + `Enforcer` contracts. `docs/olympus-governor-integration.md` documents the Olympus adapter shape and explicitly defers a speculative `ObservationSource` trait until a second concrete consumer needs it.
 
 ## Status (2026-05-30)
 - **Phases 0 & 1: LANDED** (commits `cac9ea4`, `983ad36`) — the watcher is a pure
@@ -37,6 +37,21 @@ Phased; each phase is independently shippable.
   (c) the governor call shape (who drives the tick loop, sync/async, required
   observed-session fields). Re-`/shape` Phases 2–3 into concrete tickets then.
 
+## Grooming status (2026-06-01)
+Active backlog grooming found this ticket was still listed as pending even
+though its executed work landed in `cac9ea4` and `983ad36`, and its remaining
+phases are explicitly deferred pending concrete Olympus requirements. Keep the
+ticket for context, but do not treat it as ready work until those requirements
+arrive and Phases 2-3 are reshaped into small tickets.
+
+## Closeout (2026-06-02)
+User supplied the missing Olympus direction: inspect Olympus and design the
+governor around its lane/runtime seams. Three GPT-5.5 low-reasoning lanes
+compared designs and converged on a narrow embedding boundary: Olympus observes
+and enforces its own world; Curb evaluates pre-correlated policy sessions.
+Implemented `GovernorEngine`, documented the Olympus mapping, and added a
+synthetic Olympus-like no-PID run test.
+
 ## Notes
 **Why (user direction):** fold Curb into Olympus as a governor for arbitrarily-defined agents in arbitrary environments. The user correctly intuited the prerequisite: properly decouple the engine/enforcement/watcher from the UI/UX.
 
@@ -46,11 +61,13 @@ Phased; each phase is independently shippable.
 - **Good news — the enforcement seam already exists:** `src/platform.rs` is a `Platform` trait (`capture`, `notify`, `terminate`, capability queries) with a `FakePlatform` test double. Observation and the kill action are already swappable; this ticket generalizes *what they observe/act on*, not whether they're abstracted.
 - **What's hardwired to local OS:** `platform::Snapshot`/`Process` key on OS PIDs and OS identity fields (started_at, username, executable, bundle_id, team_id); `config::Match` (`src/config.rs:707-723`) matches process names / command regex / bundle ids / paths. A logically-defined agent has none of these — needs a new identity/matcher path.
 
-**Design sketch (refined by pi roster lane — anchor on the existing `Platform` trait, then split it into two):**
-- `Observer` — returns **already-correlated** `AgentTarget`s (opaque id + identity-revalidation tokens + optional spend/turn summary + labels). *Key decision: the policy core never sees raw OS processes or raw log events.* The local `Observer` internally does what `build_snapshot` does today (scan `usage::Reader`, capture the process tree, `correlate`); a k8s/remote `Observer` queries its own world. **Correlation moves into the local adapter, not the core.**
-- `Enforcer` — executes `warn` / `acknowledge` / `stop{grace,force}` against an opaque `AgentTarget`. *Key decision: the sealed `TerminationTarget` (PID + start + owner + executable) is an implementation detail of the local enforcer, NOT a core abstraction* — it lives in `LocalEnforcer`, so the safety contract is preserved locally without leaking OS facts into the core.
-- policy `Engine` — pure, environment-agnostic: thresholds, window, grace, terminated-state, escalate-supervised, ack suppression. No `Platform`/`Snapshot`. This is what Olympus reuses unchanged. Config splits too: env-agnostic thresholds stay in core; OS matchers (`process_names`/`bundle_ids`/`*_paths`/`command_regex`) move into a `LocalMatcher` owned by the local observer.
-- Orchestration: `runtime.rs` → `Governor<O: Observer, E: Enforcer>` owning config/state/ledger and the tick loop; `api`/`http`/`web` call `Governor`, not `Runtime<P: Platform>`. Adapters land under `src/adapters/` (`local_usage`, `local_platform`, `local_observer`, `local_enforcer`).
+**Resolved design:** the shipped boundary is `GovernorEngine` over
+pre-correlated `PolicySession` values plus an environment-owned `Enforcer`.
+The policy core never sees raw OS processes, raw provider events, Olympus DB
+rows, or Sprite process facts. The local runtime and Olympus both keep
+observation/correlation in their own adapters, then submit policy sessions to
+Curb. A generic `ObservationSource`/`Governor<O, E>` framework remains deferred
+until a second concrete consumer needs it.
 
 **Sequencing / dependencies:**
 - Phase 0 overlaps and extends **006** (extract onboarding), **007** (typed events), **008** (extract write-path) — do those first; they shrink `service.rs` and make the inversion tractable. This ticket should be re-`/shape`d into per-phase tickets when picked up.

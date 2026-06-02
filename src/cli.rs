@@ -95,14 +95,6 @@ pub fn config_set_command(args: Vec<String>) -> Result<()> {
                 updates.usage_window = Some(next_duration(&mut iter, "--usage-window")?);
             }
             "--usage-scan" => updates.usage_scan = Some(next_duration(&mut iter, "--usage-scan")?),
-            "--ledger-forward-url" => {
-                let value = next_value(&mut iter, "--ledger-forward-url")?;
-                updates.ledger_forward_url = Some(if matches!(value.as_str(), "off" | "none") {
-                    String::new()
-                } else {
-                    value
-                });
-            }
             "-h" | "--help" => {
                 print_config_set_usage();
                 return Ok(());
@@ -379,7 +371,6 @@ struct ConfigUpdates {
     kill_turn_tokens: Option<i64>,
     usage_window: Option<StdDuration>,
     usage_scan: Option<StdDuration>,
-    ledger_forward_url: Option<String>,
 }
 
 impl ConfigUpdates {
@@ -394,7 +385,6 @@ impl ConfigUpdates {
             && self.kill_turn_tokens.is_none()
             && self.usage_window.is_none()
             && self.usage_scan.is_none()
-            && self.ledger_forward_url.is_none()
     }
 }
 
@@ -429,9 +419,6 @@ fn apply_config_updates(cfg: &mut Config, updates: ConfigUpdates) -> Result<()> 
     }
     if let Some(duration) = updates.usage_scan {
         cfg.usage.scan_interval = HumanDuration::from_std(duration);
-    }
-    if let Some(url) = updates.ledger_forward_url {
-        cfg.ledger.forward_url = url;
     }
     cfg.refresh_agent_policies();
     Ok(())
@@ -469,8 +456,6 @@ fn print_config_set_usage() {
     println!("  --warn-after 90m --kill-after 120m --grace 60s --scan 15s");
     println!("  --usage true --warn-turn-tokens 1000000 --kill-turn-tokens 3000000");
     println!("  --usage-window 15m --usage-scan 5s");
-    println!("  --ledger-forward-url https://example.invalid/curb/events");
-    println!("  --ledger-forward-url off");
 }
 
 fn set_private_dir(path: &Path) -> Result<()> {
@@ -527,14 +512,7 @@ fn print_config_summary(path: &Path, cfg: &Config) {
     } else {
         println!("  disabled");
     }
-    println!(
-        "  export: {}",
-        if cfg.ledger.forward_url.is_empty() {
-            "local ledger only".to_string()
-        } else {
-            format!("forwarding ledger events to {}", cfg.ledger.forward_url)
-        }
-    );
+    println!("  export: local ledger only");
     println!();
     println!("watched agents");
     println!(

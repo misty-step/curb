@@ -89,8 +89,6 @@ For custom thresholds:
 ```sh
 curb config set --mode enforcement --warn-after 2m --kill-after 4m --grace 30s --scan 5s
 curb config set --warn-turn-tokens 1000000 --kill-turn-tokens 3000000 --usage-window 15m
-curb config set --ledger-forward-url https://example.invalid/curb/events
-curb config set --ledger-forward-url off
 ```
 
 The local app policy panel edits the same first-class policy fields. For
@@ -98,9 +96,9 @@ managed devices, edit the YAML config directly and run `curb validate-config`
 before starting the watcher.
 
 `curb config` shows the active config path, action, scan interval, policy,
-configured agents, and whether the ledger is local-only or forwarding events.
-The local API also exposes the durable endpoint `machine_id` for dashboards and
-export receivers. In an interactive terminal it prompts for the common setup.
+configured agents, and local ledger path. The local API also exposes the
+durable endpoint `machine_id` for dashboards and future export receivers. In an
+interactive terminal it prompts for the common setup.
 
 ## Local UI API
 
@@ -164,8 +162,11 @@ separate duration-based kill loop when usage monitoring is disabled. With
 visibility only. Curb currently enforces the latest metadata-reported turn size
 and displays rolling-window activity for context.
 
-Curb enforces process agents such as `codex`, `claude`, `claude-code`, and
-Anti-Gravity's `agy` CLI. Desktop applications such as Codex Desktop and Claude
+Curb can track process agents such as `codex`, `claude`, `claude-code`, and
+Anti-Gravity's `agy` CLI, but process visibility is not the same as usage
+metering. Usage policy currently comes from supported Codex, Claude, and Pi
+metadata adapters; Antigravity is process-visible only until a metadata-only
+usage adapter ships. Desktop applications such as Codex Desktop and Claude
 Desktop are watch-only when explicitly configured and are not killed by the
 standard presets. This keeps the kill switch focused on runaway worker
 processes instead of closing an entire desktop app.
@@ -264,7 +265,6 @@ Curb does not record prompts, responses, screenshots, keystrokes, or file
 contents. Usage readers extract only metadata such as timestamp, provider,
 session id, model, working directory, and token counters.
 
-The local ledger is the source of audit truth. If `ledger.forward_url` is set,
-Curb POSTs the same metadata-only ledger event to that HTTP(S) endpoint after
-the local write succeeds. Forwarding failures are ignored by policy and cannot
-trigger or block process termination.
+The local ledger is the source of audit truth. The launch config does not define
+remote forwarding or alert webhooks; remote collectors are future export work,
+not part of process policy or termination.

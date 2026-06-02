@@ -7,13 +7,11 @@
 //! sibling, records the grace -> termination_started -> termination_completed
 //! lifecycle in the ledger, and does not re-kill a session it already terminated.
 //!
-//! macOS only (for now): verified on macOS locally and on GitHub's macOS runner.
-//! The synthetic-worker correlation does not match under the GitHub Linux Actions
-//! sandbox, even though the core capture/terminate paths pass there (platform.rs's
-//! own live-child unit tests are green on Linux) — so this is a test-harness gap,
-//! not a product bug. Restoring Linux E2E is tracked by backlog 014. Windows is
-//! out of scope (different kill primitive and process-tree semantics).
-#![cfg(target_os = "macos")]
+//! Unix only: verified on macOS locally and on GitHub's macOS runner; Linux
+//! coverage is restored by accepting Ubuntu's `/bin/sh` process name (`dash`) in
+//! the synthetic-worker matcher. Windows is out of scope (different kill
+//! primitive and process-tree semantics).
+#![cfg(unix)]
 
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -151,7 +149,7 @@ fn marker_agent(marker: &str) -> Agent {
         // The marker is `[A-Za-z0-9-]` only, so it is already a literal regex
         // fragment (no escaping needed: `-` is not special outside a class).
         matcher: Match {
-            process_names: vec!["bash".to_string(), "sh".to_string()],
+            process_names: vec!["bash".to_string(), "dash".to_string(), "sh".to_string()],
             command_regex: vec![marker.to_string()],
             require_command_regex: vec![marker.to_string()],
             ..Match::default()

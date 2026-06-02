@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Internal desktop shell permissions.",
+  "windows": ["main"],
+  "permissions": []
+}

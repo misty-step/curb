@@ -76,10 +76,22 @@ agents:
       exclude_parent_command_regex:
         - "/Applications/Codex\\.app/.+\\bapp-server\\b"
 
+  - id: pi-cli
+    label: Pi
+    family: pi
+    kind: process
+    match:
+      process_names:
+        - pi
+      command_regex:
+        - "(^|/|\\\\)pi(\\.cmd|\\.exe)?(\\s|$)"
+
   - id: antigravity-cli
     label: Anti-Gravity CLI
     family: antigravity
     kind: process
+    # Process visibility only. Curb does not meter Antigravity token usage until
+    # a metadata-only provider adapter is implemented.
     match:
       process_names:
         - agy
@@ -102,10 +114,7 @@ agents:
 
 alerts:
   local_notifications: true
-  webhook_url: ""
-  slack_webhook_url: ""
 
 ledger:
   path: .curb/runs.ndjson
   include_prompt_content: false
-  forward_url: ""

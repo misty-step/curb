@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::config::Config;
+use crate::governor::GovernorEngine;
 use crate::local_enforcer::{self, LocalEnforcer};
 use crate::onboarding::{self, NotificationView, OnboardingView};
 use crate::platform::{Platform, PlatformError};
@@ -15,7 +16,7 @@ use crate::service::{
     SessionView, Snapshot, StopRequest, StopView, TurnView,
 };
 use crate::usage::{Reader, UsageError};
-use crate::usagewatch::{UsageWatch, UsageWatchError};
+use crate::usagewatch::UsageWatchError;
 use crate::write_path::Service;
 
 #[derive(Debug, Error)]
@@ -89,7 +90,7 @@ pub struct Runtime<P: Platform> {
     platform: P,
     cache: Mutex<Option<Snapshot>>,
     notification: Mutex<Option<NotificationView>>,
-    usagewatch: Mutex<UsageWatch>,
+    governor: Mutex<GovernorEngine>,
 }
 
 impl<P> Runtime<P>
@@ -140,7 +141,7 @@ impl<P: Platform> Runtime<P> {
             platform,
             cache: Mutex::new(None),
             notification: Mutex::new(None),
-            usagewatch: Mutex::new(UsageWatch::default()),
+            governor: Mutex::new(GovernorEngine::default()),
         }
     }
 
@@ -152,7 +153,7 @@ impl<P: Platform> Runtime<P> {
             platform,
             cache: Mutex::new(None),
             notification: Mutex::new(None),
-            usagewatch: Mutex::new(UsageWatch::default()),
+            governor: Mutex::new(GovernorEngine::default()),
         }
     }
 
@@ -216,13 +217,12 @@ impl<P: Platform> Runtime<P> {
         let scan = self.reader.scan_since(Some(self.lookback_start(now)))?;
         let processes = self.platform.capture()?;
         let cfg = self.config();
-        let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
         let sessions = local_enforcer::build_policy_sessions(&cfg, &scan.events, &processes, now)?;
         let enforcer = LocalEnforcer::new(&cfg, &self.platform, &processes);
-        self.usagewatch
+        self.governor
             .lock()
-            .expect("usage watcher mutex poisoned")
-            .scan(&cfg, &sessions, &enforcer, window_start, now)?;
+            .expect("governor mutex poisoned")
+            .scan(&cfg, &sessions, &enforcer, now)?;
         self.rescan(now)
     }
 
@@ -387,9 +387,9 @@ impl<P: Platform> Runtime<P> {
             }
         };
         let terminated = self
-            .usagewatch
+            .governor
             .lock()
-            .expect("usage watcher mutex poisoned")
+            .expect("governor mutex poisoned")
             .terminated_keys();
         let mut snapshot = service::build_snapshot_filtered(
             &cfg,

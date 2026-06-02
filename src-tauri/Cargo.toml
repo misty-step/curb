@@ -1,0 +1,13 @@
+[package]
+name = "curb-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Internal Tauri shell for Curb"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"

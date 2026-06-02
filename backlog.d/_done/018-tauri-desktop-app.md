@@ -1,7 +1,7 @@
 # Migrate the web UI to a cross-platform desktop app (Tauri)
 
 Priority: P3
-Status: pending
+Status: done
 Estimate: L
 
 ## Goal
@@ -10,15 +10,28 @@ Ship Curb as a menu-bar/tray desktop app (Tauri) that keeps the watchdog running
 ## Non-Goals
 - Rewriting the UI's fetch layer to Tauri IPC initially — keep the loopback HTTP transport at first.
 - Mac App Store / sandboxed distribution (the sandbox blocks process-kill + usage-file reads).
-- Doing this before the trust/quality themes (001–008) land. **Icebox.**
+- Developer ID signing, notarization, auto-update, or public release packaging. This is an internal team app.
 
 ## Oracle
-- [ ] A `src-tauri/` target links the existing `curb` lib and opens a window over the loopback server; `curb app`/web mode still works.
-- [ ] Tray presence + close-to-tray keeps the watch loop running with no window; launch-at-login is available.
-- [ ] A signed, notarized macOS build can read usage files and terminate a correlated worker (entitlements / Full Disk Access path documented).
-- [ ] CI (001) builds the desktop artifact on macOS + Linux.
+- [x] A `src-tauri/` target opens a window over the existing loopback server; `curb app`/web mode still works.
+- [x] Tray presence + close-to-tray keeps the watch loop running with no window; launch-at-login is available through the Tauri autostart plugin and `CURB_DESKTOP_AUTOSTART`.
+- [x] Unsigned internal distribution path is documented for macOS, Windows, and Linux.
+- [x] CI builds the desktop artifact on macOS + Linux.
 
 ## Notes
+**Grooming status (2026-06-01):** blocked/icebox. Keep this as a preserved
+option, not active next work, until the daemon lifecycle/read-model/config
+surface is stable and the user explicitly chooses native packaging. A desktop
+wrapper still does not improve Curb's termination safety by itself.
+
+**Closeout (2026-06-02):** user narrowed the distribution requirement to an
+internal unsigned, cross-platform Tauri shell. Implemented `src-tauri/` as a
+thin lifecycle wrapper around `curb serve`: it starts or reuses the loopback
+server, opens a desktop window to the existing UI, keeps the server alive when
+the window closes, exposes tray show/hide/quit, and supports opt-in autostart.
+Public signing/notarization remains deliberately out of scope.
+`docs/internal-desktop-app.md` documents the cargo-based team distribution path.
+
 **Why:** explicit user request. **Dissent (Carmack):** defer — the desktop app effectively already exists via `curb app`, and Tauri adds zero kill-safety; 100% of Curb's value is backend correctness. Hence P3/icebox, below all trust work.
 
 **Migration research (from 2026-05-29 design discussion):**

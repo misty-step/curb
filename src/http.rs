@@ -423,7 +423,6 @@ mod tests {
             ack_extension_seconds: 30,
             local_notifications: true,
             escalate_supervised: false,
-            ledger_forward_url: None,
             agents: Vec::new(),
         }
     }

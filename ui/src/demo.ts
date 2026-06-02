@@ -93,7 +93,7 @@ export const demoSnapshot: Snapshot = {
       owner: "you",
       executable: "/Applications/Codex.app/Contents/Resources/codex",
       explanation:
-        "Over your kill line, but a desktop app supervises this task and would respawn it — Curb can warn but not stop it.",
+        "Over your kill line, but this is a watch-only desktop app that supervises the task and would respawn it — Curb can warn but not stop it.",
     },
     {
       key: "claude:gradient",
@@ -158,5 +158,24 @@ export const demoSnapshot: Snapshot = {
       explanation: "Idle between turns.",
     },
   ],
-  turns: [],
+  turns: [
+    {
+      id: "turn-demo-2",
+      request_id: "req-demo-2",
+      session_key: "codex:olympus",
+      session_id: "olympus",
+      provider: "codex",
+      at: NOW,
+      model: "gpt-5.5",
+      input_tokens: 1_200_000,
+      cached_input_tokens: 180_000,
+      cache_creation_input_tokens: 25_000,
+      output_tokens: 240_000,
+      reasoning_output_tokens: 90_000,
+      total_tokens: 1_555_000,
+      spent_tokens: 1_375_000,
+      cumulative_tokens: 3_300_000,
+      source: "codex usage log",
+    },
+  ],
 };

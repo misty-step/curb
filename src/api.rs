@@ -1078,7 +1078,16 @@ mod tests {
             now,
         );
         assert_eq!(turns.status, 200);
+        assert!(turns.text().contains("\"model\":\"model\""));
+        assert!(turns.text().contains("\"input_tokens\":789"));
+        assert!(turns.text().contains("\"cached_input_tokens\":12"));
+        assert!(turns.text().contains("\"cache_creation_input_tokens\":34"));
+        assert!(turns.text().contains("\"output_tokens\":56"));
+        assert!(turns.text().contains("\"reasoning_output_tokens\":78"));
         assert!(turns.text().contains("\"total_tokens\":789"));
+        assert!(turns.text().contains("\"spent_tokens\":777"));
+        assert!(turns.text().contains("\"cumulative_tokens\":1234"));
+        assert!(turns.text().contains("\"source\":\"test usage log\""));
     }
 
     #[test]
@@ -1488,16 +1497,16 @@ mod tests {
                 session_id: Some("session/one".to_string()),
                 provider: "codex".to_string(),
                 at: Some(fixed_now()),
-                model: None,
+                model: Some("model".to_string()),
                 input_tokens: 789,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                cache_creation_input_tokens: 0,
-                reasoning_output_tokens: 0,
+                cached_input_tokens: 12,
+                output_tokens: 56,
+                cache_creation_input_tokens: 34,
+                reasoning_output_tokens: 78,
                 total_tokens: 789,
-                spent_tokens: 789,
-                cumulative_tokens: 789,
-                source: "test".to_string(),
+                spent_tokens: 777,
+                cumulative_tokens: 1234,
+                source: "test usage log".to_string(),
             }])
         }
 
@@ -1703,7 +1712,6 @@ mod tests {
             ack_extension_seconds: 30 * 60,
             local_notifications,
             escalate_supervised: false,
-            ledger_forward_url: None,
             agents: Vec::new(),
         }
     }

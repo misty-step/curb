@@ -4,9 +4,12 @@ import type {
   ConfigUpdate,
   ConfigView,
   NotificationView,
+  OnboardingView,
+  SessionView,
   Snapshot,
   StopExpectedIdentity,
   StopView,
+  TurnView,
 } from "./types";
 
 // Thin client over the loopback API. With no base URL it returns demo data, so
@@ -20,6 +23,22 @@ export interface ApiSettings {
 export async function fetchSnapshot(settings: ApiSettings): Promise<Snapshot> {
   if (!settings.baseUrl) return demoSnapshot;
   return getJSON(settings, "/v1/snapshot") as Promise<Snapshot>;
+}
+
+export async function fetchSession(settings: ApiSettings, sessionKey: string): Promise<SessionView> {
+  if (!settings.baseUrl) {
+    return demoSnapshot.sessions.find((session) => session.key === sessionKey) ?? demoSnapshot.sessions[0];
+  }
+  return getJSON(settings, `/v1/sessions/${encodeURIComponent(sessionKey)}`) as Promise<SessionView>;
+}
+
+export async function fetchSessionTurns(
+  settings: ApiSettings,
+  sessionKey: string,
+  limit = 20,
+): Promise<TurnView[]> {
+  if (!settings.baseUrl) return demoSnapshot.turns.filter((turn) => turn.session_key === sessionKey).slice(0, limit);
+  return getJSON(settings, `/v1/sessions/${encodeURIComponent(sessionKey)}/turns?limit=${limit}`) as Promise<TurnView[]>;
 }
 
 export async function rescanService(settings: ApiSettings): Promise<Snapshot> {
@@ -43,6 +62,28 @@ export async function saveConfig(settings: ApiSettings, update: ConfigUpdate): P
 export async function fetchNotificationHealth(settings: ApiSettings): Promise<NotificationView> {
   if (!settings.baseUrl) return demoNotifications;
   return getJSON(settings, "/v1/notifications/health") as Promise<NotificationView>;
+}
+
+export async function fetchOnboarding(settings: ApiSettings): Promise<OnboardingView> {
+  if (!settings.baseUrl) {
+    return {
+      required: true,
+      config_path: demoConfig.path,
+      mode: demoConfig.mode,
+      action: "notify only; never kill",
+      mode_can_terminate: false,
+      detected_providers: demoSnapshot.overview.sources.map((source) => source.provider),
+      detected_workers: demoSnapshot.agents.map((agent) => agent.label),
+      enforceable_agent_types: demoConfig.agents.filter((agent) => agent.terminates).length,
+      watch_only_agent_types: demoConfig.agents.filter((agent) => !agent.terminates).length,
+      notifications: demoNotifications,
+      capabilities: demoSnapshot.overview.capabilities,
+      sources: demoSnapshot.overview.sources,
+      final_sentence: "Curb will notify on high-token turns.",
+      steps: [],
+    };
+  }
+  return getJSON(settings, "/v1/onboarding") as Promise<OnboardingView>;
 }
 
 export async function testNotification(settings: ApiSettings): Promise<NotificationView> {

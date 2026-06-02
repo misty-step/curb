@@ -1,0 +1,2 @@
+{"date":"2026-06-01","pr":null,"correctness":8,"depth":8,"simplicity":8,"craft":8,"verdict":"conditional-merge-ready","providers":["codex","claude","pi","gpt-5.5-low-subagents"]}
+{"date":"2026-06-02","pr":null,"correctness":9,"depth":8,"simplicity":8,"craft":8,"verdict":"ship","providers":["codex","claude","pi","gpt-5.5-low-subagents"]}

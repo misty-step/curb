@@ -1,4 +1,12 @@
-import type { SessionView, Snapshot } from "./types";
+import type {
+  CapabilityView,
+  NotificationView,
+  OnboardingView,
+  PlatformCapabilities,
+  SessionView,
+  Snapshot,
+  TurnView,
+} from "./types";
 
 // Turns the service snapshot into what the dashboard renders. Three buckets:
 //
@@ -13,6 +21,47 @@ export interface DashboardModel {
   active: SessionView[];
   idle: SessionView[];
   headline: string;
+}
+
+export interface EvidenceItem {
+  label: string;
+  value: string;
+}
+
+export interface TimelineTurn {
+  label: string;
+  provider: string;
+  at?: string;
+  model?: string;
+  source: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  spentTokens: number;
+  cumulativeTokens: number;
+}
+
+export interface SelectedSessionExplanation {
+  session: SessionView;
+  turns: TimelineTurn[];
+  correlationEvidence: EvidenceItem[];
+  actionEvidence: EvidenceItem[];
+}
+
+export interface ReadinessItem {
+  label: string;
+  status: string;
+  message: string;
+  attention: boolean;
+}
+
+export interface ReadinessModel {
+  attention: boolean;
+  summary: string;
+  items: ReadinessItem[];
 }
 
 const ALERT_RANK: Record<string, number> = { kill: 0, warn: 1, ok: 2 };
@@ -74,6 +123,97 @@ export function warnRatio(warnTokens: number, killTokens: number): number {
   return clamp01(warnTokens / killTokens);
 }
 
+export function selectSessionExplanation(
+  session: SessionView | undefined,
+  turns: TurnView[],
+): SelectedSessionExplanation | undefined {
+  if (!session) return undefined;
+  return {
+    session,
+    turns: turns.map((turn, index) => ({
+      label: turn.id || turn.request_id || `turn ${index + 1}`,
+      provider: turn.provider,
+      at: turn.at,
+      model: turn.model,
+      source: turn.source,
+      inputTokens: turn.input_tokens,
+      cachedInputTokens: turn.cached_input_tokens,
+      cacheCreationTokens: turn.cache_creation_input_tokens,
+      outputTokens: turn.output_tokens,
+      reasoningTokens: turn.reasoning_output_tokens,
+      totalTokens: turn.total_tokens,
+      spentTokens: turn.spent_tokens,
+      cumulativeTokens: turn.cumulative_tokens,
+    })),
+    correlationEvidence: correlationEvidence(session),
+    actionEvidence: actionEvidence(session),
+  };
+}
+
+export function selectReadiness(
+  onboarding: OnboardingView | undefined,
+  notifications: NotificationView,
+  capabilities: PlatformCapabilities,
+): ReadinessModel {
+  const items: ReadinessItem[] = [
+    {
+      label: "First run",
+      status: onboarding?.required ? "required" : "ready",
+      message: onboarding?.final_sentence || "Onboarding status unavailable",
+      attention: Boolean(onboarding?.required),
+    },
+    {
+      label: "Notifications",
+      status: notifications.status,
+      message: notifications.message,
+      attention: notifications.enabled && !notifications.available,
+    },
+    capabilityItem("Process capture", capabilities.process_capture),
+    capabilityItem("Identity", capabilities.process_identity),
+    capabilityItem("Enforcement", capabilities.enforcement),
+  ];
+  const attention = items.some((item) => item.attention);
+  return {
+    attention,
+    summary: attention ? "Setup needs attention" : "Ready",
+    items,
+  };
+}
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function correlationEvidence(session: SessionView): EvidenceItem[] {
+  return [
+    session.pid ? { label: "PID", value: String(session.pid) } : undefined,
+    session.process_started_at ? { label: "Start-time seal", value: session.process_started_at } : undefined,
+    session.owner ? { label: "Owner", value: session.owner } : undefined,
+    session.executable ? { label: "Executable", value: session.executable } : undefined,
+    session.bundle_id ? { label: "Bundle", value: session.bundle_id } : undefined,
+    session.team_id ? { label: "Team", value: session.team_id } : undefined,
+  ].filter((item): item is EvidenceItem => Boolean(item));
+}
+
+function actionEvidence(session: SessionView): EvidenceItem[] {
+  const stop = session.can_stop
+    ? "Available after live identity revalidation."
+    : `Unavailable: ${session.explanation}`;
+  const ack = session.can_acknowledge
+    ? "Available for a bounded grace window."
+    : "Unavailable for this session state.";
+  return [
+    { label: "Alert", value: session.alert },
+    { label: "Stop", value: stop },
+    { label: "Acknowledge", value: ack },
+  ];
+}
+
+function capabilityItem(label: string, capability: CapabilityView): ReadinessItem {
+  return {
+    label,
+    status: capability.status,
+    message: capability.message,
+    attention: !capability.available && capability.status !== "disabled",
+  };
 }

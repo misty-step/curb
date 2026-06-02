@@ -287,8 +287,6 @@ pub struct ConfigView {
     pub ack_extension_seconds: i64,
     pub local_notifications: bool,
     pub escalate_supervised: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ledger_forward_url: Option<String>,
     pub agents: Vec<ConfigAgentView>,
 }
 
@@ -333,8 +331,6 @@ pub fn config_view(path: Option<&Path>, cfg: &Config) -> ConfigView {
         ack_extension_seconds: seconds(cfg.defaults.ack_extension),
         local_notifications: cfg.alerts.local_notifications,
         escalate_supervised: cfg.usage.escalate_supervised,
-        ledger_forward_url: (!cfg.ledger.forward_url.is_empty())
-            .then(|| cfg.ledger.forward_url.clone()),
         agents: cfg
             .agents
             .iter()
@@ -1763,6 +1759,37 @@ mod tests {
         assert!(!matches.iter().any(|matched| {
             matched.agent.id == "claude-code" && matched.process.pid == platform::Pid::new(101)
         }));
+    }
+
+    #[test]
+    fn synthetic_shell_worker_requires_portable_process_names_to_clear_confidence_floor() {
+        let marker = "curb-e2e-worker-linux-dash";
+        let mut cfg = Config::local_default(crate::config::Mode::Enforcement, "/tmp/curb".into());
+        cfg.agents = vec![crate::config::Agent {
+            id: "e2e-worker".to_string(),
+            label: "E2E Worker".to_string(),
+            family: "codex".to_string(),
+            kind: crate::config::AgentKind::Process,
+            matcher: crate::config::Match {
+                process_names: vec!["bash".to_string(), "dash".to_string(), "sh".to_string()],
+                command_regex: vec![marker.to_string()],
+                require_command_regex: vec![marker.to_string()],
+                ..Default::default()
+            },
+            policy: None,
+        }];
+        cfg.refresh_agent_policies();
+        let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+        let mut worker = process(now, 100, "dash", "/repo");
+        worker.command = format!("sh -c while :; do sleep 1; done # {marker}");
+        let snapshot = platform::Snapshot::new([worker]);
+
+        assert!(
+            process_matches(&cfg, &snapshot).iter().any(|matched| {
+                matched.agent.id == "e2e-worker" && matched.process.pid == platform::Pid::new(100)
+            }),
+            "Ubuntu /bin/sh is commonly dash; the marker survives in argv but the old e2e matcher scored only the command regex signal"
+        );
     }
 
     #[test]

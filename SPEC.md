@@ -82,7 +82,7 @@ Behavior:
 - Everything in visibility mode.
 - Send local notifications at warning thresholds.
 - Support `curb ack` to grant configured extensions.
-- Optionally forward events to webhooks or Slack.
+- Keep alert evidence in the local ledger.
 - Never terminate a process.
 
 ### Enforcement
@@ -535,8 +535,6 @@ agents:
 
 alerts:
   local_notifications: true
-  webhook_url: null
-  slack_webhook_url: null
 
 ledger:
   path: /Library/Application Support/Curb/runs.ndjson
@@ -947,8 +945,8 @@ Manual Linux smoke tests:
 - What should the default launch policy be: warn at 90 minutes and kill at
   120 minutes, or a stricter contractor profile?
 - Should system sleep time count toward runtime in all managed profiles?
-- Which enterprise collector should be first: Slack, generic webhook, SIEM, or a
-  local export file?
+- Which future export path should be first: local file, SIEM, Slack, generic
+  webhook, or managed API?
 - How should browser-only agent sessions be represented without intrusive
   browser inspection?
 - Should Curb expose a menubar app in launch, or keep launch focused on service

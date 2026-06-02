@@ -4,6 +4,9 @@ import {
   acknowledgeSession,
   fetchConfig,
   fetchNotificationHealth,
+  fetchOnboarding,
+  fetchSession,
+  fetchSessionTurns,
   fetchSnapshot,
   rescanService,
   saveConfig,
@@ -12,9 +15,10 @@ import {
   type ApiSettings,
 } from "./api";
 import { AgentList, ConnectionNote, Settings, StatusPill } from "./components/dashboard";
+import { ReadinessPanel } from "./components/sessionPanels";
 import { demoConfig, demoNotifications, demoSnapshot } from "./demo";
-import { selectDashboard } from "./readModel";
-import type { ConfigUpdate, ConfigView, NotificationView, SessionView, Snapshot } from "./types";
+import { selectDashboard, selectReadiness, selectSessionExplanation } from "./readModel";
+import type { ConfigUpdate, ConfigView, NotificationView, OnboardingView, SessionView, Snapshot, TurnView } from "./types";
 
 // curb app serves the dashboard same-origin and authenticates with an HttpOnly
 // cookie, so there is no URL or token to enter — we just talk to our own origin.
@@ -26,9 +30,12 @@ export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demoSnapshot);
   const [config, setConfig] = useState<ConfigView>(demoConfig);
   const [notifications, setNotifications] = useState<NotificationView>(demoNotifications);
+  const [onboarding, setOnboarding] = useState<OnboardingView>();
   const [connection, setConnection] = useState<"demo" | "live" | "error">(SAME_ORIGIN ? "live" : "demo");
   const [error, setError] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
+  const [selectedSession, setSelectedSession] = useState<SessionView>();
+  const [selectedTurns, setSelectedTurns] = useState<TurnView[]>([]);
   const [settingsMsg, setSettingsMsg] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [busyMsg, setBusyMsg] = useState("");
@@ -45,9 +52,11 @@ export function App() {
           message: "Notification health unavailable",
         })),
       ]);
+      const nextOnboarding = await fetchOnboarding(SETTINGS).catch<OnboardingView | undefined>(() => undefined);
       setSnapshot(data);
       setConfig(nextConfig);
       setNotifications(nextNotifications);
+      setOnboarding(nextOnboarding);
       setConnection(SAME_ORIGIN ? "live" : "demo");
       setError("");
     } catch (caught) {
@@ -63,6 +72,42 @@ export function App() {
   }, [refresh]);
 
   const model = useMemo(() => selectDashboard(snapshot, config.usage_window_seconds), [snapshot, config.usage_window_seconds]);
+  const selectedDetail = useMemo(
+    () => selectSessionExplanation(selectedSession, selectedTurns),
+    [selectedSession, selectedTurns],
+  );
+  const readiness = useMemo(
+    () => selectReadiness(onboarding, notifications, snapshot.overview.capabilities),
+    [onboarding, notifications, snapshot.overview.capabilities],
+  );
+
+  useEffect(() => {
+    if (!selectedKey) {
+      setSelectedSession(undefined);
+      setSelectedTurns([]);
+      return;
+    }
+    let cancelled = false;
+    const fallback = snapshot.sessions.find((session) => session.key === selectedKey);
+    setSelectedSession(fallback);
+    setSelectedTurns([]);
+    void Promise.all([fetchSession(SETTINGS, selectedKey), fetchSessionTurns(SETTINGS, selectedKey)])
+      .then(([session, turns]) => {
+        if (cancelled) return;
+        setSelectedSession(session);
+        setSelectedTurns(turns);
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setSelectedSession(fallback);
+        setSelectedTurns([]);
+        setBusyKey(selectedKey);
+        setBusyMsg(caught instanceof Error ? caught.message : "Could not load session detail");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey, snapshot.sessions]);
 
   async function persist(update: ConfigUpdate) {
     try {
@@ -141,7 +186,10 @@ export function App() {
         onStop={stop}
         busyKey={busyKey}
         busyMessage={busyMsg}
+        selectedDetail={selectedDetail}
       />
+
+      <ReadinessPanel model={readiness} />
 
       <details className="drawer">
         <summary>

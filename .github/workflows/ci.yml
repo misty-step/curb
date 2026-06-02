@@ -30,6 +30,16 @@ jobs:
       - name: Install Rust toolchain (rustfmt + clippy)
         run: rustup component add rustfmt clippy
 
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 

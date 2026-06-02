@@ -86,8 +86,6 @@ fn config_set_updates_first_class_policy_fields() {
             "10m",
             "--usage-scan",
             "2s",
-            "--ledger-forward-url",
-            "off",
         ])
         .assert()
         .success()
@@ -106,7 +104,6 @@ fn config_set_updates_first_class_policy_fields() {
     assert_eq!(cfg.usage.kill_turn_tokens, 2000);
     assert_eq!(cfg.usage.window.as_std().as_secs(), 600);
     assert_eq!(cfg.usage.scan_interval.as_std().as_secs(), 2);
-    assert!(cfg.ledger.forward_url.is_empty());
     assert!(cfg.agents.iter().all(|agent| {
         agent
             .policy
@@ -152,7 +149,7 @@ fn validate_config_matches_go_oracle_shape() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "ok config=configs/curb.example.yaml mode=visibility agents=5 ledger=.curb/runs.ndjson",
+            "ok config=configs/curb.example.yaml mode=visibility agents=6 ledger=.curb/runs.ndjson",
         ));
 }
 

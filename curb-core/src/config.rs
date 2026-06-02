@@ -9,7 +9,6 @@ use std::time::Duration as StdDuration;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-use url::Url;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -43,12 +42,6 @@ pub enum ConfigError {
     InvalidDefaultThresholds,
     #[error("ledger.include_prompt_content is not supported by launch implementation")]
     PromptCaptureUnsupported,
-    #[error("ledger.forward_url must use http or https")]
-    ForwardUrlScheme,
-    #[error("ledger.forward_url must include a host")]
-    ForwardUrlHost,
-    #[error("ledger.forward_url: {0}")]
-    ForwardUrl(url::ParseError),
     #[error("usage.warn_turn_tokens must be less than usage.kill_turn_tokens")]
     InvalidUsageThresholds,
     #[error("usage intervals must be positive")]
@@ -115,7 +108,6 @@ impl Config {
             agents: default_process_agents(),
             alerts: AlertConfig {
                 local_notifications: true,
-                ..AlertConfig::default()
             },
             ledger: LedgerConfig {
                 path: state_dir.join("runs.ndjson"),
@@ -194,9 +186,6 @@ impl Config {
         }
         if self.ledger.include_prompt_content {
             return Err(ConfigError::PromptCaptureUnsupported);
-        }
-        if !self.ledger.forward_url.is_empty() {
-            validate_forward_url(&self.ledger.forward_url)?;
         }
         if self.usage.enabled() {
             if self.usage.warn_turn_tokens >= self.usage.kill_turn_tokens {
@@ -429,17 +418,6 @@ fn set_file_private(path: &Path) -> Result<(), ConfigError> {
                 source,
             }
         })?;
-    }
-    Ok(())
-}
-
-fn validate_forward_url(raw: &str) -> Result<(), ConfigError> {
-    let parsed = Url::parse(raw).map_err(ConfigError::ForwardUrl)?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err(ConfigError::ForwardUrlScheme);
-    }
-    if parsed.host_str().is_none() {
-        return Err(ConfigError::ForwardUrlHost);
     }
     Ok(())
 }
@@ -819,8 +797,6 @@ impl Policy {
 #[serde(default, deny_unknown_fields)]
 pub struct AlertConfig {
     pub local_notifications: bool,
-    pub webhook_url: String,
-    pub slack_webhook_url: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -828,7 +804,6 @@ pub struct AlertConfig {
 pub struct LedgerConfig {
     pub path: PathBuf,
     pub include_prompt_content: bool,
-    pub forward_url: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1069,7 +1044,7 @@ mod tests {
         assert_eq!(cfg.mode, Mode::Visibility);
         assert_eq!(cfg.usage.warn_turn_tokens, 1_000_000);
         assert_eq!(cfg.usage.kill_turn_tokens, 3_000_000);
-        assert_eq!(cfg.agents.len(), 5);
+        assert_eq!(cfg.agents.len(), 6);
         assert!(!cfg.ledger.include_prompt_content);
     }
 
@@ -1194,12 +1169,18 @@ agents:
     }
 
     #[test]
-    fn rejects_invalid_forward_url() {
-        let err = load_from_str(
+    fn rejects_unimplemented_egress_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("curb.yaml");
+        std::fs::write(
+            &path,
             r#"
 version: 1
+alerts:
+  webhook_url: https://example.invalid/curb/alerts
+  slack_webhook_url: https://example.invalid/slack
 ledger:
-  forward_url: file:///tmp/events
+  forward_url: https://example.invalid/curb/events
 agents:
   - id: codex
     label: Codex
@@ -1207,9 +1188,11 @@ agents:
       process_names: [codex]
 "#,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(err, ConfigError::ForwardUrlScheme));
+        let err = Config::load(&path).unwrap_err();
+
+        assert!(matches!(err, ConfigError::Parse { .. }));
     }
 
     #[test]

@@ -7,6 +7,7 @@
 //! depends on this crate; nothing here references that shell.
 
 pub mod config;
+pub mod governor;
 pub mod ledger;
 pub mod local_enforcer;
 pub mod onboarding;

@@ -124,7 +124,7 @@ Behavior:
 
 - Everything in visibility mode.
 - Send local notifications.
-- Optionally send Slack/email/webhook alerts.
+- Keep alert evidence in the local ledger.
 - Escalate after missed acknowledgement.
 - Still does not kill unless explicitly configured.
 
@@ -281,8 +281,6 @@ policies:
 
 alerts:
   local_notifications: true
-  webhook_url: null
-  slack_webhook_url: null
 
 ledger:
   path: /Library/Application Support/Curb/runs.ndjson
@@ -334,8 +332,8 @@ Curb should emit local NDJSON records:
 }
 ```
 
-The ledger should be append-only by default. Enterprise deployments can forward
-events to SIEM, Slack, or a managed collector.
+The ledger should be append-only by default. Enterprise export to SIEM, Slack,
+or a managed collector is future work, not part of the launch config.
 
 ## Architecture
 
@@ -344,8 +342,8 @@ Suggested modules:
 - `curb-core`: policy evaluation, run state machine, config schema.
 - `curb-macos`: process discovery, LaunchAgent integration, notification
   adapter, termination adapter.
-- `curb-ledger`: append-only local ledger and export.
-- `curb-alerts`: local notification, webhook, Slack.
+- `curb-ledger`: append-only local ledger.
+- `curb-alerts`: local notification.
 - `curb-cli`: inspect runs, acknowledge warnings, validate config.
 - `curb-enterprise`: future opinionated packaging, signing, MDM profile
   examples, and default policies.
@@ -431,5 +429,5 @@ MVP should deliver:
 - Should after-hours work always be killed or only require explicit
   acknowledgement?
 - How should Curb handle browser-based agent sessions?
-- What central collector should enterprise deployments use first: Slack,
-  webhook, SIEM, or a simple internal API?
+- What future central collector should enterprise deployments use first:
+  Slack, webhook, SIEM, or a simple internal API?
