@@ -44,6 +44,7 @@ The implementation is active. The most useful entry points are:
 - [docs/user-guide.md](docs/user-guide.md) - user operating guide.
 - [docs/contributor-guide.md](docs/contributor-guide.md) - contributor architecture and verification guide.
 - [docs/application-design.md](docs/application-design.md) - canonical dashboard architecture and UI design.
+- [docs/dogfooding.md](docs/dogfooding.md) - release-build dogfood guide and next grooming loop.
 - [docs/local-agent-watchdog-spec.md](docs/local-agent-watchdog-spec.md) - watchdog product spec.
 - [SPEC.md](SPEC.md) - launch implementation specification.
 
