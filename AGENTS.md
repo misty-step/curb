@@ -4,6 +4,10 @@ This repository is a Rust + React product. Shared agent routing, provider
 rosters, skills, and harness behavior come from the system Spellbook
 configuration, not repo-local harness projections.
 
+Keep this file to repo contracts only. Do not add global skill catalogs or
+provider rosters here; point to Spellbook/Harness Kit when the behavior is not
+Curb-specific.
+
 ## Repo Signals
 
 - Product: local AI-agent visibility and watchdog tool.
@@ -64,3 +68,4 @@ Useful focused checks:
   real action would be nondeterministic or harmful.
 - Keep UI logic in tested selectors/read models rather than ad hoc component
   branches.
+- End delivery changes with `git status --short --untracked-files=all` clean.
