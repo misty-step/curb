@@ -3,6 +3,9 @@
 .pi/
 .spellbook/
 .harness-kit/
+!.harness-kit/
+.harness-kit/*
+!.harness-kit/agent-readiness.yaml
 /curb
 /curb.exe
 *.test
