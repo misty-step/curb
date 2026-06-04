@@ -272,6 +272,88 @@ fn server_accepts_shared_backend_for_daemon_side_loops() {
 }
 
 #[test]
+fn arc_backend_adapter_forwards_every_api_method() {
+    let backend = Arc::new(SharedBackend);
+    let now = fixed_now();
+
+    assert!(Backend::snapshot(&backend, now).is_ok());
+    assert!(Backend::readiness(&backend).is_ok());
+    assert!(Backend::rescan(&backend, now).is_ok());
+    assert!(matches!(
+        Backend::session(&backend, "missing", now),
+        Err(ApiError::SessionNotFound)
+    ));
+    assert!(
+        Backend::turns(&backend, "missing", TurnQuery::default(), now)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(Backend::events(&backend, 10).unwrap().is_empty());
+    assert!(Backend::alerts(&backend, 10, now).unwrap().is_empty());
+    assert!(matches!(
+        Backend::acknowledge_session(&backend, "missing", AckRequest::default(), now),
+        Err(ApiError::SessionNotFound)
+    ));
+    assert!(matches!(
+        Backend::stop_session(&backend, "missing", StopRequest::default(), now),
+        Err(ApiError::SessionNotFound)
+    ));
+    assert!(Backend::config(&backend).is_ok());
+    assert!(Backend::update_config(&backend, ConfigUpdate::default()).is_ok());
+    assert!(Backend::onboarding(&backend, now).is_ok());
+    assert!(Backend::complete_onboarding(&backend, now).is_ok());
+    assert!(Backend::notification_health(&backend).is_ok());
+    assert!(Backend::test_notification(&backend, now).is_ok());
+}
+
+#[test]
+fn runtime_backend_adapter_maps_core_runtime_contract_to_api_errors() {
+    let state = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let cfg = curb_core::config::Config::local_default(
+        curb_core::config::Mode::Visibility,
+        state.path().join("state"),
+    );
+    let runtime = Runtime::new(cfg, home.path(), curb_core::platform::EmptyPlatform)
+        .with_config_path(state.path().join("curb.yaml"));
+    let now = fixed_now();
+
+    assert!(Backend::snapshot(&runtime, now).is_ok());
+    assert!(Backend::readiness(&runtime).is_ok());
+    assert!(Backend::rescan(&runtime, now).is_ok());
+    assert!(matches!(
+        Backend::session(&runtime, "missing", now),
+        Err(ApiError::SessionNotFound)
+    ));
+    assert!(matches!(
+        Backend::turns(&runtime, "missing", TurnQuery::default(), now),
+        Err(ApiError::SessionNotFound)
+    ));
+    assert!(Backend::events(&runtime, 10).unwrap().is_empty());
+    assert!(Backend::alerts(&runtime, 10, now).unwrap().is_empty());
+    assert!(matches!(
+        Backend::acknowledge_session(&runtime, "missing", AckRequest::default(), now),
+        Err(ApiError::SessionNotFound)
+    ));
+    assert!(matches!(
+        Backend::stop_session(&runtime, "missing", StopRequest::default(), now),
+        Err(ApiError::InvalidStop(_))
+    ));
+    assert!(Backend::config(&runtime).is_ok());
+    assert!(Backend::update_config(&runtime, ConfigUpdate::default()).is_ok());
+    assert!(Backend::onboarding(&runtime, now).is_ok());
+    assert!(Backend::complete_onboarding(&runtime, now).is_ok());
+    assert!(matches!(
+        Backend::test_notification(&runtime, now),
+        Err(ApiError::NotificationsUnavailable(_))
+    ));
+    assert!(matches!(
+        Backend::notification_health(&runtime),
+        Ok(view) if !view.available
+    ));
+}
+
+#[test]
 fn returns_events_and_alerts_with_limit_and_method_semantics() {
     let server = Server::new("test-token", FakeBackend::default()).unwrap();
     let now = fixed_now();

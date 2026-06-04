@@ -48,6 +48,10 @@ jobs:
         run: npm ci
         working-directory: ui
 
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+        working-directory: ui
+
       - name: Run fast feedback gate
         run: bash scripts/check-fast.sh
 
@@ -85,6 +89,10 @@ jobs:
 
       - name: Install UI dependencies
         run: npm ci
+        working-directory: ui
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
         working-directory: ui
 
       - name: Run repository gate
