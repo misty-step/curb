@@ -1,14 +1,25 @@
-use std::collections::HashSet;
-use std::env;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration as StdDuration;
 
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
+
+mod defaults;
+mod duration;
+mod policy_merge;
+mod preset;
+mod storage;
+#[cfg(test)]
+mod tests;
+
+pub use defaults::default_home_dir;
+use defaults::{default_process_agents, default_state_dir};
+pub use duration::{HumanDuration, parse_duration_for_cli};
+pub use preset::Preset;
+use storage::{set_dir_private, set_file_private, write_private_file};
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -115,7 +126,7 @@ impl Config {
             },
         };
         cfg.set_defaults();
-        cfg.apply_policy_to_agents();
+        cfg.refresh_agent_policies();
         cfg
     }
 
@@ -199,7 +210,7 @@ impl Config {
             }
         }
 
-        let mut seen = HashSet::new();
+        let mut seen = std::collections::HashSet::new();
         for agent in &self.agents {
             if agent.id.is_empty() {
                 return Err(ConfigError::MissingAgentId);
@@ -243,183 +254,16 @@ impl Config {
     }
 
     pub fn policy_for(&self, agent: &Agent) -> Policy {
-        let mut policy = self.defaults.clone();
-        if let Some(override_policy) = &agent.policy {
-            policy.merge_override(override_policy);
-        }
-        policy
+        policy_merge::policy_for(self, agent)
     }
 
     pub fn apply_preset(&mut self, preset: Preset) {
-        self.keep_process_agents();
-        self.service.min_confidence = 50;
-        match preset {
-            Preset::Aggressive => {
-                self.mode = Mode::Enforcement;
-                self.service.scan_interval = HumanDuration::seconds(1);
-                self.service.heartbeat_interval = HumanDuration::seconds(5);
-                self.usage.enabled = Some(true);
-                self.usage.scan_interval = HumanDuration::seconds(1);
-                self.usage.window = HumanDuration::minutes(1);
-                self.usage.warn_turn_tokens = 250_000;
-                self.usage.kill_turn_tokens = 750_000;
-                self.usage.grace_period = HumanDuration::seconds(10);
-                self.defaults.warn_after = HumanDuration::seconds(30);
-                self.defaults.kill_after = HumanDuration::seconds(60);
-                self.defaults.kill_grace_period = HumanDuration::seconds(10);
-                self.defaults.ack_extension = HumanDuration::seconds(30);
-                self.defaults.max_extensions = 1;
-                self.defaults.min_lifetime = HumanDuration::seconds(1);
-                self.defaults.max_run_gap = HumanDuration::seconds(2);
-            }
-            Preset::Reasonable => {
-                self.mode = Mode::Alert;
-                self.service.scan_interval = HumanDuration::seconds(15);
-                self.service.heartbeat_interval = HumanDuration::minutes(1);
-                self.usage.enabled = Some(true);
-                self.usage.scan_interval = HumanDuration::seconds(5);
-                self.usage.window = HumanDuration::minutes(15);
-                self.usage.warn_turn_tokens = 1_000_000;
-                self.usage.kill_turn_tokens = 3_000_000;
-                self.usage.grace_period = HumanDuration::minutes(1);
-                self.defaults.warn_after = HumanDuration::minutes(90);
-                self.defaults.kill_after = HumanDuration::hours(2);
-                self.defaults.kill_grace_period = HumanDuration::minutes(1);
-                self.defaults.ack_extension = HumanDuration::minutes(30);
-                self.defaults.max_extensions = 2;
-            }
-            Preset::Observe => {
-                self.mode = Mode::Visibility;
-                self.service.scan_interval = HumanDuration::seconds(15);
-                self.usage.enabled = Some(true);
-                self.usage.scan_interval = HumanDuration::seconds(10);
-                self.usage.window = HumanDuration::minutes(15);
-                self.usage.warn_turn_tokens = 5_000_000;
-                self.usage.kill_turn_tokens = 10_000_000;
-                self.usage.grace_period = HumanDuration::minutes(1);
-                self.defaults.warn_after = HumanDuration::hours(24);
-                self.defaults.kill_after = HumanDuration::hours(48);
-                self.defaults.kill_grace_period = HumanDuration::minutes(1);
-                self.defaults.ack_extension = HumanDuration::minutes(30);
-                self.defaults.max_extensions = 2;
-            }
-        }
-        self.apply_policy_to_agents();
+        preset::apply(self, preset);
     }
 
     pub fn refresh_agent_policies(&mut self) {
-        self.apply_policy_to_agents();
+        policy_merge::refresh_agent_policies(self);
     }
-
-    fn apply_policy_to_agents(&mut self) {
-        for agent in &mut self.agents {
-            let mut policy = self.defaults.clone();
-            policy.allow_app_root_kill = false;
-            agent.policy = Some(policy);
-        }
-    }
-
-    fn keep_process_agents(&mut self) {
-        let mut agents = default_process_agents();
-        let mut seen = agents
-            .iter()
-            .map(|agent| agent.id.clone())
-            .collect::<HashSet<_>>();
-        for agent in &self.agents {
-            if seen.contains(&agent.id) || !agent.termination_allowed() {
-                continue;
-            }
-            let mut agent = agent.clone();
-            if agent.kind == AgentKind::Unspecified {
-                agent.kind = AgentKind::Process;
-            }
-            seen.insert(agent.id.clone());
-            agents.push(agent);
-        }
-        self.agents = agents;
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Preset {
-    Aggressive,
-    Reasonable,
-    Observe,
-}
-
-impl FromStr for Preset {
-    type Err = ConfigError;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        match raw {
-            "aggressive" => Ok(Self::Aggressive),
-            "reasonable" => Ok(Self::Reasonable),
-            "observe" => Ok(Self::Observe),
-            other => Err(ConfigError::Preset(other.to_string())),
-        }
-    }
-}
-
-impl fmt::Display for Preset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Preset::Aggressive => "aggressive",
-            Preset::Reasonable => "reasonable",
-            Preset::Observe => "observe",
-        })
-    }
-}
-
-fn write_private_file(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path).map_err(|source| ConfigError::Write {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    use std::io::Write;
-    file.write_all(content)
-        .map_err(|source| ConfigError::Write {
-            path: path.to_path_buf(),
-            source,
-        })
-}
-
-fn set_dir_private(path: &Path) -> Result<(), ConfigError> {
-    #[cfg(not(unix))]
-    let _ = path;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| {
-            ConfigError::Write {
-                path: path.to_path_buf(),
-                source,
-            }
-        })?;
-    }
-    Ok(())
-}
-
-fn set_file_private(path: &Path) -> Result<(), ConfigError> {
-    #[cfg(not(unix))]
-    let _ = path;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
-            ConfigError::Write {
-                path: path.to_path_buf(),
-                source,
-            }
-        })?;
-    }
-    Ok(())
 }
 
 fn validate_regexes(
@@ -806,221 +650,6 @@ pub struct LedgerConfig {
     pub include_prompt_content: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct HumanDuration(StdDuration);
-
-impl HumanDuration {
-    pub const ZERO: Self = Self(StdDuration::ZERO);
-
-    pub const fn seconds(seconds: u64) -> Self {
-        Self(StdDuration::from_secs(seconds))
-    }
-
-    pub const fn minutes(minutes: u64) -> Self {
-        Self::seconds(minutes * 60)
-    }
-
-    pub const fn hours(hours: u64) -> Self {
-        Self::minutes(hours * 60)
-    }
-
-    pub fn is_zero(self) -> bool {
-        self.0.is_zero()
-    }
-
-    pub fn as_std(self) -> StdDuration {
-        self.0
-    }
-
-    pub fn from_std(duration: StdDuration) -> Self {
-        Self(duration)
-    }
-
-    fn default_to(&mut self, value: Self) {
-        if self.is_zero() {
-            *self = value;
-        }
-    }
-
-    fn override_with(&mut self, value: Self) {
-        if !value.is_zero() {
-            *self = value;
-        }
-    }
-}
-
-impl Default for HumanDuration {
-    fn default() -> Self {
-        Self::ZERO
-    }
-}
-
-impl Serialize for HumanDuration {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&format_duration(self.0))
-    }
-}
-
-impl<'de> Deserialize<'de> for HumanDuration {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        parse_duration(&String::deserialize(deserializer)?)
-            .map(Self)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-fn parse_duration(raw: &str) -> Result<StdDuration, String> {
-    if raw.is_empty() {
-        return Ok(StdDuration::ZERO);
-    }
-    let mut rest = raw;
-    let mut total = 0u64;
-    while !rest.is_empty() {
-        let digits = rest
-            .chars()
-            .take_while(|ch| ch.is_ascii_digit())
-            .collect::<String>();
-        if digits.is_empty() {
-            return Err(format!("invalid duration {raw:?}"));
-        }
-        let value = digits
-            .parse::<u64>()
-            .map_err(|_| format!("invalid duration {raw:?}"))?;
-        rest = &rest[digits.len()..];
-        let unit = if let Some(stripped) = rest.strip_prefix("ms") {
-            rest = stripped;
-            total = total.saturating_add(value / 1000);
-            continue;
-        } else if let Some(stripped) = rest.strip_prefix('h') {
-            rest = stripped;
-            3600
-        } else if let Some(stripped) = rest.strip_prefix('m') {
-            rest = stripped;
-            60
-        } else if let Some(stripped) = rest.strip_prefix('s') {
-            rest = stripped;
-            1
-        } else {
-            return Err(format!("invalid duration {raw:?}"));
-        };
-        total = total.saturating_add(value.saturating_mul(unit));
-    }
-    Ok(StdDuration::from_secs(total))
-}
-
-pub fn parse_duration_for_cli(raw: &str) -> Result<StdDuration, String> {
-    parse_duration(raw)
-}
-
-fn format_duration(duration: StdDuration) -> String {
-    let seconds = duration.as_secs();
-    if seconds != 0 && seconds.is_multiple_of(3600) {
-        format!("{}h", seconds / 3600)
-    } else if seconds != 0 && seconds.is_multiple_of(60) {
-        format!("{}m", seconds / 60)
-    } else {
-        format!("{seconds}s")
-    }
-}
-
-/// The user's home directory, derived from the environment.
-///
-/// Prefers `HOME` (Unix) and falls back to `USERPROFILE` (Windows). Returns
-/// `None` when neither is set. Used by path-compaction rendering and by the
-/// binary's CLI to resolve default config/state locations.
-pub fn default_home_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
-}
-
-fn default_state_dir() -> PathBuf {
-    if let Ok(xdg) = env::var("XDG_STATE_HOME") {
-        return PathBuf::from(xdg).join("curb");
-    }
-    if let Ok(local) = env::var("LOCALAPPDATA") {
-        return PathBuf::from(local).join("Curb");
-    }
-    if let Ok(home) = env::var("HOME") {
-        return PathBuf::from(home)
-            .join(".local")
-            .join("state")
-            .join("curb");
-    }
-    PathBuf::from(".curb")
-}
-
-fn default_process_agents() -> Vec<Agent> {
-    vec![
-        Agent {
-            id: "codex-desktop-worker".to_string(),
-            label: "Codex Desktop Worker".to_string(),
-            family: "codex".to_string(),
-            kind: AgentKind::Process,
-            matcher: Match {
-                process_names: vec!["codex".to_string()],
-                require_command_regex: vec![
-                    "\\bapp-server\\b".to_string(),
-                    "--listen\\s+stdio://".to_string(),
-                ],
-                command_regex: vec![
-                    "\\bapp-server\\b".to_string(),
-                    "--listen\\s+stdio://".to_string(),
-                ],
-                ..Match::default()
-            },
-            policy: None,
-        },
-        Agent {
-            id: "codex-cli".to_string(),
-            label: "Codex CLI".to_string(),
-            family: "codex".to_string(),
-            kind: AgentKind::Process,
-            matcher: Match {
-                process_names: vec!["codex".to_string()],
-                command_regex: vec!["(^|/|\\\\)codex(\\.js|\\.cmd|\\.exe)?(\\s|$)".to_string()],
-                exclude_command_regex: vec!["/Applications/Codex.app".to_string()],
-                ..Match::default()
-            },
-            policy: None,
-        },
-        Agent {
-            id: "claude-code".to_string(),
-            label: "Claude Code".to_string(),
-            family: "claude".to_string(),
-            kind: AgentKind::Process,
-            matcher: Match {
-                process_names: vec!["claude".to_string(), "claude-code".to_string()],
-                command_regex: vec!["(^|/|\\\\)claude(-code)?(\\.cmd|\\.exe)?(\\s|$)".to_string()],
-                exclude_command_regex: vec!["/Applications/Claude.app".to_string()],
-                exclude_parent_regex: vec![
-                    "/Applications/Codex\\.app/.+\\bapp-server\\b".to_string(),
-                ],
-                ..Match::default()
-            },
-            policy: None,
-        },
-        Agent {
-            id: "antigravity-cli".to_string(),
-            label: "Anti-Gravity CLI".to_string(),
-            family: "antigravity".to_string(),
-            kind: AgentKind::Process,
-            matcher: Match {
-                process_names: vec!["agy".to_string()],
-                command_regex: vec!["(^|/|\\\\)agy(\\.cmd|\\.exe)?(\\s|$)".to_string()],
-                ..Match::default()
-            },
-            policy: None,
-        },
-    ]
-}
-
 /// Absolute path to the committed example config, used by unit tests across the
 /// crate. Resolved relative to the workspace root (one level above this crate's
 /// manifest dir) so tests pass regardless of the harness working directory.
@@ -1030,243 +659,4 @@ pub(crate) fn example_config_path() -> PathBuf {
         .join("..")
         .join("configs")
         .join("curb.example.yaml")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn loads_example_config_with_defaults() {
-        let cfg = Config::load(example_config_path()).unwrap();
-
-        assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.mode, Mode::Visibility);
-        assert_eq!(cfg.usage.warn_turn_tokens, 1_000_000);
-        assert_eq!(cfg.usage.kill_turn_tokens, 3_000_000);
-        assert_eq!(cfg.agents.len(), 6);
-        assert!(!cfg.ledger.include_prompt_content);
-    }
-
-    #[test]
-    fn save_round_trips_yaml_with_lowercase_enums() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("curb.yaml");
-        let mut cfg = Config::load(example_config_path()).unwrap();
-        cfg.mode = Mode::Enforcement;
-        cfg.usage.warn_turn_tokens = 2_000;
-        cfg.usage.kill_turn_tokens = 4_000;
-
-        cfg.save(&path).unwrap();
-        let raw = std::fs::read_to_string(&path).unwrap();
-        let reloaded = Config::load(&path).unwrap();
-
-        assert!(raw.contains("mode: enforcement"));
-        assert!(raw.contains("kind: process"));
-        assert_eq!(reloaded.mode, Mode::Enforcement);
-        assert_eq!(reloaded.usage.warn_turn_tokens, 2_000);
-        assert_eq!(reloaded.usage.kill_turn_tokens, 4_000);
-        assert_eq!(reloaded.agents.len(), cfg.agents.len());
-        assert_eq!(reloaded.ledger.path, cfg.ledger.path);
-    }
-
-    #[test]
-    fn local_default_builds_private_process_agent_config() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = Config::local_default(Mode::Alert, dir.path().join("state"));
-
-        assert_eq!(cfg.version, 1);
-        assert_eq!(cfg.profile, "local-default");
-        assert_eq!(cfg.mode, Mode::Alert);
-        assert_eq!(cfg.agents.len(), 4);
-        assert!(cfg.agents.iter().all(Agent::termination_allowed));
-        assert_eq!(
-            cfg.ledger.path,
-            dir.path().join("state").join("runs.ndjson")
-        );
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn presets_keep_custom_process_agents_and_drop_watch_only_apps() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut cfg = Config::local_default(Mode::Visibility, dir.path().join("state"));
-        cfg.agents.push(Agent {
-            id: "custom-worker".to_string(),
-            label: "Custom Worker".to_string(),
-            kind: AgentKind::Process,
-            matcher: Match {
-                process_names: vec!["custom".to_string()],
-                ..Match::default()
-            },
-            ..Agent::default()
-        });
-        cfg.agents.push(Agent {
-            id: "custom-app".to_string(),
-            label: "Custom App".to_string(),
-            kind: AgentKind::App,
-            matcher: Match {
-                app_paths: vec!["/Applications/Custom.app".to_string()],
-                ..Match::default()
-            },
-            ..Agent::default()
-        });
-
-        cfg.apply_preset(Preset::Aggressive);
-
-        assert_eq!(cfg.mode, Mode::Enforcement);
-        assert_eq!(cfg.usage.warn_turn_tokens, 250_000);
-        assert!(cfg.agents.iter().any(|agent| agent.id == "custom-worker"));
-        assert!(!cfg.agents.iter().any(|agent| agent.id == "custom-app"));
-        assert!(cfg.agents.iter().all(|agent| {
-            agent
-                .policy
-                .as_ref()
-                .is_some_and(|policy| !policy.allow_app_root_kill)
-        }));
-    }
-
-    #[test]
-    fn save_validates_before_replacing_existing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("curb.yaml");
-        let mut cfg = Config::load(example_config_path()).unwrap();
-        cfg.save(&path).unwrap();
-        let original = std::fs::read(&path).unwrap();
-        cfg.usage.warn_turn_tokens = cfg.usage.kill_turn_tokens + 1;
-
-        let err = cfg.save(&path).unwrap_err();
-
-        assert!(matches!(err, ConfigError::InvalidUsageThresholds));
-        assert_eq!(std::fs::read(&path).unwrap(), original);
-        assert_eq!(
-            std::fs::read_dir(dir.path())
-                .unwrap()
-                .filter_map(Result::ok)
-                .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn rejects_prompt_capture() {
-        let err = load_from_str(
-            r#"
-version: 1
-ledger:
-  include_prompt_content: true
-agents:
-  - id: codex
-    label: Codex
-    match:
-      process_names: [codex]
-"#,
-        )
-        .unwrap_err();
-
-        assert!(matches!(err, ConfigError::PromptCaptureUnsupported));
-    }
-
-    #[test]
-    fn rejects_unimplemented_egress_fields() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("curb.yaml");
-        std::fs::write(
-            &path,
-            r#"
-version: 1
-alerts:
-  webhook_url: https://example.invalid/curb/alerts
-  slack_webhook_url: https://example.invalid/slack
-ledger:
-  forward_url: https://example.invalid/curb/events
-agents:
-  - id: codex
-    label: Codex
-    match:
-      process_names: [codex]
-"#,
-        )
-        .unwrap();
-
-        let err = Config::load(&path).unwrap_err();
-
-        assert!(matches!(err, ConfigError::Parse { .. }));
-    }
-
-    #[test]
-    fn rejects_duplicate_agent_ids() {
-        let err = load_from_str(
-            r#"
-version: 1
-agents:
-  - id: codex
-    label: Codex
-    match:
-      process_names: [codex]
-  - id: codex
-    label: Codex Again
-    match:
-      process_names: [codex]
-"#,
-        )
-        .unwrap_err();
-
-        assert!(matches!(err, ConfigError::DuplicateAgentId(id) if id == "codex"));
-    }
-
-    #[test]
-    fn desktop_app_roots_are_not_termination_targets_by_default() {
-        let agent = Agent {
-            id: "codex-desktop".to_string(),
-            label: "Codex Desktop".to_string(),
-            matcher: Match {
-                bundle_ids: vec!["com.openai.codex".to_string()],
-                ..Match::default()
-            },
-            ..Agent::default()
-        };
-
-        assert!(!agent.termination_allowed());
-    }
-
-    #[test]
-    fn supervised_desktop_worker_is_watch_only_unless_escalated() {
-        let worker = default_process_agents()
-            .into_iter()
-            .find(|agent| agent.id == "codex-desktop-worker")
-            .expect("codex-desktop-worker is a default agent");
-        // It is a real process, but supervised — futile to kill the leaf.
-        assert!(worker.termination_allowed());
-        assert!(worker.is_supervised());
-        assert!(!worker.can_terminate(false));
-        assert!(worker.can_terminate(true));
-
-        let cli = default_process_agents()
-            .into_iter()
-            .find(|agent| agent.id == "codex-cli")
-            .expect("codex-cli is a default agent");
-        assert!(!cli.is_supervised());
-        assert!(cli.can_terminate(false));
-    }
-
-    #[test]
-    fn parses_composite_duration_like_go() {
-        assert_eq!(
-            parse_duration("1h30m").unwrap(),
-            StdDuration::from_secs(90 * 60)
-        );
-        assert_eq!(
-            parse_duration("15m10s").unwrap(),
-            StdDuration::from_secs(15 * 60 + 10)
-        );
-    }
-
-    fn load_from_str(raw: &str) -> Result<Config, ConfigError> {
-        let mut cfg: Config = serde_yaml::from_str(raw).unwrap();
-        cfg.set_defaults();
-        cfg.validate()?;
-        Ok(cfg)
-    }
 }

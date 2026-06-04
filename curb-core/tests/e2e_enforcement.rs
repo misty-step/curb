@@ -24,7 +24,7 @@ use curb_core::ledger;
 use curb_core::local_enforcer::{self, LocalEnforcer};
 use curb_core::platform::{Pid, Platform, Process, Snapshot, SystemPlatform};
 use curb_core::usage::{Event as UsageEvent, EventKind};
-use curb_core::usagewatch::UsageWatch;
+use curb_core::usagewatch::{PolicySession, UsageWatch};
 use tempfile::TempDir;
 
 /// Monotonic disambiguator so concurrently-running tests in the same binary
@@ -208,6 +208,75 @@ fn ledger_event_types(cfg: &Config) -> Vec<String> {
         .collect()
 }
 
+fn process_diag(pid: Pid, marker: &str) -> String {
+    match SystemPlatform.capture() {
+        Ok(snapshot) => match snapshot.process(pid) {
+            Some(process) => format!(
+                "pid={} alive=true name={:?} ppid={:?} cwd={:?} started_at={:?} user_present={} executable={:?} command_has_marker={}",
+                pid.get(),
+                process.name,
+                process.ppid.map(|ppid| ppid.get()),
+                process.cwd,
+                process.started_at,
+                process
+                    .username
+                    .as_ref()
+                    .is_some_and(|user| !user.is_empty()),
+                process.executable,
+                process.command.contains(marker),
+            ),
+            None => format!("pid={} alive=false", pid.get()),
+        },
+        Err(error) => format!("pid={} capture_error={error}", pid.get()),
+    }
+}
+
+fn sessions_diag(sessions: &[PolicySession]) -> String {
+    if sessions.is_empty() {
+        return "sessions=[]".to_string();
+    }
+    let entries = sessions
+        .iter()
+        .map(|session| {
+            format!(
+                "{{key={} cwd={:?} last_usage={:?} window_spent={} matched={} can_terminate={} pid={:?} score={} reason={:?}}}",
+                session.key,
+                session.cwd,
+                session.last_usage,
+                session.window_spent_tokens,
+                session.target.matched,
+                session.target.can_terminate,
+                session.target.pid,
+                session.target.score,
+                session.target.reason,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("sessions=[{entries}]")
+}
+
+fn e2e_diag(
+    cfg: &Config,
+    watch: &UsageWatch,
+    worker_pid: Pid,
+    worker_marker: &str,
+    sibling: Option<(Pid, &str)>,
+    sessions: &[PolicySession],
+) -> String {
+    let mut lines = vec![
+        format!("worker: {}", process_diag(worker_pid, worker_marker)),
+        sessions_diag(sessions),
+        format!("terminated_keys={:?}", watch.terminated_keys()),
+        format!("ledger_path={}", cfg.ledger.path.display()),
+        format!("ledger_events={:?}", ledger_event_types(cfg)),
+    ];
+    if let Some((pid, marker)) = sibling {
+        lines.insert(1, format!("sibling: {}", process_diag(pid, marker)));
+    }
+    lines.join("\n")
+}
+
 /// Drive one policy scan through the local adapter against the real OS: build
 /// the correlated policy inputs from the live snapshot, then evaluate them with
 /// a `LocalEnforcer` that owns the sealed termination and the kill primitive.
@@ -217,7 +286,7 @@ fn local_scan(
     events: &[UsageEvent],
     snapshot: &Snapshot,
     now: DateTime<Utc>,
-) {
+) -> Vec<PolicySession> {
     let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
     let sessions =
         local_enforcer::build_policy_sessions(cfg, events, snapshot, now).expect("build sessions");
@@ -225,6 +294,7 @@ fn local_scan(
     watch
         .scan(cfg, &sessions, &enforcer, window_start, now)
         .expect("scan");
+    sessions
 }
 
 /// (a) Warn fires, grace elapses, then the exact correlated worker process is
@@ -280,19 +350,30 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
     // Scan 1: over the kill line — grace starts, nothing terminated yet.
     let now = Utc::now();
     let snapshot = SystemPlatform.capture().expect("capture");
-    local_scan(
+    let first_sessions = local_scan(
         &mut watch,
         &cfg,
         &[over_kill_event(now, &session_cwd, 250)],
         &snapshot,
         now,
     );
-    assert!(is_alive(worker_pid), "worker must survive the grace scan");
+    assert!(
+        is_alive(worker_pid),
+        "worker must survive the grace scan\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            Some((sibling_pid, &sibling_marker)),
+            &first_sessions,
+        )
+    );
 
     // Scan 2: grace has elapsed — terminate the worker tree.
     let after = now + chrono::Duration::seconds(2);
     let snapshot = SystemPlatform.capture().expect("capture");
-    local_scan(
+    let second_sessions = local_scan(
         &mut watch,
         &cfg,
         &[over_kill_event(after, &session_cwd, 250)],
@@ -302,14 +383,30 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
 
     assert!(
         wait_until_gone(worker_pid, Duration::from_secs(10)),
-        "the correlated worker pid {} was not terminated",
-        worker_pid.get()
+        "the correlated worker pid {} was not terminated\n{}",
+        worker_pid.get(),
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            Some((sibling_pid, &sibling_marker)),
+            &second_sessions,
+        )
     );
     // The adversarial assertion: the plausible sibling must still be alive.
     assert!(
         is_alive(sibling_pid),
-        "the app-root-like sibling pid {} was wrongly terminated",
-        sibling_pid.get()
+        "the app-root-like sibling pid {} was wrongly terminated\n{}",
+        sibling_pid.get(),
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            Some((sibling_pid, &sibling_marker)),
+            &second_sessions,
+        )
     );
 
     let events = ledger_event_types(&cfg);
@@ -321,7 +418,15 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
                 "usage_termination_started",
                 "usage_termination_completed",
             ],
-        "unexpected ledger lifecycle: {events:?}"
+        "unexpected ledger lifecycle: {events:?}\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            Some((sibling_pid, &sibling_marker)),
+            &second_sessions,
+        )
     );
 
     worker.force_cleanup();
@@ -352,18 +457,30 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     let now = Utc::now();
     // Scan 1: grace.
     let snapshot = SystemPlatform.capture().expect("capture");
-    local_scan(
+    let first_sessions = local_scan(
         &mut watch,
         &cfg,
         &[over_kill_event(now, &session_cwd, 250)],
         &snapshot,
         now,
     );
+    assert!(
+        is_alive(worker_pid),
+        "worker must survive the initial grace scan\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            None,
+            &first_sessions,
+        )
+    );
 
     // Scan 2: terminate.
     let killed_at = now + chrono::Duration::seconds(1);
     let snapshot = SystemPlatform.capture().expect("capture");
-    local_scan(
+    let second_sessions = local_scan(
         &mut watch,
         &cfg,
         &[over_kill_event(killed_at, &session_cwd, 250)],
@@ -372,10 +489,29 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     );
     assert!(
         wait_until_gone(worker_pid, Duration::from_secs(10)),
-        "worker pid {} was not terminated on scan 2",
-        worker_pid.get()
+        "worker pid {} was not terminated on scan 2\n{}",
+        worker_pid.get(),
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            None,
+            &second_sessions,
+        )
     );
-    assert!(watch.terminated_keys().contains("codex:e2e-session"));
+    assert!(
+        watch.terminated_keys().contains("codex:e2e-session"),
+        "terminated key missing after scan 2\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            None,
+            &second_sessions,
+        )
+    );
 
     let after_kill = ledger_event_types(&cfg);
     assert_eq!(
@@ -385,7 +521,16 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
             "usage_grace_started",
             "usage_termination_started",
             "usage_termination_completed",
-        ]
+        ],
+        "unexpected ledger lifecycle after scan 2\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            None,
+            &second_sessions,
+        )
     );
 
     // Scan 3: the session has logged no new activity since the kill (the
@@ -393,7 +538,7 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     // table. Curb must treat the session as dead and not attempt another kill.
     let later = killed_at + chrono::Duration::seconds(1);
     let snapshot = SystemPlatform.capture().expect("capture");
-    local_scan(
+    let third_sessions = local_scan(
         &mut watch,
         &cfg,
         &[over_kill_event(killed_at, &session_cwd, 250)],
@@ -405,9 +550,28 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     assert_eq!(
         ledger_event_types(&cfg),
         after_kill,
-        "a terminated session was re-processed on the next scan"
+        "a terminated session was re-processed on the next scan\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            None,
+            &third_sessions,
+        )
     );
-    assert!(watch.terminated_keys().contains("codex:e2e-session"));
+    assert!(
+        watch.terminated_keys().contains("codex:e2e-session"),
+        "terminated key missing after scan 3\n{}",
+        e2e_diag(
+            &cfg,
+            &watch,
+            worker_pid,
+            &worker_marker,
+            None,
+            &third_sessions,
+        )
+    );
 
     worker.force_cleanup();
 }
