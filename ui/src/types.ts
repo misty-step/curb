@@ -111,19 +111,19 @@ export interface AgentView {
   running_for_seconds?: number;
   project?: string;
   cwd?: string;
-  session_key?: string;
+  session_key: string;
   turn_tokens: number;
   explanation: string;
 }
 
 export interface TurnView {
-  id?: string;
-  request_id?: string;
+  id: string | null;
+  request_id: string | null;
   session_key?: string;
-  session_id?: string;
+  session_id: string | null;
   provider: string;
-  at?: string;
-  model?: string;
+  at: string | null;
+  model: string | null;
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
@@ -182,6 +182,25 @@ export interface NotificationView {
   message: string;
   last_test_at?: string;
   last_error?: string;
+}
+
+export interface LiveView {
+  status: string;
+  app: string;
+  api_version: number;
+}
+
+export interface ReadinessCheckView {
+  name: string;
+  status: string;
+  reason?: string;
+}
+
+export interface ReadinessView {
+  status: string;
+  app: string;
+  api_version: number;
+  checks: ReadinessCheckView[];
 }
 
 export interface AckView {

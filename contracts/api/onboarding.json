@@ -1,0 +1,43 @@
+{
+  "required": true,
+  "config_path": "/tmp/curb/config.yaml",
+  "mode": "alert",
+  "action": "notify only; never kill",
+  "mode_can_terminate": false,
+  "detected_providers": ["codex"],
+  "detected_workers": ["Codex Worker"],
+  "enforceable_agent_types": 1,
+  "watch_only_agent_types": 1,
+  "notifications": {
+    "enabled": true,
+    "available": true,
+    "status": "ready",
+    "message": "ready"
+  },
+  "capabilities": {
+    "platform": "test",
+    "notifications": {
+      "available": true,
+      "status": "ready",
+      "message": "ready"
+    },
+    "process_capture": {
+      "available": true,
+      "status": "ready",
+      "message": "process capture available"
+    },
+    "process_identity": {
+      "available": true,
+      "status": "ready",
+      "message": "identity evidence available"
+    },
+    "enforcement": {
+      "available": false,
+      "status": "disabled",
+      "message": "current mode never terminates processes"
+    }
+  },
+  "sources": [],
+  "final_sentence": "Curb will notify on high-token turns.",
+  "steps": []
+}

@@ -133,8 +133,8 @@ export function selectSessionExplanation(
     turns: turns.map((turn, index) => ({
       label: turn.id || turn.request_id || `turn ${index + 1}`,
       provider: turn.provider,
-      at: turn.at,
-      model: turn.model,
+      at: turn.at ?? undefined,
+      model: turn.model ?? undefined,
       source: turn.source,
       inputTokens: turn.input_tokens,
       cachedInputTokens: turn.cached_input_tokens,

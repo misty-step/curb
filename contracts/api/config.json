@@ -1,0 +1,16 @@
+{
+  "path": "/tmp/curb/config.yaml",
+  "mode": "alert",
+  "usage_enabled": true,
+  "warn_turn_tokens": 1000,
+  "kill_turn_tokens": 3000,
+  "usage_window_seconds": 900,
+  "usage_scan_seconds": 5,
+  "lookback_seconds": 86400,
+  "process_warn_seconds": 5400,
+  "process_kill_seconds": 7200,
+  "ack_extension_seconds": 1800,
+  "local_notifications": true,
+  "escalate_supervised": false,
+  "agents": []
+}

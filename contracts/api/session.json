@@ -1,0 +1,22 @@
+{
+  "key": "codex:session/one",
+  "id": "session/one",
+  "provider": "codex",
+  "status": "working",
+  "alert": "warn",
+  "can_stop": false,
+  "can_acknowledge": true,
+  "project": "repo",
+  "cwd": "/repo",
+  "models": ["model"],
+  "turn_tokens": 789,
+  "turn_context_tokens": 789,
+  "total_tokens": 1000,
+  "calls": 1,
+  "last_activity_at": "2026-05-28T16:00:00Z",
+  "pid": 4242,
+  "process_started_at": "2026-05-28T16:00:00Z",
+  "owner": "phaedrus",
+  "executable": "/usr/local/bin/codex",
+  "explanation": "Past your warn line since your last input."
+}
