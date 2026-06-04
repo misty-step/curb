@@ -1,0 +1,8 @@
+curb headless server
+  listening: http://127.0.0.1:63763/
+  token: /var/folders/jr/0kj0xfdd4s1ggs921sr2d7f80000gn/T//curb-dogfood-observability.bzP0O6/state/api.token
+  auth: Authorization: Bearer $(cat token-file)
+  ui: disabled
+  live: http://127.0.0.1:63763/v1/live
+  ready: http://127.0.0.1:63763/v1/ready
+  watcher: usage policy scans run in this process

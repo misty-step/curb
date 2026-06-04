@@ -124,6 +124,22 @@ the same service that serves the UI API. It binds only to loopback. The
 embedded `curb app` dashboard receives a same-origin HttpOnly cookie
 automatically, so normal UI use does not require pasting a token.
 
+For headless sidecars and server-hosted agent runners, use API-only mode:
+
+```sh
+curb serve --headless --addr 127.0.0.1:8765
+```
+
+Headless mode does not serve the embedded web UI and does not open a browser.
+`/v1/live` and `/v1/ready` are public loopback probes in both serve modes so
+local supervisors can check process and dependency health without reading the
+API token. Protected API routes still require the token, including
+`/v1/health`, `/v1/overview`, session actions, config updates, notification
+tests, and stop requests. Headless mode does not change enforcement safety:
+visibility and alert modes never terminate, desktop app roots remain
+watch-only, and every stop still requires fresh process correlation plus sealed
+PID, start time, owner, executable, bundle, or signing identity.
+
 Advanced CLI and development clients use the per-user bearer token stored at
 `<state_dir>/api.token` with `0600` permissions to call endpoints such as
 `/v1/snapshot`, `/v1/overview`, `/v1/agents`, `/v1/sessions`, `/v1/events`,

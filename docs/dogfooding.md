@@ -21,9 +21,32 @@ Run the local app:
 For a headless/server-style run:
 
 ```sh
-./target/release/curb serve --addr 127.0.0.1:8765
+CURB_LOG_FORMAT=json ./target/release/curb serve --headless --addr 127.0.0.1:8765 2> curb.ndjson
 ./target/release/curb watch
 ```
+
+For repeatable timed observability evidence, prefer the repo script:
+
+```sh
+CURB_DOGFOOD_SECONDS=60 bash scripts/dogfood-headless-observability.sh
+```
+
+For a stronger local sidecar proof, run a longer window into a unique evidence
+directory:
+
+```sh
+CURB_DOGFOOD_SECONDS=180 bash scripts/dogfood-headless-observability.sh evidence/dogfood/$(date +%F)-headless-observability-3min
+```
+
+`curb serve --headless` keeps the local API/runtime available without serving
+the embedded web UI. It exposes unauthenticated liveness/readiness probes at
+`/v1/live` and `/v1/ready`; protected API routes such as `/v1/health`,
+`/v1/overview`, session actions, config updates, and stop requests still require
+the API token and loopback binding.
+
+Structured logs use the schema in `docs/observability.md`. Attach the validated
+NDJSON artifact to the dogfood evidence directory when a run is meant to support
+backlog ranking or release confidence.
 
 ## What To Watch
 
@@ -52,3 +75,24 @@ After the first real dogfood session, use
 `backlog.d/023-post-closeout-grooming-and-dogfood.md` to shape the next tranche:
 refactoring, stronger gates, Windows proof, release/install flow, user-like QA,
 and Olympus adapter readiness.
+
+The current groomed tranche starts with
+`backlog.d/024-dogfood-evidence-matrix.md`, then moves through headless server
+mode, structured observability, quality gates/API contracts, and deep-module
+refactoring. Keep that order unless new dogfood evidence shows a higher-risk
+failure.
+
+Current local headless evidence includes
+`evidence/dogfood/2026-06-04-headless-observability-3min/`, a 180-second
+visibility-mode run with repeated watcher ticks, final readiness HTTP 200,
+parser acceptance, and NDJSON redaction checks. Treat this as local dogfood
+evidence, not hosted or multi-hour deployment proof.
+
+The headless observability script now fails weak timed runs: it validates
+`CURB_DOGFOOD_SECONDS`, requires watcher ticks to scale with the requested
+window, and checks NDJSON for token/auth, prompt/response, screenshot,
+keystroke, file-content, raw-provider, and payload markers.
+
+Dogfood evidence should live under `evidence/dogfood/YYYY-MM-DD-<short-slug>/`
+and include enough source-health, notification, startup, UI, and safety notes to
+justify the next backlog ranking without relying on memory.

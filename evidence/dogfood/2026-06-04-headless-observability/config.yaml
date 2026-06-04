@@ -1,0 +1,120 @@
+version: 1
+profile: contractor-default
+mode: visibility
+
+service:
+  scan_interval: 15s
+  policy_interval: 5s
+  heartbeat_interval: 60s
+  min_confidence: 50
+  state_dir: /var/folders/jr/0kj0xfdd4s1ggs921sr2d7f80000gn/T//curb-dogfood-observability.jsKZNo/state
+
+usage:
+  enabled: true
+  scan_interval: 2s
+  lookback: 24h
+  window: 5m
+  warn_turn_tokens: 1000000
+  kill_turn_tokens: 3000000
+  grace_period: 10s
+  # Power-user opt-in. Desktop agents (e.g. the Codex app) supervise their task
+  # workers and respawn them, so killing the leaf is futile — by default Curb
+  # treats them as watch-only. Set true to kill the supervisor instead, which
+  # stops every concurrent task under that desktop app.
+  escalate_supervised: false
+
+defaults:
+  warn_after: 90m
+  kill_after: 120m
+  ack_extension: 30m
+  max_extensions: 2
+  kill_grace_period: 60s
+  cooldown_after_kill: 15m
+  min_lifetime: 10s
+  max_run_gap: 20s
+  allow_app_root_kill: false
+
+agents:
+  - id: codex-desktop-worker
+    label: Codex Desktop Worker
+    family: codex
+    kind: process
+    match:
+      process_names:
+        - codex
+      require_command_regex:
+        - "\\bapp-server\\b"
+        - "--listen\\s+stdio://"
+      command_regex:
+        - "\\bapp-server\\b"
+        - "--listen\\s+stdio://"
+
+  - id: codex-cli
+    label: Codex CLI
+    family: codex
+    kind: process
+    match:
+      process_names:
+        - codex
+      command_regex:
+        - "(^|/|\\\\)codex(\\.js|\\.cmd|\\.exe)?(\\s|$)"
+      exclude_command_regex:
+        - "/Applications/Codex.app"
+
+  - id: claude-code
+    label: Claude Code
+    family: claude
+    kind: process
+    match:
+      process_names:
+        - claude
+        - claude-code
+      command_regex:
+        - "(^|/|\\\\)claude(-code)?(\\.cmd|\\.exe)?(\\s|$)"
+      exclude_command_regex:
+        - "/Applications/Claude.app"
+      exclude_parent_command_regex:
+        - "/Applications/Codex\\.app/.+\\bapp-server\\b"
+
+  - id: pi-cli
+    label: Pi
+    family: pi
+    kind: process
+    match:
+      process_names:
+        - pi
+      command_regex:
+        - "(^|/|\\\\)pi(\\.cmd|\\.exe)?(\\s|$)"
+
+  - id: antigravity-cli
+    label: Anti-Gravity CLI
+    family: antigravity
+    kind: process
+    # Process visibility only. Curb does not meter Antigravity token usage until
+    # a metadata-only provider adapter is implemented.
+    match:
+      process_names:
+        - agy
+      command_regex:
+        - "(^|/|\\\\)agy(\\.cmd|\\.exe)?(\\s|$)"
+
+  - id: synthetic-sleep
+    label: Synthetic Sleep
+    family: synthetic
+    match:
+      process_names:
+        - sleep
+      command_regex:
+        - "\\bsleep\\b"
+    policy:
+      warn_after: 30s
+      kill_after: 60s
+      ack_extension: 30s
+      max_extensions: 1
+
+alerts:
+  local_notifications: false
+
+ledger:
+  path: evidence/dogfood/2026-06-04-headless-observability/ledger.ndjson
+  include_prompt_content: false

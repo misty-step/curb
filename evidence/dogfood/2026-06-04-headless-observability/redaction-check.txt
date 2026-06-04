@@ -1,0 +1,1 @@
+ok: no token, auth header, prompt, response, screenshot, or keystroke terms in NDJSON

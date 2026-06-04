@@ -1,0 +1,5 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling curb-core v0.1.0 (/Users/phaedrus/.codex/worktrees/066e/curb/curb-core)
+   Compiling curb v0.1.0 (/Users/phaedrus/.codex/worktrees/066e/curb)
+    Finished `release` profile [optimized] target(s) in 20.12s

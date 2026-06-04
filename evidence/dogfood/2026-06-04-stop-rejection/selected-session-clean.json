@@ -1,0 +1,22 @@
+{
+  "key": "codex:019e8ee0-2e21-76d1-88ed-0152403413c4",
+  "id": "019e8ee0-2e21-76d1-88ed-0152403413c4",
+  "provider": "codex",
+  "status": "working",
+  "alert": "ok",
+  "can_stop": false,
+  "can_acknowledge": false,
+  "project": "curb",
+  "cwd": "/Users/phaedrus/.codex/worktrees/066e/curb",
+  "models": [],
+  "turn_tokens": 66902,
+  "turn_context_tokens": 2583798,
+  "total_tokens": 99301,
+  "calls": 23,
+  "last_activity_at": "2026-06-04T02:30:27.808Z",
+  "pid": 18861,
+  "process_started_at": "2026-06-04T01:22:21Z",
+  "owner": "phaedrus",
+  "executable": "/Applications/Codex.app/Contents/Resources/codex",
+  "explanation": "Working."
+}

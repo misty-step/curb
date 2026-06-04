@@ -1,0 +1,15 @@
+curb usage
+  sources: codex 2360 events; claude 701 events; pi 317 events
+  sessions: 257
+  codex 019e8ee0-2e21-76d1-88ed-0152403413c4 calls=17 total=2202090 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e9039-6598-7df2-970b-345b8b6d407f calls=8 total=722268 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e903a-d6eb-7bd3-8ed6-12fa4365d939 calls=9 total=248264 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  claude 5b07c014-86e9-401b-8ab4-61cbdd7e91ba calls=2 total=0 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e9033-cce4-7803-a3c1-ca16e421dfa4 calls=9 total=300766 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e9033-abbe-7202-96e9-837b9653e37a calls=7 total=185017 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e9033-8806-7190-8154-a5ab99a3c6c4 calls=2 total=0 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e9033-60fe-7e43-a885-5342b7f50ac9 calls=2 total=0 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e902e-6522-7120-924d-092bb634c86b calls=6 total=393816 cwd=/Users/phaedrus/Development/harness-kit
+  pi 68fb0588-b99e-42a1-8625-0b2b92bee704 calls=8 total=109866 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  codex 019e902e-8537-7440-9557-d2dadd5cb38f calls=9 total=371114 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
+  pi 950a66e4-0238-4677-8925-5936ebba0491 calls=5 total=73957 cwd=/Users/phaedrus/.codex/worktrees/066e/curb

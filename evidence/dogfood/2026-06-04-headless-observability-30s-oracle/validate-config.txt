@@ -1,0 +1,1 @@
+ok config=evidence/dogfood/2026-06-04-headless-observability-30s-oracle/config.yaml mode=visibility agents=6 ledger=evidence/dogfood/2026-06-04-headless-observability-30s-oracle/ledger.ndjson

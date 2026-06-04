@@ -1,0 +1,1 @@
+ok config=configs/curb.example.yaml mode=visibility agents=6 ledger=.curb/runs.ndjson

@@ -1,0 +1,6 @@
+duration_seconds=30
+events=23
+usage_scan=1
+watcher_tick=10
+expected_watcher_tick_min=6
+max_policy_duration_ms=3989

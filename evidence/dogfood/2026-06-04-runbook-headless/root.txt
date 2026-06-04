@@ -1,0 +1,6 @@
+HTTP/1.1 404 Not Found
+content-type: application/json
+Content-Length: 51
+Connection: close
+
+{"error":"headless server","app":"curb","ui":false}

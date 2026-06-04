@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+content-type: application/json
+Content-Length: 277
+Connection: close
+
+{"session_key":"codex:dogfood-enforcement","agent_id":"dogfood-synthetic-worker","pid":23055,"started_at":"2026-06-04T02:50:52Z","owner":"phaedrus","executable":"/bin/bash","scope":"tree","scope_pids":[23202,23055],"result":{"soft_signaled":[23202,23055],"gone":[23202,23055]}}

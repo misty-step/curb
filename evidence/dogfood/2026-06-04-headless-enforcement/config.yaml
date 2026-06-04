@@ -1,0 +1,53 @@
+version: 1
+profile: dogfood-headless-enforcement
+mode: enforcement
+
+service:
+  scan_interval: 1s
+  policy_interval: 1s
+  heartbeat_interval: 60s
+  min_confidence: 50
+  state_dir: /var/folders/jr/0kj0xfdd4s1ggs921sr2d7f80000gn/T//curb-dogfood-enforcement.xHlQmz/state
+
+usage:
+  enabled: true
+  scan_interval: 1s
+  lookback: 5m
+  window: 5m
+  warn_turn_tokens: 100
+  kill_turn_tokens: 200
+  grace_period: 1s
+  escalate_supervised: false
+
+defaults:
+  warn_after: 30s
+  kill_after: 60s
+  ack_extension: 30s
+  max_extensions: 1
+  kill_grace_period: 1s
+  cooldown_after_kill: 15m
+  min_lifetime: 0s
+  max_run_gap: 20s
+  allow_app_root_kill: false
+
+agents:
+  - id: dogfood-synthetic-worker
+    label: Dogfood Synthetic Worker
+    family: codex
+    kind: process
+    match:
+      process_names:
+        - sh
+        - bash
+        - dash
+      require_command_regex:
+        - "curb-dogfood-enforcement-22959-1780541432"
+      command_regex:
+        - "curb-dogfood-enforcement-22959-1780541432"
+
+alerts:
+  local_notifications: false
+
+ledger:
+  path: evidence/dogfood/2026-06-04-headless-enforcement/ledger.ndjson
+  include_prompt_content: false

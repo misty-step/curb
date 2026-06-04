@@ -1,0 +1,1 @@
+ok observability events 18 config_loaded,server_started,usage_scan,watcher_tick,watcher_tick,watcher_tick,api_request,readiness_check,api_request,health_check,watcher_tick,watcher_tick,watcher_tick,health_check,api_request,watcher_tick,watcher_tick,shutdown
