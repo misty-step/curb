@@ -24,7 +24,7 @@ Live evidence:
   tests passed.
 - demo/006 dry-run completed and would only target a synthetic sleep worker.
 - Offline dependency audit loaded 1105 RustSec advisories from
-  /Users/phaedrus/.cargo/advisory-db and scanned 187 crate dependencies.
+  <cargo-advisory-db> and scanned 187 crate dependencies.
 - Online dependency audit fetched RustSec, updated crates.io, scanned
   Cargo.lock, found 0 Rust vulnerabilities, and completed npm audit.
 

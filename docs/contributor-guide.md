@@ -137,7 +137,7 @@ Update it when local gates, CI gates, module boundaries, observability signals,
 or approved waivers change. The profile is validated with:
 
 ```sh
-/Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate
+<agent-readiness-skill>/scripts/profile-crud.py validate
 ```
 
 The current gate ladder is:

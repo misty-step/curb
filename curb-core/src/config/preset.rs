@@ -35,13 +35,14 @@ impl fmt::Display for Preset {
 
 pub(super) fn apply(config: &mut Config, preset: Preset) {
     policy_merge::keep_process_agents(config);
+    let previous_defaults = config.defaults.clone();
     config.service.min_confidence = 50;
     match preset {
         Preset::Aggressive => apply_aggressive(config),
         Preset::Reasonable => apply_reasonable(config),
         Preset::Observe => apply_observe(config),
     }
-    policy_merge::refresh_agent_policies(config);
+    policy_merge::refresh_agent_policies_from_previous_defaults(config, &previous_defaults);
 }
 
 fn apply_aggressive(config: &mut Config) {

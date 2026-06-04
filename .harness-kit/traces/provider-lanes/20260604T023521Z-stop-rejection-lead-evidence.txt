@@ -19,7 +19,7 @@ verification:
   - cargo build --release --bin curb
   - python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-stop-rejection/stop-rejection.ndjson
   - python3 scripts/check-secrets.py
-  - /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate
+  - <agent-readiness-skill>/scripts/profile-crud.py validate
   - git diff --check
   - test ! -e .curb
 provider_review:

@@ -6,7 +6,7 @@ use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use super::{CommandSpec, TerminationResult, TerminationTarget, capture};
 
 pub(super) fn terminate_tree(target: &TerminationTarget, grace: Duration) -> TerminationResult {
-    let mut pids = target
+    let pids = target
         .scope()
         .iter()
         .map(|pid| pid.get())
@@ -17,8 +17,6 @@ pub(super) fn terminate_tree(target: &TerminationTarget, grace: Duration) -> Ter
             ..TerminationResult::default()
         };
     }
-    pids.sort_by(|left, right| right.cmp(left));
-
     let mut result = TerminationResult::default();
     for pid in &pids {
         match soft_terminate(*pid) {

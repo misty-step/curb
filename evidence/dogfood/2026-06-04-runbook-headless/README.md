@@ -7,7 +7,7 @@ against a real release-build service run.
 
 ## Environment
 
-- Command cwd: `/Users/phaedrus/.codex/worktrees/066e/curb`
+- Command cwd: `<home>/.codex/worktrees/066e/curb`
 - Binary: `./target/release/curb`
 - Config: `configs/curb.example.yaml`
 - Address: `127.0.0.1:18765`

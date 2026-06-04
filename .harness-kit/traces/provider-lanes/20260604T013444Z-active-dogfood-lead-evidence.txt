@@ -8,7 +8,7 @@ Evidence:
 - cargo build --release --bin curb passed.
 - Initial documented `./target/release/curb usage --since 24h` returned zero
   provider events.
-- `./target/release/curb usage --home /Users/phaedrus --since 24h` returned
+- `./target/release/curb usage --home <home> --since 24h` returned
   non-zero Codex, Claude, and Pi events, proving data existed and exposing a CLI
   default-home bug.
 - `src/main.rs` now defaults `usage` to the OS home directory, matching related

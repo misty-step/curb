@@ -7,7 +7,7 @@
   "can_stop": true,
   "can_acknowledge": true,
   "project": "curb",
-  "cwd": "/Users/phaedrus/.codex/worktrees/066e/curb",
+  "cwd": "<home>/.codex/worktrees/066e/curb",
   "models": [],
   "turn_tokens": 340,
   "turn_context_tokens": 340,
@@ -16,7 +16,7 @@
   "last_activity_at": "2026-06-04T02:50:53.073084Z",
   "pid": 23055,
   "process_started_at": "2026-06-04T02:50:52Z",
-  "owner": "phaedrus",
+  "owner": "<owner>",
   "executable": "/bin/bash",
   "explanation": "Over your kill line — stopping after the grace period."
 }

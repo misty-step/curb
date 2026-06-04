@@ -1,2 +1,3 @@
 {"date":"2026-06-01","pr":null,"correctness":8,"depth":8,"simplicity":8,"craft":8,"verdict":"conditional-merge-ready","providers":["codex","claude","pi","gpt-5.5-low-subagents"]}
 {"date":"2026-06-02","pr":null,"correctness":9,"depth":8,"simplicity":8,"craft":8,"verdict":"ship","providers":["codex","claude","pi","gpt-5.5-low-subagents"]}
+{"date":"2026-06-04","pr":1,"correctness":8,"depth":8,"simplicity":8,"craft":8,"verdict":"conditional-ship-after-artifact-tracking-fix","providers":["codex","pi"],"notes":"codex final critic found untracked count and delegation evidence; lead staged/remediated before commit"}

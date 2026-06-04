@@ -389,6 +389,7 @@ impl ConfigUpdates {
 }
 
 fn apply_config_updates(cfg: &mut Config, updates: ConfigUpdates) -> Result<()> {
+    let previous_defaults = cfg.defaults.clone();
     if let Some(mode) = updates.mode {
         cfg.mode = Mode::from_str(&mode).map_err(anyhow::Error::msg)?;
     }
@@ -420,7 +421,7 @@ fn apply_config_updates(cfg: &mut Config, updates: ConfigUpdates) -> Result<()> 
     if let Some(duration) = updates.usage_scan {
         cfg.usage.scan_interval = HumanDuration::from_std(duration);
     }
-    cfg.refresh_agent_policies();
+    cfg.refresh_agent_policies_from_previous_defaults(&previous_defaults);
     Ok(())
 }
 

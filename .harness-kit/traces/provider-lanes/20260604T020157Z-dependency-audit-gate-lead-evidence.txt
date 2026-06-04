@@ -28,7 +28,7 @@ Verification:
   RustSec data.
 - `.github/workflows/ci.yml` and `.harness-kit/agent-readiness.yaml` parsed as
   YAML.
-- `/Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate` passed.
+- `<agent-readiness-skill>/scripts/profile-crud.py validate` passed.
 - `bash scripts/check-fast.sh` passed.
 - `bash scripts/validate.sh` passed.
 - `git diff --check` passed.

@@ -23,7 +23,7 @@ Verification commands:
 - python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
 - jq -e 'select(.event == "usage_scan" and .fields.grace_started == 1 and .fields.observed_sessions == 1)' evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
 - jq -e 'select(.event == "watcher_tick" and .fields.stop_blocked == 1)' evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
-- /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate
+- <agent-readiness-skill>/scripts/profile-crud.py validate
 
 Evidence artifacts:
 - evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson

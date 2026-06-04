@@ -20,7 +20,7 @@ Verification:
 - `cd ui && npm run smoke` passed.
 - `bash scripts/check-fast.sh` passed with the smoke included.
 - `bash scripts/validate.sh` passed with the smoke included through the fast gate.
-- `/Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate` passed.
+- `<agent-readiness-skill>/scripts/profile-crud.py validate` passed.
 - `git diff --check` passed.
 
 Lead verdict:

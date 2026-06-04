@@ -1,7 +1,7 @@
 version: 1
 generated_at: '2026-06-04T02:40:00Z'
 profile:
-  repo_root: /Users/phaedrus/.codex/worktrees/066e/curb
+  repo_root: .
   detected_stack:
   - rust
   - node

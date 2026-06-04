@@ -2,7 +2,7 @@ Objective: validate the durable agent-readiness profile after the readiness
 closeout and local proof tranche.
 
 Command:
-- python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
+- python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
 
 Status: passed
 

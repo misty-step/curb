@@ -5,7 +5,7 @@
   "expected": {
     "pid": 23055,
     "started_at": "2026-06-04T02:50:52Z",
-    "owner": "phaedrus",
+    "owner": "<owner>",
     "executable": "/bin/bash",
     "bundle_id": null,
     "team_id": null

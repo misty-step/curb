@@ -104,7 +104,35 @@ fn stop_session_records_structured_termination_result_errors() {
     assert_eq!(events[1].event_type, "manual_stop_completed");
     assert_eq!(
         events[1].data.as_ref().unwrap().get("result").unwrap(),
-        "completed"
+        "failed"
+    );
+}
+
+#[test]
+fn stop_session_records_partial_termination_when_some_signals_fail() {
+    let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
+    cfg.mode = crate::config::Mode::Enforcement;
+    cfg.service.state_dir = tempfile::tempdir().unwrap().keep();
+    cfg.ledger.path = cfg.service.state_dir.join("runs.ndjson");
+    cfg.usage.warn_turn_tokens = 100;
+    cfg.usage.kill_turn_tokens = 200;
+    let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+    let events = vec![event("codex", "s1", now, 250)];
+    let root = process(now, 100, "codex", "/repo");
+    let platform =
+        FakePlatform::new(platform::Snapshot::new([root.clone()])).with_partial_terminate_error();
+    let service = Service::new(&cfg, &events, &platform);
+
+    let view = service
+        .stop_session("s1", stop_request_for(&root), now)
+        .unwrap();
+
+    assert_eq!(view.result.soft_signaled, vec![100]);
+    assert_eq!(view.result.errors, vec!["hard pid 100: test failure"]);
+    let events = crate::ledger::read(cfg.ledger.path.clone()).unwrap();
+    assert_eq!(
+        events[1].data.as_ref().unwrap().get("result").unwrap(),
+        "partial"
     );
 }
 
@@ -287,6 +315,7 @@ struct FakePlatform {
     capture: Result<platform::Snapshot, PlatformError>,
     terminated: Mutex<Vec<Vec<i32>>>,
     terminate_error: Option<String>,
+    partial_terminate_error: bool,
 }
 
 impl FakePlatform {
@@ -295,6 +324,7 @@ impl FakePlatform {
             capture: Ok(snapshot),
             terminated: Mutex::new(Vec::new()),
             terminate_error: None,
+            partial_terminate_error: false,
         }
     }
 
@@ -303,11 +333,17 @@ impl FakePlatform {
             capture: Err(PlatformError::Capture(message.to_string())),
             terminated: Mutex::new(Vec::new()),
             terminate_error: None,
+            partial_terminate_error: false,
         }
     }
 
     fn with_terminate_error(mut self, message: &str) -> Self {
         self.terminate_error = Some(message.to_string());
+        self
+    }
+
+    fn with_partial_terminate_error(mut self) -> Self {
+        self.partial_terminate_error = true;
         self
     }
 }
@@ -345,6 +381,13 @@ impl Platform for FakePlatform {
         if let Some(message) = &self.terminate_error {
             return platform::TerminationResult {
                 errors: vec![message.clone()],
+                ..platform::TerminationResult::default()
+            };
+        }
+        if self.partial_terminate_error {
+            return platform::TerminationResult {
+                soft_signaled: target.scope().iter().map(|pid| pid.get()).collect(),
+                errors: vec!["hard pid 100: test failure".to_string()],
                 ..platform::TerminationResult::default()
             };
         }

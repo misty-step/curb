@@ -7,7 +7,7 @@ structured logs without terminating any process.
 
 ## Environment
 
-- Command cwd: `/Users/phaedrus/.codex/worktrees/066e/curb`
+- Command cwd: `<home>/.codex/worktrees/066e/curb`
 - Binary: `./target/release/curb`
 - Config: `configs/curb.example.yaml`
 - Mode: visibility/watch behavior from the example config, not enforcement

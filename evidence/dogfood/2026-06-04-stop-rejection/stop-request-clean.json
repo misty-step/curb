@@ -1,1 +1,1 @@
-{"confirm":true,"scope":"tree","reason":"safe dogfood stop rejection","expected":{"pid":18861,"started_at":"2026-06-04T01:22:21Z","owner":"phaedrus","executable":"/Applications/Codex.app/Contents/Resources/codex","bundle_id":null,"team_id":null}}
+{"confirm":true,"scope":"tree","reason":"safe dogfood stop rejection","expected":{"pid":18861,"started_at":"2026-06-04T01:22:21Z","owner":"<owner>","executable":"<codex-app>","bundle_id":null,"team_id":null}}

@@ -77,8 +77,8 @@ Path(config_path).write_text(source)
 PY
 
 ./target/release/curb validate-config "${CONFIG}" >"${OUT}/validate-config.txt"
-./target/release/curb usage --since 24h --home "${HOME_DIR}" >"${OUT}/usage-since-24h.txt"
-./target/release/curb usage --since 24h --home "${HOME_DIR}" --json >"${OUT}/usage-since-24h.json"
+./target/release/curb usage --since 24h --home "${HOME_DIR}" \
+  | sed -n '1,3p' >"${OUT}/usage-since-24h.txt"
 
 CURB_LOG_FORMAT=json ./target/release/curb serve \
   --headless \
@@ -105,7 +105,8 @@ AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 
 curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/health" >"${OUT}/health-authenticated.json"
 curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/overview" >"${OUT}/overview-initial.json"
-curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/sessions" >"${OUT}/sessions-initial.json"
+curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/sessions" \
+  | jq 'length' >"${OUT}/sessions-initial-count.txt"
 
 sleep "${DURATION}"
 
@@ -113,7 +114,8 @@ curl -sS -o "${OUT}/ready-final.json" -w "%{http_code}\n" \
   "http://${ADDR}/v1/ready" >"${OUT}/ready-final.status"
 grep -q '^200$' "${OUT}/ready-final.status"
 curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/overview" >"${OUT}/overview-final.json"
-curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/sessions" >"${OUT}/sessions-final.json"
+curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/sessions" \
+  | jq 'length' >"${OUT}/sessions-final-count.txt"
 curl -fsS -H "${AUTH_HEADER}" "http://${ADDR}/v1/events?limit=50" >"${OUT}/events-final.json"
 
 kill "${SERVER_PID}" 2>/dev/null || true
@@ -202,14 +204,16 @@ Evidence:
 
 - \`build-release.txt\`: release binary build.
 - \`validate-config.txt\`: generated scratch-state config validates.
-- \`usage-since-24h.txt\` and \`usage-since-24h.json\`: provider source-health
-  baseline before the headless run.
+- \`usage-since-24h.txt\`: provider source-health aggregate baseline before the
+  headless run. It intentionally omits per-session IDs and local paths.
 - \`live.json\`, \`ready-initial.json\`, \`ready-initial.status\`,
   \`ready-final.json\`, \`ready-final.status\`, \`health-authenticated.json\`:
   headless API probes.
-- \`overview-initial.json\`, \`overview-final.json\`, \`sessions-initial.json\`,
-  \`sessions-final.json\`, \`events-final.json\`: protected API evidence after
-  the timed window.
+- \`overview-initial.json\`, \`overview-final.json\`,
+  \`sessions-initial-count.txt\`, \`sessions-final-count.txt\`, and
+  \`events-final.json\`: protected API evidence after the timed window.
+  Per-session response dumps are intentionally not committed because they
+  contain local project labels.
 - \`parse-observability-smoke.txt\`: parser accepted the NDJSON artifact and
   required runtime policy fields.
 - \`event-summary.json\` and \`event-summary.txt\`: event counts from the timed

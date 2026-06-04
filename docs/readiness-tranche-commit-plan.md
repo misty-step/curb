@@ -43,7 +43,7 @@ Verification before commit:
 scripts/check-setup.sh
 scripts/check-fast.sh
 scripts/check-dependency-audit.sh --offline
-python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
+python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
 ```
 
 Risk to review: workflow syntax, local path leakage in the profile, and whether
@@ -318,7 +318,7 @@ After all semantic commits are created, run the full branch proof again:
 scripts/validate.sh
 scripts/check-dependency-audit.sh --offline
 bash scripts/check-dependency-audit.sh --online
-python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
+python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
 python3 - <<'PY'
 import json
 from pathlib import Path

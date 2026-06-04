@@ -3,7 +3,7 @@
 ## Run Metadata
 
 - Build SHA: `6bff6ce`
-- Branch/worktree: detached `HEAD` at `/Users/phaedrus/.codex/worktrees/066e/curb`
+- Branch/worktree: detached `HEAD` at `<home>/.codex/worktrees/066e/curb`
 - OS: macOS 26.5.1 arm64
 - Curb command(s):
   - `cargo build --release --bin curb`
@@ -36,7 +36,7 @@ python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-03-active-
 Evidence:
 
 - `usage-since-24h.txt`: initial documented command returned `codex 0 events; claude 0 events; pi 0 events`.
-- `usage-since-24h-home.txt`: adding `--home /Users/phaedrus` returned `codex 2360 events; claude 701 events; pi 317 events`.
+- `usage-since-24h-home.txt`: adding `--home <home>` returned `codex 2360 events; claude 701 events; pi 317 events`.
 - `usage-since-24h-fixed.txt`: after the CLI fix, the documented command without `--home` returned the same non-zero provider events.
 
 ## Startup And Install Friction

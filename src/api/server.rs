@@ -70,7 +70,7 @@ impl<B: Backend> Server<B> {
             return response::error_response(401, "unauthorized").with_headers(cors_headers);
         }
         if auth::uses_cookie_auth(&request, &self.token)
-            && auth::unsafe_method(&request.method)
+            && (auth::unsafe_method(&request.method) || auth::has_origin(&request))
             && !auth::same_origin(&request)
         {
             return response::error_response(403, "forbidden").with_headers(cors_headers);

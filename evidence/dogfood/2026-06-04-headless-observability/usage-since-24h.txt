@@ -1,15 +1,3 @@
 curb usage
   sources: codex 2405 events; claude 703 events; pi 337 events
   sessions: 267
-  codex 019e8ee0-2e21-76d1-88ed-0152403413c4 calls=20 total=3658944 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  codex 019e9079-5092-71e1-9cd0-3dc8a200c0e3 calls=11 total=423685 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  pi 8ce445b9-724e-4aaa-8c13-3312c379120a calls=6 total=65094 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  codex 019e9073-0600-7213-979a-5adfddee41e1 calls=8 total=186250 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  pi 7fd9339c-bca8-4553-bfcb-fa57c58298dc calls=4 total=35565 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  codex 019e906b-bf5a-76e3-bf74-03c722ae0247 calls=11 total=674081 cwd=/Users/phaedrus/Development/harness-kit
-  pi b4f74dc5-065f-4ba5-bec1-65c0f2a12300 calls=2 total=10700 cwd=/Users/phaedrus/Development/harness-kit
-  codex 019e906d-63eb-75a3-b8e7-6822df33c177 calls=4 total=29827 cwd=/Users/phaedrus/Development/harness-kit
-  claude ee978c0f-d733-4120-a896-535c6fcf595b calls=2 total=0 cwd=/Users/phaedrus/Development/harness-kit
-  pi 85d1b3a7-a204-4876-b474-8578af926cab calls=8 total=163400 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  codex 019e9069-0704-7030-85b9-64716254502f calls=8 total=261053 cwd=/Users/phaedrus/.codex/worktrees/066e/curb
-  codex 019e9039-6598-7df2-970b-345b8b6d407f calls=8 total=722268 cwd=/Users/phaedrus/.codex/worktrees/066e/curb

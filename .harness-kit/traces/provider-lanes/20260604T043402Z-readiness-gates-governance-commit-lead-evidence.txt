@@ -29,7 +29,7 @@ Verification before commit:
 - scripts/check-fast.sh passed.
 - scripts/check-dependency-audit.sh --offline passed against 1105 cached
   RustSec advisories and 187 crate dependencies.
-- python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate passed.
+- python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate passed.
 - git diff --cached --check passed.
 
 Residual risk:

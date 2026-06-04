@@ -84,7 +84,7 @@ Local branch proof now exists:
   RustSec advisories and 187 crate dependencies.
 - `bash scripts/check-dependency-audit.sh --online` fetched RustSec, updated
   crates.io, found 0 Rust vulnerabilities, and completed npm audit.
-- `python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate`
+- `python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate`
   passed, proving the durable readiness profile is valid.
 
 Hosted branch proof now exists on draft PR #1:
@@ -117,7 +117,7 @@ Local commands to rerun before repushing if the tree changes again:
 scripts/validate.sh
 scripts/check-dependency-audit.sh --offline
 bash scripts/check-dependency-audit.sh --online
-python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
+python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
 python3 - <<'PY'
 import json
 from pathlib import Path

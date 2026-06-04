@@ -20,7 +20,7 @@ accepted_output:
   - Added headless sidecar and observability dogfood runbooks with copy-paste commands, triage steps, and evidence guidance.
   - Linked the ADR/runbook set from README, contributor guide, readiness roadmap, readiness profile, and backlog 029.
 verification:
-  - /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate
+  - <agent-readiness-skill>/scripts/profile-crud.py validate
   - git diff --check
   - cargo test --bin curb headless -- --nocapture
   - cargo test --bin curb observability -- --nocapture

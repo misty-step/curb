@@ -164,7 +164,7 @@ fn supports_bearer_header_token_and_cookie_auth() {
 }
 
 #[test]
-fn cookie_auth_requires_same_origin_for_unsafe_methods() {
+fn cookie_auth_requires_same_origin_for_unsafe_methods_and_cross_origin_reads() {
     let server = Server::new("test-token", FakeBackend::default()).unwrap();
     let now = fixed_now();
 
@@ -181,6 +181,24 @@ fn cookie_auth_requires_same_origin_for_unsafe_methods() {
         now,
     );
     assert_eq!(cross_origin.status, 403);
+
+    let cross_origin_read = server.handle(
+        Request::new("GET", "/v1/overview")
+            .cookie("curb_token=test-token")
+            .origin("http://127.0.0.1:3000")
+            .endpoint("http", "127.0.0.1:8765"),
+        now,
+    );
+    assert_eq!(cross_origin_read.status, 403);
+
+    let same_origin_read = server.handle(
+        Request::new("GET", "/v1/overview")
+            .cookie("curb_token=test-token")
+            .origin("http://127.0.0.1:8765")
+            .endpoint("http", "127.0.0.1:8765"),
+        now,
+    );
+    assert_eq!(same_origin_read.status, 200);
 
     let same_origin = server.handle(
         Request::new("POST", "/v1/service/rescan")

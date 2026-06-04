@@ -264,6 +264,10 @@ impl Config {
     pub fn refresh_agent_policies(&mut self) {
         policy_merge::refresh_agent_policies(self);
     }
+
+    pub fn refresh_agent_policies_from_previous_defaults(&mut self, previous_defaults: &Policy) {
+        policy_merge::refresh_agent_policies_from_previous_defaults(self, previous_defaults);
+    }
 }
 
 fn validate_regexes(

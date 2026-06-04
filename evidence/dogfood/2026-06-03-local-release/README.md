@@ -3,7 +3,7 @@
 ## Run Metadata
 
 - Build SHA: `6bff6ce2c72ff19bc4c003e611a44d3976d6f780`
-- Branch/worktree: detached worktree at `/Users/phaedrus/.codex/worktrees/066e/curb`
+- Branch/worktree: detached worktree at `<home>/.codex/worktrees/066e/curb`
 - OS: macOS 26.5.1 build 25F80, Darwin 25.5.0 arm64
 - Curb command(s):
   - `cargo build --release --bin curb`

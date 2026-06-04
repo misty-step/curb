@@ -80,6 +80,10 @@ pub(super) fn same_origin(request: &Request) -> bool {
             .is_some_and(|origin_host| origin_host.eq_ignore_ascii_case(&request.host))
 }
 
+pub(super) fn has_origin(request: &Request) -> bool {
+    request.header_value("origin").is_some()
+}
+
 pub(super) fn unsafe_method(method: &str) -> bool {
     !matches!(method, "GET" | "HEAD" | "OPTIONS")
 }

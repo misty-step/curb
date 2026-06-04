@@ -20,12 +20,12 @@ accepted_output:
   - README, contributor guide, readiness roadmap, readiness profile, and backlog 029 document the hook feedback path.
 verification:
   - bash -n scripts/install-git-hooks.sh scripts/git-hooks/pre-commit scripts/check-setup.sh
-  - /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate
+  - <agent-readiness-skill>/scripts/profile-crud.py validate
   - git diff --check
   - bash scripts/check-setup.sh
   - bash scripts/git-hooks/pre-commit
 local_hook_state:
-  - scripts/install-git-hooks.sh refused to overwrite /Users/phaedrus/.git-hooks/pre-commit because it is an existing non-Curb Lefthook hook.
+  - scripts/install-git-hooks.sh refused to overwrite <user-git-hooks>/pre-commit because it is an existing non-Curb Lefthook hook.
   - The refusal is intentional user-work preservation; the versioned Curb hook template itself was executed directly and passed.
 residual_risk:
   - This checkout's active Git hook remains the user's global Lefthook hook unless the user intentionally chains or replaces it.

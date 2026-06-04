@@ -21,7 +21,7 @@ Dogfood proof:
 - Evidence: evidence/dogfood/2026-06-04-headless-observability/
 - Event summary: 20 structured events, 1 usage_scan, 7 watcher_tick, max_policy_duration_ms=3955.
 - Readiness: ready-initial.status=503, ready-final.status=200 with all checks ok.
-- Sessions: sessions-final.json contained 267 sessions and 0 stoppable sessions in visibility mode.
+- Sessions: sessions-final-count.txt recorded 267 sessions; protected per-session response dumps were not committed.
 - Parser: scripts/parse-observability-smoke.py accepted headless-observability.ndjson.
 - Redaction: no token, auth header, prompt, response, screenshot, or keystroke terms in NDJSON.
 

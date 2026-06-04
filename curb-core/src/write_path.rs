@@ -187,12 +187,13 @@ impl<'a, P: Platform> Service<'a, P> {
         let result = self
             .platform
             .terminate(&target, self.cfg.usage.grace_period.as_std());
+        let outcome = termination_outcome(&result);
         self.append_manual_stop_event(
             ledger::LedgerEvent::ManualStopCompleted,
             &session,
             &correlation,
             &target,
-            Some("completed"),
+            Some(outcome),
             &request.reason,
         )?;
         let root = target.root();
@@ -244,6 +245,17 @@ impl<'a, P: Platform> Service<'a, P> {
         Ledger::open(&self.cfg.ledger.path)?.append(event)?;
         Ok(())
     }
+}
+
+fn termination_outcome(result: &platform::TerminationResult) -> &'static str {
+    if result.errors.is_empty() {
+        return "completed";
+    }
+    if result.soft_signaled.is_empty() && result.hard_signaled.is_empty() && result.gone.is_empty()
+    {
+        return "failed";
+    }
+    "partial"
 }
 
 #[cfg(test)]

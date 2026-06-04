@@ -67,6 +67,12 @@ fn presets_keep_custom_process_agents_and_drop_watch_only_apps() {
             process_names: vec!["custom".to_string()],
             ..Match::default()
         },
+        policy: Some(Policy {
+            warn_after: HumanDuration::seconds(5),
+            kill_after: HumanDuration::seconds(20),
+            allow_app_root_kill: true,
+            ..Policy::default()
+        }),
         ..Agent::default()
     });
     cfg.agents.push(Agent {
@@ -84,7 +90,15 @@ fn presets_keep_custom_process_agents_and_drop_watch_only_apps() {
 
     assert_eq!(cfg.mode, Mode::Enforcement);
     assert_eq!(cfg.usage.warn_turn_tokens, 250_000);
-    assert!(cfg.agents.iter().any(|agent| agent.id == "custom-worker"));
+    let custom_worker = cfg
+        .agents
+        .iter()
+        .find(|agent| agent.id == "custom-worker")
+        .expect("custom process agent retained");
+    let custom_policy = custom_worker.policy.as_ref().expect("policy refreshed");
+    assert_eq!(custom_policy.warn_after, HumanDuration::seconds(5));
+    assert_eq!(custom_policy.kill_after, HumanDuration::seconds(20));
+    assert!(!custom_policy.allow_app_root_kill);
     assert!(!cfg.agents.iter().any(|agent| agent.id == "custom-app"));
     assert!(cfg.agents.iter().all(|agent| {
         agent

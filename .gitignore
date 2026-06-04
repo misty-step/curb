@@ -6,6 +6,9 @@
 !.harness-kit/
 .harness-kit/*
 !.harness-kit/agent-readiness.yaml
+!.harness-kit/delegation-receipts.jsonl
+!.harness-kit/traces/
+!.harness-kit/traces/**
 /curb
 /curb.exe
 *.test
