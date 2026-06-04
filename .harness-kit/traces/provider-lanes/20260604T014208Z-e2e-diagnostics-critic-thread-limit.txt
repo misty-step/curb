@@ -1,0 +1,17 @@
+Role: fresh-context E2E diagnostics critic
+Objective: review the E2E diagnostics diff against the oracle that failures
+must expose enough live process, session, and ledger state to debug flake or
+policy regressions.
+Provider target: native default subagent
+Receipt id: 7D7ACC10-35EE-4DB8-BC76-EE06170B0A13
+Status: failed before execution
+
+Error:
+Fresh-context subagent dispatch was not attempted again because the previous
+native critic dispatch in this active run failed on the agent thread limit, and
+no callable alternate provider lane was available in this Codex tool surface.
+
+Lead verdict:
+Rejected as provider/tooling failure. Proceeded with a narrow diff, live
+focused E2E test, fast gate, full validation, whitespace check, and readiness
+profile parse.

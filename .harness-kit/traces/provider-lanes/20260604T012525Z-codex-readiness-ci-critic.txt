@@ -1,0 +1,18 @@
+Role: readiness critic
+Objective: identify the highest-leverage remaining agent-readiness fix across
+gates, CI, testing, and dogfood evidence.
+Provider target: native default subagent
+Status: completed
+
+Findings:
+- Active-session dogfood remains the highest product-readiness gap because the
+  first evidence run saw zero provider events.
+- Real-process E2E diagnostics, browser smoke promotion, and governance gates
+  remain open.
+- The roadmap was stale against live CI and still described monolithic CI and
+  no Windows job.
+
+Lead verdict:
+Partially accepted. This turn completed the already-open fast/full CI split and
+fixed the stale roadmap. The active-session dogfood recommendation is accepted
+as the next major readiness slice, not completed in this turn.

@@ -1,0 +1,19 @@
+Recommended extraction: `src/api/dispatch.rs` owning protected-route → backend-call → response mapping (the body of `Server::route`), including the two post-response observability emissions for `stop` and `notification_test`.
+
+Evidence:
+- `src/api.rs:323-429` (`Server::route`) is ~107 lines of pure dispatch over an already-parsed `routes::Route`. Inputs are clean (`&B: Backend`, `Request`, `Route`, `DateTime<Utc>`); output is `Response`. No `self` state besides `self.backend` and no auth/CORS/UI coupling — those all complete upstream in `Server::handle` (`src/api.rs:246-290`).
+- This completes the route-table abstraction promised in Milestone 1 of `docs/refactor-map.md:97-134`: `routes.rs` already owns *intent*; `dispatch.rs` would own *action*. Today `Server::route` is the only consumer of `routes::Route`, and `wire::decode_*` plus `response::*` are already pulled into a sibling module — extraction is mechanical re-grouping, not new design.
+- Observability side effects (`emit_stop_outcome(response.status)` at `src/api.rs:420`, `emit_notification_attempt(response.status)` at `src/api.rs:379`) are post-call tail emissions tied 1:1 to specific routes; they move with the match arm and remain observable in the existing parse-observability-smoke probe.
+
+Risk:
+- Low for behavior: every protected-route test (`api_contract_fixtures_match_ui_facing_routes`, ack/stop/config/notifications/events) already exercises this exact path through `Server::handle`, so any drift fails loudly without test edits.
+- Watch-items: do not lift the observability emits *into* the backend calls (would change ordering relative to `response.status`); do not eagerly decode bodies before the route arm match (would change 405 vs 400 ordering for malformed payloads on wrong methods); keep `Backend` trait undivided (refactor-map non-goal at `docs/refactor-map.md:313-315`).
+
+Minimum tests (no new tests needed; rerun as oracle):
+- `api_contract_fixtures_match_ui_facing_routes` — JSON-equality for `/v1/snapshot`, `/v1/overview`, `/v1/sessions/:key`, `/v1/sessions/:key/turns`, `/v1/config`, `/v1/onboarding`, `/v1/live`, `/v1/ready`.
+- `maps_ack_and_stop_routes_and_errors` + `malformed_ack_and_stop_payloads_are_bad_requests` + `write_payloads_reject_unknown_fields_before_backend_actions` — proves wire-decode-before-backend-mutation ordering survives.
+- `serves_notification_health_and_test_with_conflict_shapes` plus the `scripts/parse-observability-smoke.py` step in `scripts/validate.sh` — proves `emit_stop_outcome` / `emit_notification_attempt` still fire at the right status.
+- `cookie_auth_requires_same_origin_for_unsafe_methods` + `headless_public_routes_do_not_weaken_protected_api_auth` — proves dispatch extraction did not lift any guard past the cookie+unsafe-method check.
+- `returns_events_and_alerts_with_limit_and_method_semantics`, `rescan_requires_post_and_auth`, `decodes_session_key_and_filters_turns` — method/limit/key plumbing.
+
+Rejected alternative: extracting `Server::handle`'s middleware chain (prefix/UI-headless fork → CORS → OPTIONS → public-route fork → auth → cookie/unsafe/same-origin guard → protected dispatch) into per-stage helpers next. Shallow-and-risky now: every stage reads `Server` fields (`token`, `ui`, `headless`, `scheme`), the ordering is the security-sensitive invariant (cookie+unsafe-method+cross-origin must precede the protected branch, headless 404 must precede CORS, UI cookie-injection couples `self.token` to `request.scheme`), and the appealing shape (a middleware trait or context object) is exactly what the refactor-map warns against (`docs/refactor-map.md:311-318`). Defer until dispatch extraction proves the route mechanics, not the pipeline shape, is the remaining surface pressure.

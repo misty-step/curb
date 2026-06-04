@@ -1,0 +1,27 @@
+Objective: Curb dogfood scripts, runbooks, and evidence commit.
+Provider: codex lead.
+Provider status: waived_mechanical_semantic_commit.
+Commit: 56831a5 docs(dogfood): preserve headless proof artifacts.
+
+Commands:
+- bash -n scripts/dogfood-headless-observability.sh
+- bash -n scripts/dogfood-headless-enforcement.sh
+- CURB_DOGFOOD_SECONDS=30 bash scripts/dogfood-headless-observability.sh /tmp/curb-headless-observability-check
+- git add docs/dogfooding.md docs/user-guide.md evidence/dogfood/README.md evidence/dogfood/TEMPLATE.md evidence/dogfood/2026-06-03-active-agent/ evidence/dogfood/2026-06-03-local-release/ evidence/dogfood/2026-06-04-runbook-headless/ evidence/dogfood/2026-06-04-stop-rejection/ evidence/dogfood/2026-06-04-headless-observability/ evidence/dogfood/2026-06-04-headless-observability-3min/ evidence/dogfood/2026-06-04-headless-observability-30s-oracle/ evidence/dogfood/2026-06-04-headless-enforcement/ scripts/dogfood-headless-observability.sh scripts/dogfood-headless-enforcement.sh
+- git diff --cached --name-status
+- git diff --cached --check
+- git diff --cached --stat
+- git add evidence/dogfood/TEMPLATE.md
+- git diff --cached --check
+- git commit -m "docs(dogfood): preserve headless proof artifacts"
+
+Evidence:
+- Shell syntax checks passed for both dogfood scripts.
+- 30-second headless observability dogfood smoke passed and reported: headless observability dogfood ok: /tmp/curb-headless-observability-check.
+- Initial staged whitespace check found one extra blank line at EOF in evidence/dogfood/TEMPLATE.md; removed only that trailing blank line.
+- Final whitespace check passed with no output.
+- Staged path list matched docs/readiness-tranche-commit-plan.md group 4 only.
+
+Residual:
+- Remaining readiness tranche groups are still dirty and intentionally uncommitted.
+- Full branch validation already passed before semantic splitting; rerun after all semantic groups are committed.

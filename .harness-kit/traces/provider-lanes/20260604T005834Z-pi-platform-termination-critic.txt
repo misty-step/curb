@@ -1,0 +1,7 @@
+Provider: pi
+Role: read-only critic
+Objective: Refute behavior-preserving platform termination extraction.
+Input: /tmp/curb-platform-termination.diff and live platform files.
+Verdict: Accepted.
+Blocking findings: None.
+Non-blocking risks: CommandSpec and termination command builders are pub(super) for sibling module/test access; terminate_tree trusts the sealed TerminationTarget without re-verifying; real-process platform tests remain environment-sensitive but unchanged.

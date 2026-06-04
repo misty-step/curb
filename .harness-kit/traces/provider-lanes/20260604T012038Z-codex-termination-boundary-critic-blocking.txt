@@ -1,0 +1,23 @@
+Role: fresh-context critic
+Objective: refute the termination-boundary gate.
+Provider target: native default subagent
+Status: completed
+
+Blocking findings:
+1. The gate initially treated only pid/Pid/i32 as a bare PID or integer. It
+   would miss stop/kill/terminate production APIs accepting u32, usize, or
+   other primitive integer process identifiers.
+2. The raw OS termination isolation check was too small and could miss direct
+   kill APIs such as libc::kill or nix::sys::signal::kill, especially when
+   imported or aliased.
+
+Non-blocking findings:
+- Live platform files already terminated through TerminationTarget.
+- The gate was wired into check-fast, validate, and agent-readiness.
+
+Lead verdict:
+Accepted. The gate now treats primitive integer parameters on strong
+stop/kill/terminate action APIs as violations, still flags pid-like parameters
+on broader termination-named APIs, and scans for direct libc/nix/signal kill
+patterns outside curb-core/src/platform/termination.rs. Positive and negative
+smoke checks passed, followed by check-fast and validate.

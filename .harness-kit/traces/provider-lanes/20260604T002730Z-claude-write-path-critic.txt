@@ -1,0 +1,10 @@
+provider: claude
+objective: Curb write-path ack-persistence extraction critic
+scope: current diff for curb-core/src/write_path.rs, curb-core/src/write_path/ack_store.rs, docs/refactor-map.md, docs/agent-readiness-roadmap.md, backlog.d/028-deep-module-refactor-path.md, .harness-kit/agent-readiness.yaml
+oracle: behavior-preserving write-path extraction; ack-file write/delete/rollback mechanics belong in write_path/ack_store.rs; write_path::Service remains manual acknowledge/stop orchestration; stop_session behavior unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is only confirmation evidence; ledger event ordering and wire behavior unchanged
+result: No blocking gaps.
+accepted: yes
+residual_risks:
+- Roadmap originally overstated the write-path split; corrected to call out ack persistence only.
+- Rollback behavior is covered by runtime tests rather than a new ack_store-specific unit.
+- ack_store depends on service::session_ack_path so the ack path remains single-sourced with the read side.

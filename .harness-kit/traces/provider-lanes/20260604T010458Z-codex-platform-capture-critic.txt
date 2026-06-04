@@ -1,0 +1,8 @@
+Provider: codex
+Role: read-only critic
+Objective: Refute behavior-preserving platform capture extraction.
+Input: /tmp/curb-platform-capture-complete.diff and live platform files.
+Verdict: Accepted.
+Blocking findings: None.
+Non-blocking risks: Review packet includes prior platform notification/termination extractions because those files remain untracked; termination depends on capture::is_live_process_status.
+Evidence: Verified Platform trait unchanged, SystemPlatform::capture delegates through the same refresh/conversion shape, identity sealing remains in platform.rs, production termination still accepts &TerminationTarget, and capture.rs remains metadata-only.

@@ -1,0 +1,24 @@
+receipt_id: 19B47359-CD6A-4FC0-8400-21E02D12650E
+timestamp_utc: 2026-06-04T02:07:59Z
+role: lead
+lane: write-path-tests-module-extraction
+objective: Move inline write-path tests out of the production module while preserving behavior.
+scope:
+  - curb-core/src/write_path.rs
+  - curb-core/src/write_path/tests.rs
+  - docs/refactor-map.md
+  - docs/agent-readiness-roadmap.md
+  - backlog.d/028-deep-module-refactor-path.md
+accepted_output:
+  - Production write-path module is 250 lines and ends with #[cfg(test)] mod tests;.
+  - Moved write-path unit tests and fixtures into curb-core/src/write_path/tests.rs, 360 lines.
+  - Updated refactor/readiness/backlog notes to reflect the completed test-module extraction.
+verification:
+  - cargo test -p curb-core write_path -- --nocapture
+  - cargo fmt --all -- --check
+  - bash scripts/check-fast.sh
+  - bash scripts/validate.sh
+  - git diff --check
+  - wc -l curb-core/src/write_path.rs curb-core/src/write_path/tests.rs
+residual_risk:
+  - This slice only moves tests; broader worktree closeout and hosted CI proof remain open.

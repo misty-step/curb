@@ -1,0 +1,26 @@
+Role: lead evidence
+Objective: Prove the mandatory dashboard smoke covers the stoppable destructive-action state on deterministic data.
+Scope: ui/scripts/smoke-dashboard.mjs, docs/agent-readiness-roadmap.md, .harness-kit/agent-readiness.yaml, backlog.d/031-fast-feedback-and-cross-platform-gates.md
+
+Behavior verified:
+- Deterministic smoke starts its own Vite server with contract fixtures.
+- First row is transformed into a stoppable session.
+- Desktop and narrow smoke open the row and assert This turn, Model calls, Stop requires, PID, start time, owner, executable, and Stop now.
+- Desktop and narrow smoke assert no viewport overflow for .topbar, .agents, .action-strip, .stop-checks, .row-actions, .readiness, and .drawer.
+- In-app Browser loaded http://127.0.0.1:5173/, selected the stoppable row, verified the Stop requires checklist and Stop now affordance, and reported no console warnings/errors.
+
+Evidence:
+- cd ui && npm run smoke -> passed; manifest ui/artifacts/smoke-dashboard/manifest.json failures []
+- screenshots refreshed: ui/artifacts/smoke-dashboard/dashboard-desktop.png 1440x968; ui/artifacts/smoke-dashboard/dashboard-narrow.png 390x1580
+- cd ui && npm test -- --run App readModel -> 2 files passed, 12 tests passed
+- cd ui && npm run typecheck -> passed
+- cd ui && npm run lint -> passed
+- scripts/check-fast.sh -> passed; includes UI build embed check, Rust tests, UI typecheck/lint/tests, deterministic smoke, termination-boundary scan, and secret scan
+- git diff --check -> passed
+- python3 scripts/check-secrets.py -> check-secrets: ok
+
+Browser residual:
+- In-app Browser full-page screenshot capture timed out; deterministic Playwright smoke screenshots are the retained screenshot artifacts.
+
+Provider note:
+- Direct lead proof used for this small UI smoke milestone. Recent fresh-subagent critic attempts in this thread have repeatedly hit the thread limit; no new provider output was accepted for this slice.

@@ -1,0 +1,7 @@
+Provider: codex
+Role: read-only critic
+Objective: Refute behavior-preserving platform termination extraction.
+Input: /tmp/curb-platform-termination.diff.
+Verdict: Rejected as artifact-only blocker.
+Blocking finding: The initial review packet omitted untracked platform submodule new-file diffs, so it was incomplete even though live files existed.
+Lead disposition: Rebuilt review packet as /tmp/curb-platform-termination-complete.diff with untracked module files included, then reran Codex critic.

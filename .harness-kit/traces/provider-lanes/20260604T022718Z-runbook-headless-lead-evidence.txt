@@ -1,0 +1,30 @@
+receipt_id: 4DA6A028-E8D4-45C6-9EAC-1C4EE662835F
+timestamp_utc: 2026-06-04T02:27:18Z
+role: lead
+lane: headless-runbook-dogfood
+objective: Prove the new headless sidecar and observability dogfood runbooks against a real release-build local service run.
+scope:
+  - docs/runbooks/headless-sidecar.md
+  - docs/agent-readiness-roadmap.md
+  - evidence/dogfood/2026-06-04-runbook-headless/
+accepted_output:
+  - Captured release build transcript.
+  - Ran CURB_LOG_FORMAT=json ./target/release/curb serve --headless on 127.0.0.1:18765.
+  - Captured public live and ready probe responses.
+  - Captured headless root 404 JSON response.
+  - Captured protected health 401 without token and 200 with startup-emitted token.
+  - Captured authenticated overview response and parsed structured NDJSON.
+  - Removed generated .curb token/cache/ledger state after evidence capture.
+  - Updated the headless runbook to name the default emitted token path.
+verification:
+  - cargo build --release --bin curb
+  - python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-runbook-headless/headless.ndjson
+  - python3 scripts/check-secrets.py
+  - git diff --check
+  - test ! -e .curb
+provider_review:
+  - codex QA accepted with no blocking gaps.
+  - pi QA accepted with no blocking gaps.
+residual_risk:
+  - Hosted CI proof remains open.
+  - Stop decision/rejection is not exercised by this local headless runbook smoke.

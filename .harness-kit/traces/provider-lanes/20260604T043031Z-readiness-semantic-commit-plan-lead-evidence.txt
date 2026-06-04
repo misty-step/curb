@@ -1,0 +1,27 @@
+Objective: create a semantic commit/PR split plan for the dirty readiness
+tranche without staging or committing files.
+
+Commands/evidence:
+- git status --short --branch --untracked-files=all
+- git diff --name-status
+- git ls-files --others --exclude-standard
+- git diff --stat
+- docs/readiness-tranche-closeout.md
+- backlog.d/033-hosted-proof-and-tranche-closeout.md
+
+Subagent note:
+- Existing native agent prompts for module-depth, readiness/gates, and
+  dogfood/UI critique still had no usable completed reports. Lead proceeded
+  from live repo evidence.
+
+Changes:
+- Added docs/readiness-tranche-commit-plan.md with seven semantic commit groups,
+  exact pathspecs, per-group verification commands, review risks, and final
+  branch proof commands.
+- Linked the commit plan from docs/readiness-tranche-closeout.md.
+- Updated backlog.d/033-hosted-proof-and-tranche-closeout.md to mark semantic
+  commit/review-group classification complete.
+
+Residual risk:
+- No files were staged, committed, pushed, or hosted-verified in this slice.
+- The branch remains dirty and must still be intentionally closed out.

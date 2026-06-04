@@ -1,0 +1,17 @@
+receipt_id: 6ACB3784-B141-4832-BCB1-65E818609FB9
+timestamp_utc: 2026-06-04T02:27:18Z
+provider: codex
+role: read-only QA critic
+objective: Verify whether the headless runbook dogfood evidence proves the runbook path worked.
+input_ref:
+  - docs/runbooks/headless-sidecar.md
+  - docs/runbooks/observability-dogfood.md
+  - evidence/dogfood/2026-06-04-runbook-headless/
+accepted_output:
+  - verdict: accepted
+  - no blocking gaps
+  - verified live/ready, headless root, unauthenticated and authenticated health, overview, structured NDJSON, parser replay, and redaction scan
+nonblocking_notes:
+  - evidence is local only
+  - stop decision/rejection remains future enforcement dogfood
+lead_decision: accepted

@@ -1,0 +1,7 @@
+Role: read-only critic
+Objective: review whether moving overview delta calculation from curb-core/src/service/snapshot_model.rs into a new service module preserves behavior and improves the service presenter boundary.
+Scope: curb-core/src/service.rs, curb-core/src/service/snapshot_model.rs, curb-core/src/service/tests.rs, docs/refactor-map.md.
+Provider: claude
+Status: failed
+Failure: claude returned "You've hit your monthly spend limit" before producing a verdict.
+Lead decision: record as failed roster attempt and proceed with Pi critic plus focused service tests.

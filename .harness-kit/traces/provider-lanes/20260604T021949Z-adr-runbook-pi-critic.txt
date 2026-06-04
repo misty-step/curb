@@ -1,0 +1,17 @@
+receipt_id: D23D7A0F-139C-4C2B-AE8D-A6B2591B7B93
+timestamp_utc: 2026-06-04T02:19:49Z
+provider: pi
+role: read-only backlog critic
+objective: Propose the next single backlog path to maximize headless/server integration readiness, structured JSON observability, modularity, quality gates, strict typing, docs, dogfooding, and UI quality.
+input_ref:
+  - backlog.d/025-032
+  - docs/agent-readiness-roadmap.md
+  - docs/refactor-map.md
+  - docs/observability.md
+  - README.md
+  - docs/contributor-guide.md
+accepted_output:
+  - Recommended ADR and runbook coverage for headless, observability, and termination-boundary decisions.
+  - Acceptance oracle included headless/server ADR, observability ADR, termination-boundary ADR, headless deployment runbook, observability dogfood runbook, cross-references, and roadmap update.
+  - Proof commands included headless serve smoke, observability parser, termination-boundary scan, and validate.
+lead_decision: accepted

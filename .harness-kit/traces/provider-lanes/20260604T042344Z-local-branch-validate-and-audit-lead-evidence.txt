@@ -1,0 +1,37 @@
+Objective: prove backlog 033 local gate and advisory-audit steps on the named
+agent-readiness-closeout branch.
+
+Commands:
+- scripts/validate.sh
+- scripts/check-dependency-audit.sh --offline
+- bash scripts/check-dependency-audit.sh --online
+
+Status: passed
+
+Live evidence:
+- scripts/validate.sh passed on branch agent-readiness-closeout.
+- UI embed check passed through scripts/build-ui.sh --check.
+- Rust fmt, clippy, file-length, termination-boundary scan, and secret scan
+  passed through scripts/check-fast.sh.
+- Rust binary tests: 45 passed.
+- CLI integration tests: 23 passed.
+- curb-core tests: 126 passed.
+- real-process enforcement E2E tests: 2 passed.
+- UI typecheck, ESLint, Vitest, and deterministic dashboard smoke passed:
+  5 UI test files and 21 tests passed; dashboard smoke wrote
+  ui/artifacts/smoke-dashboard.
+- Desktop shell checks passed: curb-desktop check/test/build, with 3 desktop
+  tests passed.
+- demo/006 dry-run completed and would only target a synthetic sleep worker.
+- Offline dependency audit loaded 1105 RustSec advisories from
+  /Users/phaedrus/.cargo/advisory-db and scanned 187 crate dependencies.
+- Online dependency audit fetched RustSec, updated crates.io, scanned
+  Cargo.lock, found 0 Rust vulnerabilities, and completed npm audit.
+
+Repo-fit check:
+- These are the exact local proof commands required by backlog 033.
+- No gate thresholds were lowered.
+
+Residual risk:
+- Hosted CI, Windows runner proof, dependency-audit job proof, coverage job
+  proof, push, PR review, and clean worktree closeout remain open.

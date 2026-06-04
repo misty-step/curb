@@ -1,0 +1,12 @@
+Role: fresh-context critic
+Objective: try to refute the Curb termination-boundary gate.
+Provider target: native subagent torvalds
+Status: failed before execution
+
+Error:
+The fixed torvalds role attempted to use gpt-5.3-codex, which is not supported
+for this ChatGPT-backed Codex account.
+
+Lead verdict:
+Rejected as provider/tooling failure. Replaced with a default read-only critic
+lane against the same oracle and file scope.

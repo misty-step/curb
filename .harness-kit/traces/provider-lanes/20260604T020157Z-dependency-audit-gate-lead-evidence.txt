@@ -1,0 +1,38 @@
+Role: lead dependency-audit gate executor
+Objective: add a mandatory Cargo/npm dependency-advisory audit policy without
+making local validation depend on registry/network availability.
+Provider target: codex lead
+Receipt id: 324AB4AD-BCBC-4BDA-B107-56E71261547F
+Status: completed
+
+Evidence:
+- `scripts/check-dependency-audit.sh` defines `--online` for mandatory RustSec
+  plus npm advisory proof, and `--offline` for cache-backed local RustSec
+  checks without npm registry dependency.
+- `.github/workflows/ci.yml` has a dedicated `dependency audit` job that
+  installs a minimal Rust toolchain, installs `cargo-audit`, installs UI
+  dependencies with `npm ci`, and runs
+  `bash scripts/check-dependency-audit.sh --online`.
+- `.harness-kit/agent-readiness.yaml`, `SECURITY.md`,
+  `docs/contributor-guide.md`, `docs/agent-readiness-roadmap.md`, `README.md`,
+  and `backlog.d/029-agent-readiness-contract.md` now describe the audit policy,
+  local reproduction commands, and advisory waiver requirements.
+
+Verification:
+- Updated local `cargo-audit` from 0.21.2 to 0.22.1 because the older binary
+  could not parse current RustSec CVSS 4.0 advisories.
+- `bash scripts/check-dependency-audit.sh --online` passed:
+  RustSec loaded 1105 advisories, scanned 187 Rust crate dependencies, found 0
+  vulnerabilities, and npm audit reported 0 high/critical vulnerabilities.
+- `bash scripts/check-dependency-audit.sh --offline` passed against cached
+  RustSec data.
+- `.github/workflows/ci.yml` and `.harness-kit/agent-readiness.yaml` parsed as
+  YAML.
+- `/Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate` passed.
+- `bash scripts/check-fast.sh` passed.
+- `bash scripts/validate.sh` passed.
+- `git diff --check` passed.
+
+Lead verdict:
+Accepted. Dependency-advisory auditing is now a mandatory CI governance gate,
+with explicit local reproduction and an offline inner-loop mode.

@@ -1,0 +1,13 @@
+Role: module-boundary critic
+Objective: review whether the Curb termination-boundary enforcement preserves a
+deep platform termination module.
+Provider target: native subagent ousterhout
+Status: failed before execution
+
+Error:
+The fixed ousterhout role attempted to use gpt-5.3-codex, which is not
+supported for this ChatGPT-backed Codex account.
+
+Lead verdict:
+Rejected as provider/tooling failure. Replaced with a default read-only critic
+lane against the same module-boundary oracle and file scope.

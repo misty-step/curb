@@ -1,0 +1,15 @@
+Objective: prove the accumulated readiness, dogfood, UI, and module-boundary changes still pass the repository's full local pre-merge gate.
+Command: scripts/validate.sh
+Status: passed
+Live evidence:
+- scripts/build-ui.sh --check via check-fast: ui embed check ok.
+- cargo fmt/clippy/file-length/termination-boundary/secret scan via check-fast: passed.
+- Rust binary tests: 45 passed.
+- CLI integration tests: 23 passed.
+- curb-core tests: 126 passed.
+- e2e enforcement tests: 2 passed.
+- UI typecheck, ESLint, Vitest, and deterministic dashboard smoke: 5 UI test files passed, 21 tests passed, dashboard smoke ok.
+- Desktop shell check: curb-desktop check/test/build passed; src-tauri tests 3 passed.
+- demo/006 dry-run: dry-run would run alert-mode would-stop and enforcement termination demos against a synthetic sleep worker.
+Repo-fit check: this is the exact root AGENTS pre-merge gate, run from the live dirty worktree after web/dist was refreshed.
+Residual risk: local macOS validation is not hosted CI proof, Windows runner proof, dependency-audit proof, or multi-hour deployment dogfood.

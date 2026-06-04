@@ -1,0 +1,35 @@
+Role: lead implementer / verifier
+Objective: complete the structured observability oracle requiring usage_scan and watcher_tick logs to expose policy stop/grace/revalidation outcomes.
+
+Provider fanout:
+- Attempted Ousterhout critic lane for the diff.
+- Result: failed before dispatch because the current thread hit the agent limit.
+- Waiver: direct solo completion with focused Rust tests, clippy, and dogfood evidence.
+
+Accepted implementation:
+- Added PolicyScanReport from UsageWatch::scan.
+- Threaded policy reports through GovernorReport and Runtime::usage_tick_report without changing API snapshots.
+- Added report-observer watcher path while preserving the existing snapshot observer.
+- Added runtime scan log fields: observed_sessions, policy_warnings, would_stop, stop_blocked, grace_started, grace_pending, stop_attempted, stop_completed, stop_rejected, resumed_sessions, terminated_sessions.
+- Tightened scripts/parse-observability-smoke.py to require policy fields on usage_scan and watcher_tick.
+- Updated observability docs, runbook, readiness profile, roadmap, and backlog 026.
+
+Verification commands:
+- cargo fmt --all
+- cargo test -p curb-core usagewatch -- --nocapture
+- cargo test --bin curb observability -- --nocapture
+- cargo clippy --all-targets -- -D warnings
+- ./scripts/dogfood-headless-enforcement.sh evidence/dogfood/2026-06-04-headless-enforcement
+- python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
+- jq -e 'select(.event == "usage_scan" and .fields.grace_started == 1 and .fields.observed_sessions == 1)' evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
+- jq -e 'select(.event == "watcher_tick" and .fields.stop_blocked == 1)' evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
+- /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py validate
+
+Evidence artifacts:
+- evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
+- evidence/dogfood/2026-06-04-headless-enforcement/parse-observability-smoke.txt
+- evidence/dogfood/2026-06-04-headless-enforcement/README.md
+
+Residual risk:
+- Hosted CI proof remains open.
+- This slice does not address UI operator-flow polish.

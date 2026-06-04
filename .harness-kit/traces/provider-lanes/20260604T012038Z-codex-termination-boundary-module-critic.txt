@@ -1,0 +1,19 @@
+Role: module-boundary critic
+Objective: review whether the termination-boundary enforcement preserves a deep
+module around sealed TerminationTarget and private raw-PID OS mechanics.
+Provider target: native default subagent
+Status: completed
+
+Blocking findings:
+None.
+
+Non-blocking risks:
+- The scanner is lexical and can still miss sufficiently indirect command-name
+  assembly.
+- TerminationTarget::scope exposes Pid values for introspection, but no
+  production termination caller accepts raw PIDs.
+
+Lead verdict:
+Accepted as a module-boundary review. The lexical limitation remains residual
+risk, mitigated by direct production search, negative smoke coverage for the
+called-out shapes, and the gate being wired into fast/full validation.

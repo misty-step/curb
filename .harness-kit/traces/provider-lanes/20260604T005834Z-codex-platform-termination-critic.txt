@@ -1,0 +1,8 @@
+Provider: codex
+Role: read-only replacement critic
+Objective: Refute behavior-preserving platform termination extraction using complete artifact.
+Input: /tmp/curb-platform-termination-complete.diff and live files.
+Verdict: Accepted.
+Blocking findings: None.
+Evidence: Focused cargo test -p curb-core platform:: --no-fail-fast passed 16 platform tests.
+Non-blocking risks: Windows behavior source-inspected only on macOS; full repo gate not run by the critic lane, but lead ran scripts/validate.sh separately.

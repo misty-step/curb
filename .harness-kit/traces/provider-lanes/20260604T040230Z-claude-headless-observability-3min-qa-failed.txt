@@ -1,0 +1,7 @@
+Role: read-only QA critic
+Objective: review the 3-minute Curb headless observability dogfood evidence and decide whether it supports a stronger local readiness claim.
+Scope: evidence/dogfood/2026-06-04-headless-observability-3min/README.md, event-summary.txt/json, ready-final.status, parse-observability-smoke.txt, redaction-check.txt, overview-final.json, docs/agent-readiness-roadmap.md.
+Provider: claude
+Status: failed
+Failure: claude returned "You've hit your monthly spend limit" before producing a verdict.
+Lead decision: record as failed roster attempt and proceed with Pi QA plus parser/redaction/receipt checks.

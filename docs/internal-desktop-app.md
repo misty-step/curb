@@ -44,5 +44,7 @@ No Developer ID signing, notarization, app-store sandboxing, installer,
 auto-update, or public release channel is required for this phase.
 
 Cross-platform CI builds the desktop executable on macOS and Linux through
-`scripts/check-desktop.sh`. Windows is supported by the same Tauri target and is
-kept as a manual team-run path until a Windows CI runner is added.
+`scripts/check-desktop.sh`. Windows desktop packaging remains a manual
+team-run path, while `.github/workflows/ci.yml` includes a focused Windows smoke
+for the Rust binary, example config validation, notification capability
+contract, and Windows termination-command construction.

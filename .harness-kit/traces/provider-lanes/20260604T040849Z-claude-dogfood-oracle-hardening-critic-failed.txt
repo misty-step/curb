@@ -1,0 +1,7 @@
+Role: read-only critic
+Objective: review the dogfood-headless-observability oracle hardening.
+Scope: scripts/dogfood-headless-observability.sh, docs/runbooks/observability-dogfood.md, docs/dogfooding.md, docs/agent-readiness-roadmap.md, evidence/dogfood/2026-06-04-headless-observability-30s-oracle/event-summary.txt, redaction-check.txt.
+Provider: claude
+Status: failed
+Failure: claude returned "You've hit your monthly spend limit" before producing a verdict.
+Lead decision: record as failed roster attempt and proceed with Pi critic plus shell syntax, invalid-duration, dogfood, parser, diff, receipt, and secret checks.

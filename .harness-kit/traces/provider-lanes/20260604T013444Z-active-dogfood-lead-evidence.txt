@@ -1,0 +1,25 @@
+Role: lead dogfood executor
+Objective: capture active-session release/headless dogfood evidence and close
+the non-zero provider-event gap.
+Provider target: codex lead
+Status: completed
+
+Evidence:
+- cargo build --release --bin curb passed.
+- Initial documented `./target/release/curb usage --since 24h` returned zero
+  provider events.
+- `./target/release/curb usage --home /Users/phaedrus --since 24h` returned
+  non-zero Codex, Claude, and Pi events, proving data existed and exposing a CLI
+  default-home bug.
+- `src/main.rs` now defaults `usage` to the OS home directory, matching related
+  usage-facing commands.
+- `tests/cli.rs` includes `usage_defaults_to_home_directory_for_provider_discovery`.
+- Rebuilt release binary; documented `./target/release/curb usage --since 24h`
+  returned Codex 2360 events, Claude 701 events, Pi 317 events.
+- Headless run on 127.0.0.1:18766 produced parsed NDJSON with startup,
+  readiness, usage_scan, and health_check events.
+- `scripts/check-fast.sh` and `scripts/validate.sh` passed.
+
+Lead verdict:
+Accepted as active-session dogfood proof. Stop/correlation behavior was not
+manually exercised and remains a follow-up risk.

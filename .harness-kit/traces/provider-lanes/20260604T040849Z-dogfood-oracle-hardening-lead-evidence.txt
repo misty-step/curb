@@ -1,0 +1,12 @@
+Objective: harden the timed headless observability dogfood oracle so weak runs fail and privacy checks cover the full invariant vocabulary.
+Files changed: scripts/dogfood-headless-observability.sh, docs/runbooks/observability-dogfood.md, docs/dogfooding.md, docs/agent-readiness-roadmap.md, .harness-kit/agent-readiness.yaml, backlog.d/024-dogfood-evidence-matrix.md.
+Behavior changed: dogfood script now validates CURB_DOGFOOD_SECONDS as a positive integer, records duration_seconds and expected_watcher_tick_min, requires watcher_tick count >= max(2, duration / 5), and checks NDJSON for token/auth, prompt/response, screenshot, keystroke, file-content, raw-provider, and payload terms.
+Live evidence:
+- bash -n scripts/dogfood-headless-observability.sh: passed.
+- CURB_DOGFOOD_SECONDS=abc bash scripts/dogfood-headless-observability.sh /tmp/curb-invalid-duration-check: exited 2 with "CURB_DOGFOOD_SECONDS must be a positive integer, got abc".
+- CURB_DOGFOOD_SECONDS=30 bash scripts/dogfood-headless-observability.sh evidence/dogfood/2026-06-04-headless-observability-30s-oracle: passed.
+- evidence/dogfood/2026-06-04-headless-observability-30s-oracle/event-summary.txt: duration_seconds=30, watcher_tick=10, expected_watcher_tick_min=6, final readiness status 200, max_policy_duration_ms=3989.
+- evidence/dogfood/2026-06-04-headless-observability-30s-oracle/redaction-check.txt: no token, auth header, prompt, response, screenshot, keystroke, file-content, raw-provider, or payload terms in NDJSON.
+- python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-headless-observability-30s-oracle/headless-observability.ndjson: passed with 23 observability events.
+Repo-fit check: keeps visibility mode, private scratch state, metadata-only provider ingestion, and does not change runtime product behavior.
+Residual risk: threshold is intentionally conservative; it catches stalled watcher loops but is not a substitute for multi-hour deployment monitoring.

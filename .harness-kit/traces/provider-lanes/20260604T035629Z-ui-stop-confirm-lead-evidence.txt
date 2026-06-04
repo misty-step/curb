@@ -1,0 +1,12 @@
+Objective: make the destructive dashboard stop action require a visible inline confirmation before the protected stop API receives a confirmed stop request.
+Files changed: ui/src/components/dashboard.tsx, ui/src/components/sessionActions.tsx, ui/src/App.test.tsx, ui/scripts/smoke-dashboard.mjs, ui/src/styles.css, web/dist, docs/agent-readiness-roadmap.md, backlog.d/023-post-closeout-grooming-and-dogfood.md.
+Behavior changed: selected stoppable rows still show Stop requires identity checks and Stop now, but the first Stop now click now arms an inline Cancel / Confirm stop choice. The UI posts /stop only after Confirm stop.
+Live evidence:
+- cd ui && npm test -- --run App: passed, 6 tests. Added proof that no /stop request occurs on first Stop now click and that the confirmed POST includes expected identity fields.
+- cd ui && npm run typecheck: passed.
+- cd ui && npm run lint: passed; dashboard.tsx is 346 lines and sessionActions.tsx is 90 lines.
+- cd ui && npm run smoke: passed; deterministic desktop and narrow screenshots check Stop now, Confirm stop, Cancel, and action-surface overflow.
+- scripts/build-ui.sh: passed and refreshed web/dist embedded assets.
+- scripts/check-fast.sh: passed, including UI embed check, clippy -D warnings, file-length guard, termination-boundary guard, secret scan, Rust binary/core/e2e tests, UI typecheck/lint/Vitest, and dashboard smoke.
+Repo-fit check: action UI is now a focused component boundary, uses service-provided stop identity fields, does not recompute safety policy in React, does not weaken the protected API, and keeps the Rust sealed termination invariant unchanged.
+Residual risk: browser smoke is deterministic fixture proof, not a long real-session dogfood. Hosted CI and longer deployment dogfood remain open.

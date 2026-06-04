@@ -1,0 +1,17 @@
+Role: architecture critic
+Provider: pi
+Objective: Decide whether ledger event taxonomy extraction is the next best readiness slice.
+Scope: curb-core/src/ledger.rs, docs/refactor-map.md, backlog.d/028-deep-module-refactor-path.md, docs/agent-readiness-roadmap.md.
+Verdict: partially accepted.
+
+Recommendation:
+- Defer ledger taxonomy extraction because the existing LedgerEvent taxonomy is already cohesive and lower leverage than remaining observability/presenter work.
+
+Evidence cited:
+- curb-core/src/ledger.rs had a well-documented closed taxonomy with parse/as_str and alert/view classification.
+- docs/refactor-map.md did not previously list ledger taxonomy extraction.
+- docs/agent-readiness-roadmap.md emphasizes remaining large presenter/persistence surfaces.
+
+Lead disposition:
+- Rejected the "defer" recommendation after a narrow extraction was already implemented and focused tests passed.
+- Accepted the residual guidance that future work should prioritize higher-leverage presenter/UI or observability proof rather than continuing to split ledger internals.

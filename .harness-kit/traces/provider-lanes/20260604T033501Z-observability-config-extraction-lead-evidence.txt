@@ -1,0 +1,40 @@
+Role: lead evidence
+Objective: Deepen Curb's headless observability and config boundaries without changing behavior.
+Scope:
+- src/observability.rs
+- src/observability/event.rs
+- src/observability/registry.rs
+- curb-core/src/config.rs
+- curb-core/src/config/preset.rs
+- curb-core/src/config/policy_merge.rs
+- docs/refactor-map.md
+- docs/agent-readiness-roadmap.md
+- backlog.d/028-deep-module-refactor-path.md
+- .harness-kit/agent-readiness.yaml
+
+Behavior changed:
+- None intended. This is a behavior-preserving extraction.
+
+Architecture changed:
+- src/observability.rs remains the binary public emit-function facade.
+- src/observability/event.rs now owns LogEvent, SCHEMA_VERSION, JSON-log enablement, and sanitized reason handling.
+- src/observability/registry.rs now owns registered event names, request path templating, and HTTP status outcomes.
+- curb-core/src/config.rs remains the public schema/load/save/validate facade plus Config policy/preset facade methods.
+- curb-core/src/config/preset.rs now owns preset mutation mechanics.
+- curb-core/src/config/policy_merge.rs now owns policy override and agent policy refresh mechanics.
+
+Provider evidence:
+- Claude critic failed due spend limit.
+- Pi critic recommended config policy/preset extraction; accepted.
+
+Verification:
+- cargo test -p curb-core config -- --nocapture -> 14 passed.
+- cargo test --bin curb observability -- --nocapture -> 9 passed.
+- cargo test --bin curb api::tests -- --nocapture -> 23 passed.
+- git diff --check -> passed.
+- python3 scripts/check-secrets.py -> check-secrets: ok.
+- scripts/check-fast.sh -> passed; includes UI embed check, clippy -D warnings, file-length, termination-boundary scan, secret scan, Rust bin/lib/CLI/e2e tests, UI typecheck/lint/tests, and deterministic dashboard smoke.
+
+Residual:
+- Profile validator script was not present in this repo or the checked Harness Kit script path.
+- Hosted CI proof and longer real deployment dogfood remain open readiness gaps.

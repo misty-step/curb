@@ -1,0 +1,9 @@
+provider: pi
+objective: Curb write-path ledger-event projection critic
+scope: current diff for curb-core/src/write_path.rs, curb-core/src/write_path/ack_store.rs, curb-core/src/write_path/ledger_events.rs, docs/refactor-map.md, docs/agent-readiness-roadmap.md, backlog.d/028-deep-module-refactor-path.md, .harness-kit/agent-readiness.yaml
+oracle: behavior-preserving write-path ledger projection extraction; session_ack_received/manual_stop_started/manual_stop_completed event types, data fields, reason message handling, mode/agent attribution, and append ordering unchanged; stop_session behavior unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is only confirmation evidence
+result: No blocking gaps.
+accepted: yes
+residual_risks:
+- rollback_session_ack remains pub(super) from the prior ack-store split, still constrained to the write_path module tree.
+- Dead-code cleanup is covered by compile and clippy in the full gate.

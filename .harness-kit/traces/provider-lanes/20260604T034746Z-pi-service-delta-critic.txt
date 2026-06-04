@@ -1,0 +1,10 @@
+Role: read-only critic
+Objective: review whether moving overview delta calculation from curb-core/src/service/snapshot_model.rs into a new service module preserves behavior and improves the service presenter boundary.
+Scope: curb-core/src/service.rs, curb-core/src/service/snapshot_model.rs, curb-core/src/service/tests.rs, docs/refactor-map.md.
+Provider: pi openrouter/moonshotai/kimi-k2.5
+Status: succeeded
+Verdict: approve. The delta logic is a distinct pure-function concern comparing two snapshots, has no side effects, and can move behind a narrow module without changing the service API.
+Blocking risks: preserve service.rs re-export; verify tests do not depend on private build_overview_delta; keep the existing overview_delta_reports_new_usage_alerts_agents_and_source_errors test passing unchanged.
+Focused tests recommended: cargo test -p curb-core overview_delta; cargo test -p curb-core service; scripts/validate.sh.
+Priority signal: lower than remaining UI/presenter work. This is code hygiene with no user-facing impact, so future work should prefer operator-flow/UI proof.
+Lead decision: accepted the extraction as already narrow and tested; accepted the priority warning for the next tranche.

@@ -1,0 +1,15 @@
+Objective: extract overview delta calculation into a dedicated service presenter module without changing public API or behavior.
+Files changed: curb-core/src/service.rs, curb-core/src/service/snapshot_model.rs, curb-core/src/service/delta.rs, docs/refactor-map.md, docs/agent-readiness-roadmap.md, .harness-kit/agent-readiness.yaml.
+Behavior changed: none intended. service::annotate_overview_delta remains publicly exported; snapshot_model no longer owns snapshot-diff mechanics.
+Live evidence:
+- cargo test -p curb-core service::tests::overview_delta_reports_new_usage_alerts_agents_and_source_errors -- --nocapture: passed, 1 test.
+- cargo test -p curb-core service::tests -- --nocapture: passed, 20 tests.
+- cargo fmt --all: applied formatting after cargo fmt --all -- --check reported one wrapping diff.
+- cargo fmt --all -- --check: passed after formatting.
+- cargo test -p curb-core overview_delta -- --nocapture: passed, 1 test.
+- scripts/check-fast.sh: passed, including UI embed check, cargo clippy -D warnings, file-length guard, termination-boundary guard, secret scan, Rust binary/core/e2e tests, UI typecheck/lint/Vitest, and dashboard smoke.
+- git diff --check: passed.
+- python3 scripts/check-secrets.py: passed.
+- line-by-line JSONL parse of .harness-kit/delegation-receipts.jsonl: passed, 57 lines.
+Repo-fit check: extraction follows the existing service submodule pattern for correlation, config_model, events_model, ack_state, and snapshot_model. It adds no new dependency, no wire format, no enforcement behavior, and no mock.
+Residual risk before closeout: worktree is intentionally still dirty from the broader readiness sweep; hosted CI/full validate proof and longer real deployment dogfood remain outside this slice.

@@ -1,0 +1,12 @@
+Role: fresh-context dogfood critic
+Objective: review the active-session dogfood evidence and CLI default-home fix.
+Provider target: native default subagent
+Status: failed before execution
+
+Error:
+Subagent spawn failed because the agent thread limit was reached.
+
+Lead verdict:
+Rejected as provider/tooling failure. Proceeded with release dogfood evidence,
+focused CLI regression tests, fast gate, full validation, artifact parsing, and
+sensitive-token grep.

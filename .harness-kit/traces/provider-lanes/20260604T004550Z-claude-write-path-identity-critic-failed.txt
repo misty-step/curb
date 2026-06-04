@@ -1,0 +1,7 @@
+provider: claude
+objective: Curb write-path expected-identity extraction critic
+scope: current diff for write_path identity extraction
+oracle: behavior-preserving expected identity validation extraction
+result: failed
+failure: Claude CLI returned "You've hit your monthly spend limit"; no verdict accepted.
+accepted: no

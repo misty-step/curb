@@ -1,0 +1,39 @@
+Objective: make the next agent-readiness backlog path explicit after the local
+readiness tranche, with hosted proof and clean closeout as the next P0.
+
+Commands/evidence read:
+- git status --short --branch --untracked-files=all
+- backlog.d/*.md active ticket scan
+- docs/agent-readiness-roadmap.md
+- docs/internal-desktop-app.md
+- .github/workflows/ci.yml
+- evidence/dogfood/*/README.md
+- git diff --check -- backlog.d/033-hosted-proof-and-tranche-closeout.md backlog.d/023-post-closeout-grooming-and-dogfood.md docs/agent-readiness-roadmap.md docs/internal-desktop-app.md
+
+Provider/subagent attempts:
+- Native subagent spawn failed because the agent thread limit was reached.
+- Existing native agents were sent read-only module-depth, readiness/gate, and
+  dogfood/UI critique prompts, but did not return usable completed reports in
+  the wait window. Lead proceeded from live repo evidence.
+- This does not satisfy the configured provider roster floor; it is a
+  supplemental attempt only.
+
+Changes made:
+- Added backlog.d/033-hosted-proof-and-tranche-closeout.md.
+- Updated backlog.d/023-post-closeout-grooming-and-dogfood.md to include 033
+  in the groomed next tranche.
+- Updated docs/agent-readiness-roadmap.md so ordered work starts with 033.
+- Updated docs/internal-desktop-app.md to replace stale Windows-CI wording with
+  the current focused Windows smoke shape.
+
+Verification:
+- git diff --check for the touched backlog/docs files passed.
+- Text newline/CR checks for the touched files passed.
+- Search confirmed the stale "manual team-run path until a Windows CI runner"
+  sentence is absent from docs/backlog.
+
+Residual risk:
+- This is a backlog/docs grooming slice only. It does not create the named
+  branch, push, run hosted CI, or close the dirty worktree.
+- Native subagent reports did not return in time; final synthesis should treat
+  this as lead evidence, not full roster-complete grooming.

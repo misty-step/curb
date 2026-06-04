@@ -1,0 +1,25 @@
+Objective: Curb UI stop confirmation and embedded assets commit.
+Provider: codex lead.
+Provider status: waived_mechanical_semantic_commit.
+Commit: 8f2a415 feat(ui): require stop confirmation.
+
+Commands:
+- cd ui && npm test -- --run App
+- cd ui && npm run smoke
+- scripts/build-ui.sh --check
+- git add ui/src/components/dashboard.tsx ui/src/components/sessionActions.tsx ui/src/App.test.tsx ui/scripts/smoke-dashboard.mjs ui/src/styles.css web/dist/index.html web/dist/assets/index-CbWlSMQl.js web/dist/assets/index-D-vLLOwG.css web/dist/assets/index-DN380y4E.js web/dist/assets/index-CzY8TPgA.css
+- git diff --cached --name-status
+- git diff --cached --check
+- git diff --cached --stat
+- git commit -m "feat(ui): require stop confirmation"
+
+Evidence:
+- App Vitest subset passed: 1 test file passed, 6 tests passed.
+- Dashboard smoke passed and wrote artifacts/smoke-dashboard.
+- UI embed check passed with Vite output matching web/dist hashed assets.
+- Staged path list matched docs/readiness-tranche-commit-plan.md group 5 only, with old web/dist assets represented as renames.
+- Whitespace check passed with no output.
+
+Residual:
+- Remaining readiness tranche groups are still dirty and intentionally uncommitted.
+- Full branch validation already passed before semantic splitting; rerun after all semantic groups are committed.

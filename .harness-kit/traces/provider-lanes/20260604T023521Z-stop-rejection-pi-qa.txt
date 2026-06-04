@@ -1,0 +1,16 @@
+receipt_id: E3ABF1A4-D004-40C0-BA3F-F172DC69DFE2
+timestamp_utc: 2026-06-04T02:35:21Z
+provider: pi
+role: read-only QA critic
+objective: Verify whether stop-rejection dogfood proves safe non-enforcement rejection and NDJSON redaction.
+input_ref:
+  - docs/runbooks/observability-dogfood.md
+  - evidence/dogfood/2026-06-04-stop-rejection/
+accepted_output:
+  - verdict: accepted
+  - no blocking gaps
+  - verified 409 Conflict with enforcement mode is required, stop_rejection in NDJSON, protected API checks, parser output, and no token/reason/raw-session leakage in NDJSON
+nonblocking_notes:
+  - stop-request-clean.json intentionally captures the operator reason as request evidence, not as log output
+  - successful termination remains future synthetic-subprocess dogfood
+lead_decision: accepted

@@ -1,0 +1,8 @@
+provider: codex
+objective: Curb write-path expected-identity extraction critic
+scope: current diff for curb-core/src/write_path.rs, curb-core/src/write_path/stop_identity.rs, curb-core/src/write_path/*.rs, docs/refactor-map.md, docs/agent-readiness-roadmap.md, backlog.d/028-deep-module-refactor-path.md, .harness-kit/agent-readiness.yaml
+oracle: behavior-preserving expected identity validation extraction; call order, error classes, message strings, fresh capture authority, and sealed target construction unchanged
+result: No blocking gaps.
+accepted: yes
+residual_risks:
+- Codex critic was read-only and did not rerun tests; lead-run focused tests, check-fast, and validate supplied the execution proof.

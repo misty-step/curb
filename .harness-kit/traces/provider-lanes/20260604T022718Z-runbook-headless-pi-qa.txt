@@ -1,0 +1,16 @@
+receipt_id: 3B424B8C-81FA-4DC2-9F98-8124841E70A3
+timestamp_utc: 2026-06-04T02:27:18Z
+provider: pi
+role: read-only QA critic
+objective: Verify whether the headless runbook dogfood evidence proves the runbook path worked.
+input_ref:
+  - docs/runbooks/headless-sidecar.md
+  - docs/runbooks/observability-dogfood.md
+  - evidence/dogfood/2026-06-04-runbook-headless/
+accepted_output:
+  - verdict: accepted
+  - no blocking gaps
+  - verified public probes, protected auth behavior, observability parser output, evidence package completeness, and healthy watcher baseline
+nonblocking_notes:
+  - local-only proof and no stop decision exercised are correctly recorded as residual risk
+lead_decision: accepted

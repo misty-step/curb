@@ -1,0 +1,16 @@
+receipt_id: 14089A79-A0A8-4B09-BE09-98DFB0C6B8AF
+timestamp_utc: 2026-06-04T02:07:59Z
+role: critic
+lane: ousterhout-write-path-test-extraction
+objective: Fresh read-only critic should review the diff plus Ousterhout/module-depth oracle before accepting the milestone.
+failure:
+  - Critic dispatch failed before execution with: agent thread limit reached.
+waiver:
+  - Proceeded because the change was a mechanical relocation of an existing #[cfg(test)] module plus documentation/backlog count updates.
+  - Behavior was checked by focused write-path tests and the full repository validation gate.
+verification_substitute:
+  - cargo test -p curb-core write_path -- --nocapture
+  - cargo fmt --all -- --check
+  - bash scripts/check-fast.sh
+  - bash scripts/validate.sh
+  - git diff --check

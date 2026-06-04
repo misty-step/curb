@@ -1,0 +1,17 @@
+receipt_id: 94E0825B-BDDA-4C17-B8D0-E55CC44F6517
+timestamp_utc: 2026-06-04T02:35:21Z
+provider: codex
+role: read-only QA critic
+objective: Verify whether stop-rejection dogfood proves safe non-enforcement rejection and NDJSON redaction.
+input_ref:
+  - docs/runbooks/observability-dogfood.md
+  - evidence/dogfood/2026-06-04-stop-rejection/
+accepted_output:
+  - verdict: accepted
+  - no blocking gaps
+  - verified stop_rejection status 409, templated stop route, config mode visibility, watcher kill count 0, and shutdown
+  - verified zero NDJSON occurrences of selected session key, encoded key, operator reason, Authorization, Bearer, prompt, response, screenshot, or keystroke
+nonblocking_notes:
+  - selected-session-clean.json contains the raw session key as an API response artifact, but the NDJSON leakage check is clean
+  - successful termination remains future synthetic-subprocess dogfood
+lead_decision: accepted

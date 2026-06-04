@@ -1,0 +1,8 @@
+Provider: pi
+Role: read-only critic
+Objective: Refute behavior-preserving platform capture extraction.
+Input: /tmp/curb-platform-capture-complete.diff and live platform files.
+Verdict: Accepted.
+Blocking findings: None.
+Non-blocking risks: Test import/cfg hygiene, import pruning, liveness predicate coupling between capture and termination, CommandSpec pub(super), and module path discoverability.
+Lead disposition: Added a code comment documenting the capture/termination liveness coupling; focused platform tests and formatting passed after the comment.

@@ -1,0 +1,31 @@
+Objective: Curb headless service and structured observability commit.
+Provider: codex lead.
+Provider status: waived_mechanical_semantic_commit.
+Commit: 4faca76 feat(headless): add service api and observability.
+
+Commands:
+- cargo test --bin curb headless observability api -- --nocapture
+- cargo test --test cli serve -- --nocapture
+- python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-headless-observability-30s-oracle/headless-observability.ndjson
+- cargo test --bin curb headless -- --nocapture
+- cargo test --bin curb observability -- --nocapture
+- cargo test --bin curb api -- --nocapture
+- git add src/api.rs src/api/auth.rs src/api/dispatch.rs src/api/http_types.rs src/api/response.rs src/api/routes.rs src/api/server.rs src/api/token_store.rs src/api/wire.rs src/http.rs src/main.rs src/observability.rs src/observability/event.rs src/observability/registry.rs src/server_cmd.rs tests/cli.rs docs/adr/0001-headless-service-contract.md docs/adr/0002-structured-observability-contract.md docs/adr/README.md docs/observability.md docs/runbooks/headless-sidecar.md docs/runbooks/observability-dogfood.md scripts/parse-observability-smoke.py
+- git diff --cached --name-status
+- git diff --cached --check
+- git diff --cached --stat
+- git commit -m "feat(headless): add service api and observability"
+
+Evidence:
+- The grouped Cargo command from docs/readiness-tranche-commit-plan.md failed because Cargo accepts one TESTNAME filter; this is a plan-command syntax defect, not a product test failure.
+- cargo test --bin curb headless -- --nocapture passed: 2 tests passed, 43 filtered out.
+- cargo test --bin curb observability -- --nocapture passed: 9 tests passed, 36 filtered out.
+- cargo test --bin curb api -- --nocapture passed: 23 tests passed, 22 filtered out.
+- cargo test --test cli serve -- --nocapture passed: 3 tests passed, 20 filtered out.
+- Observability parser passed against evidence/dogfood/2026-06-04-headless-observability-30s-oracle/headless-observability.ndjson with 23 accepted events and no forbidden sensitive text.
+- Staged path list matched docs/readiness-tranche-commit-plan.md group 3 only.
+- Whitespace check passed with no output.
+
+Residual:
+- Remaining readiness tranche groups are still dirty and intentionally uncommitted.
+- Full branch validation already passed before semantic splitting; rerun after all semantic groups are committed.
