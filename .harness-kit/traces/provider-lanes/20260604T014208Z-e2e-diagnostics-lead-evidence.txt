@@ -1,0 +1,33 @@
+Role: lead E2E diagnostics executor
+Objective: make real-process enforcement test failures explain timing,
+correlation, process identity, and ledger state without weakening behavior.
+Provider target: codex lead
+Receipt id: D3688F0F-8689-4AF9-A084-8F0018B38AB7
+Status: completed
+
+Evidence:
+- `curb-core/tests/e2e_enforcement.rs` now includes failure diagnostics for
+  worker and sibling liveness, process identity, marker matching, correlated
+  policy sessions, terminated session keys, ledger path, and ledger event
+  lifecycle.
+- `terminated_session_is_not_rekilled_on_the_next_scan` reports scan 2 and
+  scan 3 state when termination or re-kill suppression invariants fail.
+- `enforcement_terminates_the_correlated_worker_and_spares_the_sibling`
+  reports both worker and plausible sibling state when grace, termination,
+  sibling-safety, or ledger lifecycle assertions fail.
+- `backlog.d/027-quality-gates-and-contract-tests.md` marks the
+  real-process E2E diagnostics item complete.
+- `docs/agent-readiness-roadmap.md` now treats real-process E2E diagnostics as
+  present and leaves browser smoke classification as the remaining testing gap.
+
+Verification:
+- `cargo fmt --all && cargo fmt --all -- --check && cargo test -p curb-core --test e2e_enforcement -- --nocapture` passed.
+- `bash scripts/check-fast.sh` passed.
+- `bash scripts/validate.sh` passed.
+- `git diff --check` passed.
+- `.harness-kit/agent-readiness.yaml` parsed with PyYAML.
+
+Lead verdict:
+Accepted. The change improves failure observability for the real-process
+termination contract while preserving the sealed PID plus start-time boundary
+and existing behavior.

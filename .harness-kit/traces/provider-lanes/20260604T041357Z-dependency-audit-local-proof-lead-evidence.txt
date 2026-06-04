@@ -1,0 +1,13 @@
+Objective: prove the dependency-advisory audit path locally after the readiness tranche and remove a direct-invocation script-mode paper cut.
+Commands:
+- bash scripts/check-dependency-audit.sh --offline
+- bash scripts/check-dependency-audit.sh --online
+- chmod +x scripts/check-dependency-audit.sh
+- scripts/check-dependency-audit.sh --offline
+Status: passed
+Live evidence:
+- Offline mode loaded 1105 RustSec advisories from <cargo-advisory-db> and scanned Cargo.lock for vulnerabilities across 187 crate dependencies.
+- Online mode fetched RustSec advisory-db from https://github.com/RustSec/advisory-db.git, updated the crates.io index, scanned Cargo.lock, found 0 vulnerabilities, and completed npm audit.
+- Direct local invocation initially failed with zsh permission denied because the script was not executable; after chmod +x, scripts/check-dependency-audit.sh --offline passed.
+Repo-fit check: CI already invokes the script through bash, so this preserves CI behavior while making documented local direct invocation work.
+Residual risk: this is local audit proof, not hosted CI dependency-audit job proof.

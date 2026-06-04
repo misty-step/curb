@@ -1,0 +1,15 @@
+{
+  "counts": {
+    "api_request": 7,
+    "config_loaded": 1,
+    "health_check": 1,
+    "readiness_check": 2,
+    "server_started": 1,
+    "usage_scan": 1,
+    "watcher_tick": 10
+  },
+  "duration_seconds": 30,
+  "event_count": 23,
+  "expected_watcher_ticks": 6,
+  "max_policy_duration_ms": 3989
+}

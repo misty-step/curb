@@ -570,8 +570,57 @@ button {
   font-size: 11.5px;
   color: var(--text-muted);
 }
+.action-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-top: var(--s2);
+}
+.stop-checks {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  color: var(--text-muted);
+}
+.stop-check-title {
+  margin-right: var(--s1);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-faint);
+}
+.stop-check {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.stop-check.ready {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 28%, var(--border));
+  background: var(--ok-soft);
+}
+.stop-check.missing {
+  color: var(--kill);
+  border-color: color-mix(in srgb, var(--kill) 30%, var(--border));
+  background: var(--kill-soft);
+}
 .row-actions {
   display: flex;
+  gap: var(--s2);
+  flex: none;
+}
+.stop-confirm {
+  display: inline-flex;
+  align-items: center;
   gap: var(--s2);
 }
 .row-busy {
@@ -581,6 +630,10 @@ button {
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border-radius: var(--r-sm);
   padding: 7px 13px;
   font-size: 12.5px;
@@ -610,6 +663,14 @@ button {
 .btn-stop:hover {
   background: var(--kill-soft);
   border-color: var(--kill);
+}
+.btn-stop-confirm {
+  color: white;
+  background: var(--kill);
+  border-color: var(--kill);
+}
+.btn-stop-confirm:hover {
+  background: color-mix(in srgb, var(--kill) 88%, black);
 }
 .btn-ghost {
   background: none;
@@ -992,6 +1053,17 @@ button {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .action-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .row-actions,
+  .stop-confirm {
+    flex-wrap: wrap;
   }
 }
 

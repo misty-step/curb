@@ -1,0 +1,24 @@
+Objective: Curb API/UI contract fixture commit.
+Provider: codex lead.
+Provider status: waived_mechanical_semantic_commit.
+Commit: 02b1207 test(contract): lock api ui fixtures.
+
+Commands:
+- git status --short -- contracts/api/config.json contracts/api/live.json contracts/api/onboarding.json contracts/api/overview.json contracts/api/ready.json contracts/api/session.json contracts/api/snapshot.json contracts/api/turns.json src/api/tests.rs ui/src/api.test.ts ui/src/contract.test.ts ui/src/readModel.ts ui/src/types.ts
+- cargo test --bin curb api_contract_fixtures_match_ui_facing_routes -- --nocapture
+- cd ui && npm test -- --run contract api
+- git add contracts/api/config.json contracts/api/live.json contracts/api/onboarding.json contracts/api/overview.json contracts/api/ready.json contracts/api/session.json contracts/api/snapshot.json contracts/api/turns.json src/api/tests.rs ui/src/api.test.ts ui/src/contract.test.ts ui/src/readModel.ts ui/src/types.ts
+- git diff --cached --name-status
+- git diff --cached --check
+- git diff --cached --stat
+- git commit -m "test(contract): lock api ui fixtures"
+
+Evidence:
+- Rust contract fixture parity check passed: 1 test passed, 44 filtered out.
+- UI contract/API Vitest subset passed: 2 test files passed, 5 tests passed.
+- Staged path list matched docs/readiness-tranche-commit-plan.md group 2 only.
+- Whitespace check passed with no output.
+
+Residual:
+- Remaining readiness tranche groups are still dirty and intentionally uncommitted.
+- Full branch validation already passed before semantic splitting; rerun after all semantic groups are committed.

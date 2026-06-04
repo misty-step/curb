@@ -1,0 +1,11 @@
+Role: read-only QA critic
+Objective: review the 3-minute Curb headless observability dogfood evidence and decide whether it supports a stronger local readiness claim.
+Scope: evidence/dogfood/2026-06-04-headless-observability-3min/README.md, event-summary.txt/json, ready-final.status, parse-observability-smoke.txt, redaction-check.txt, overview-final.json, docs/agent-readiness-roadmap.md.
+Provider: pi openrouter/moonshotai/kimi-k2.5
+Status: succeeded
+Verdict: evidence supports incremental local readiness strengthening.
+Accepted evidence: 72 events, 59 watcher ticks, max policy duration around 3.9s, clean redaction, required policy fields on runtime events, and a valid step up from the prior 20-second proof.
+Blocking gaps: still worktree-local, macOS-only, visibility mode only in this slice.
+Residual risk: 3 minutes is not deployment; resource leaks, log rotation, hours/days drift, pressure behavior, and hosted CI remain unverified.
+Backlog gap reduction: partial. This improves local ticker/NDJSON accumulation evidence but does not satisfy the roadmap's longer real deployment windows outside the worktree.
+Lead decision: accepted.

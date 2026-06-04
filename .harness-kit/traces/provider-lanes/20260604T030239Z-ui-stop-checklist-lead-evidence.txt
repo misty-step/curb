@@ -1,0 +1,36 @@
+Curb UI stop-identity checklist slice
+
+Scope:
+- ui/src/components/dashboard.tsx
+- ui/src/styles.css
+- ui/src/App.test.tsx
+- web/dist/
+- docs/agent-readiness-roadmap.md
+- .harness-kit/agent-readiness.yaml
+
+Behavior changed:
+- A selected stoppable dashboard row now shows a compact "Stop requires" identity checklist next to the destructive "Stop now" action.
+- Checklist facets are PID, process start time, owner, and executable/app identity.
+- The row action area wraps on narrow viewports instead of crowding the destructive button.
+
+Browser evidence:
+- In-app Browser target: http://127.0.0.1:5178/ served by a temporary Vite fixture API with one can_stop session.
+- Browser selected the unique row button "repo Codex · 6d ago 789 over warn 789".
+- DOM contained "Stop requires", "PID", "start time", "owner", "executable", and button "Stop now".
+- Browser layout check showed no viewport overflow for .row-open, .action-strip, .stop-checks, and .row-actions at width 1280.
+- The in-app Browser full-page screenshot command timed out, so Playwright captured the visual artifact at ui/artifacts/browser-stop-checklist.png against the same fixture server.
+
+Verification:
+- npm run lint
+- npm test -- --run App readModel
+- npm run typecheck
+- npm run smoke
+- scripts/build-ui.sh
+- scripts/build-ui.sh --check
+- git diff --check
+- python3 scripts/check-secrets.py
+- scripts/check-fast.sh
+
+Provider waiver:
+- A callable multi-agent spawn tool was discovered only after implementation, but its tool contract allows spawning only when the user explicitly asks for sub-agents/delegation.
+- Repo roster floor is therefore waived for this slice; the lead recorded browser proof and the fast gate instead of inventing a critic lane.

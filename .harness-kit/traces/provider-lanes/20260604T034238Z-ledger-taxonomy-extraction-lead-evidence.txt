@@ -1,0 +1,31 @@
+Role: lead evidence
+Objective: Separate ledger event taxonomy/classification from append-only ledger persistence without changing behavior.
+Scope:
+- curb-core/src/ledger.rs
+- curb-core/src/ledger/taxonomy.rs
+- docs/refactor-map.md
+- docs/agent-readiness-roadmap.md
+- backlog.d/028-deep-module-refactor-path.md
+- .harness-kit/agent-readiness.yaml
+
+Behavior changed:
+- None intended. This is a behavior-preserving extraction.
+
+Architecture changed:
+- curb-core/src/ledger.rs remains the facade for Event, Ledger, Options, open/open_with_options/append, readback, hash-chain state, metadata enrichment, sensitive-field scrubbing, and persistence tests.
+- curb-core/src/ledger/taxonomy.rs now owns LedgerEvent, ViewClass, AlertClass, parse/as_str, event-view classification, alert classification, and taxonomy tests.
+
+Critic outcome:
+- Pi recommended deferring this slice as lower leverage than presenter/observability work. Lead accepted the future-priority warning but kept the narrow extraction because it preserved the public facade and passed affected behavior tests.
+
+Verification:
+- cargo test -p curb-core ledger -- --nocapture -> 11 passed.
+- cargo test -p curb-core service::tests -- --nocapture -> 20 passed.
+- cargo test -p curb-core usagewatch -- --nocapture -> 11 passed.
+- cargo test -p curb-core write_path -- --nocapture -> 6 passed.
+- scripts/check-fast.sh -> passed; includes clippy -D warnings, file-length, termination-boundary scan, secret scan, Rust binary/core/CLI/e2e tests, UI typecheck/lint/tests, and deterministic dashboard smoke.
+- git diff --check -> passed.
+- python3 scripts/check-secrets.py -> check-secrets: ok.
+
+Residual:
+- Do not continue splitting ledger unless new pain appears. Next architecture value should come from remaining presenter/UI/observability proof or hosted CI/dogfood evidence.

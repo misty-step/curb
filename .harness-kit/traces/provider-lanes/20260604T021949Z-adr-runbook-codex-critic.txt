@@ -1,0 +1,18 @@
+receipt_id: 57499CE3-2F36-41FD-A878-389123EC2DC3
+timestamp_utc: 2026-06-04T02:19:49Z
+provider: codex
+role: read-only documentation/architecture critic
+objective: Identify missing ADR/runbook artifacts for headless mode, structured observability, termination safety, and deep-module readiness.
+input_ref:
+  - README.md
+  - docs/contributor-guide.md
+  - docs/agent-readiness-roadmap.md
+  - docs/refactor-map.md
+  - docs/observability.md
+  - backlog.d/025-032
+accepted_output:
+  - Recommended ADR for the headless service contract.
+  - Recommended runbook for structured observability dogfood and incident triage.
+  - Recommended ADR/runbook coverage for termination safety and deep-module boundaries.
+  - Warned against broad architecture handbook duplication.
+lead_decision: accepted

@@ -1,0 +1,30 @@
+receipt_id: E56BE5CF-710D-44AA-B8FC-265857206D25
+timestamp_utc: 2026-06-04T02:19:49Z
+role: lead
+lane: agent-readiness-adr-runbook-coverage
+objective: Add durable ADR/runbook coverage for Curb's major headless, observability, and termination-boundary decisions.
+scope:
+  - docs/adr/README.md
+  - docs/adr/0001-headless-service-contract.md
+  - docs/adr/0002-structured-observability-contract.md
+  - docs/adr/0003-termination-boundary-safety.md
+  - docs/runbooks/headless-sidecar.md
+  - docs/runbooks/observability-dogfood.md
+  - README.md
+  - docs/contributor-guide.md
+  - docs/agent-readiness-roadmap.md
+  - .harness-kit/agent-readiness.yaml
+  - backlog.d/029-agent-readiness-contract.md
+accepted_output:
+  - Added ADR index and three accepted ADRs for headless service contract, structured observability contract, and termination-boundary safety.
+  - Added headless sidecar and observability dogfood runbooks with copy-paste commands, triage steps, and evidence guidance.
+  - Linked the ADR/runbook set from README, contributor guide, readiness roadmap, readiness profile, and backlog 029.
+verification:
+  - <agent-readiness-skill>/scripts/profile-crud.py validate
+  - git diff --check
+  - cargo test --bin curb headless -- --nocapture
+  - cargo test --bin curb observability -- --nocapture
+  - bash scripts/check-termination-boundary.sh
+residual_risk:
+  - Hosted CI proof and fresh post-doc dogfood evidence remain open.
+  - Worktree remains broadly dirty from the larger readiness/refactor run.

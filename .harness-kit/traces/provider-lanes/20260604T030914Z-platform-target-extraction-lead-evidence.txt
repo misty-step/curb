@@ -1,0 +1,36 @@
+Curb platform target extraction slice
+
+Scope:
+- curb-core/src/platform.rs
+- curb-core/src/platform/target.rs
+- curb-core/src/platform/tests.rs
+- docs/refactor-map.md
+- docs/agent-readiness-roadmap.md
+- backlog.d/028-deep-module-refactor-path.md
+- .harness-kit/agent-readiness.yaml
+
+Behavior changed:
+- No public behavior change intended.
+- Snapshot::termination_target and Snapshot::supervisor_target remain the public facade.
+- Sealed TerminationTarget construction, process identity comparison, supervisor escalation walk, and child-first process-tree scoping moved behind curb-core/src/platform/target.rs.
+- Production termination still accepts only TerminationTarget, never a bare PID.
+
+New oracle:
+- platform::tests::supervisor_target_uses_nearest_same_family_ancestor_tree verifies opt-in supervised escalation picks the nearest same-family ancestor and returns child-first scope ordering.
+
+Verification:
+- cargo test -p curb-core platform::tests::supervisor_target_uses_nearest_same_family_ancestor_tree -- --nocapture
+- cargo fmt --all -- --check
+- cargo test -p curb-core platform::tests -- --nocapture
+- scripts/check-termination-boundary.sh
+- cargo test -p curb-core write_path::tests -- --nocapture
+- cargo test -p curb-core runtime::tests::stop -- --nocapture
+- cargo clippy -p curb-core --all-targets -- -D warnings
+- cargo test -p curb-core --test e2e_enforcement -- --nocapture
+- python3 YAML parse for .harness-kit/agent-readiness.yaml
+- git diff --check
+- scripts/check-fast.sh
+
+Provider note:
+- Fresh Ousterhout critic spawn was attempted and failed with "agent thread limit reached".
+- Lead proceeded with the new public-behavior oracle, property tests, boundary scan, e2e enforcement tests, clippy, and check-fast.

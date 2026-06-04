@@ -1,0 +1,30 @@
+receipt_id: FDC20581-0343-44BB-87EA-E167C47C0919
+timestamp_utc: 2026-06-04T02:35:21Z
+role: lead
+lane: stop-rejection-dogfood
+objective: Prove a safe non-enforcement stop rejection through the headless API and structured logs without terminating any process.
+scope:
+  - docs/runbooks/observability-dogfood.md
+  - docs/agent-readiness-roadmap.md
+  - evidence/dogfood/2026-06-04-stop-rejection/
+accepted_output:
+  - Ran release-build headless service on 127.0.0.1:18767 with CURB_LOG_FORMAT=json.
+  - Captured live, ready, unauthenticated health, authenticated health, selected session, stop request, stop response, and NDJSON logs.
+  - Sent a well-formed stop request with scope tree in non-enforcement mode.
+  - Captured 409 Conflict with enforcement mode is required.
+  - Captured stop_rejection status 409 and templated /v1/sessions/{session_key}/stop path in NDJSON.
+  - Removed generated .curb token/cache/ledger state after capture.
+  - Pruned exploratory bad-scope artifacts from the final evidence package.
+verification:
+  - cargo build --release --bin curb
+  - python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-stop-rejection/stop-rejection.ndjson
+  - python3 scripts/check-secrets.py
+  - <agent-readiness-skill>/scripts/profile-crud.py validate
+  - git diff --check
+  - test ! -e .curb
+provider_review:
+  - codex QA accepted with no blocking gaps.
+  - pi QA accepted with no blocking gaps.
+residual_risk:
+  - This proves safe rejection, not successful enforcement termination.
+  - Hosted CI proof remains open.

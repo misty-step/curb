@@ -142,6 +142,19 @@ fn install_copies_current_binary_to_prefix_bin() {
 }
 
 #[test]
+fn serve_help_exposes_headless_contract() {
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+
+    cmd.args(["serve", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--headless"))
+        .stdout(predicate::str::contains(
+            "Serve the API/runtime without the embedded web UI",
+        ));
+}
+
+#[test]
 fn validate_config_matches_go_oracle_shape() {
     let mut cmd = Command::cargo_bin("curb").expect("curb binary");
 
@@ -176,6 +189,20 @@ fn usage_reads_synthetic_provider_metadata() {
         .stdout(predicate::str::contains("codex 1 events"))
         .stdout(predicate::str::contains("session_codex"))
         .stdout(predicate::str::contains("total=107"));
+}
+
+#[test]
+fn usage_defaults_to_home_directory_for_provider_discovery() {
+    let home = tempdir().expect("home");
+    write_synthetic_codex_usage(home.path(), "session_codex", "/repo", 107);
+
+    let mut cmd = Command::cargo_bin("curb").expect("curb binary");
+    cmd.env("HOME", home.path())
+        .args(["usage", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("codex 1 events"))
+        .stdout(predicate::str::contains("session_codex"));
 }
 
 #[test]

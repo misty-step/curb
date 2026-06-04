@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${CURB_SKIP_PRE_COMMIT:-}" = "1" ]; then
+  echo "curb pre-commit: skipped because CURB_SKIP_PRE_COMMIT=1" >&2
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+echo "curb pre-commit: running scripts/check-fast.sh" >&2
+bash "$ROOT/scripts/check-fast.sh"

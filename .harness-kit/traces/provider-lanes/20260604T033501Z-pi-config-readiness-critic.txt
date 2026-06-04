@@ -1,0 +1,21 @@
+Role: readiness critic
+Provider: pi
+Objective: Identify the single highest-leverage next backlog/refactor slice for agent readiness, modularity, headless observability, tests, and UI quality.
+Scope: backlog.d, docs/agent-readiness-roadmap.md, docs/refactor-map.md, .harness-kit/agent-readiness.yaml, and live code hotspots.
+Verdict: accept.
+
+Recommendation:
+- Complete the config schema facade extraction by moving policy merge and preset mechanics out of curb-core/src/config.rs.
+
+Evidence cited:
+- docs/refactor-map.md already treated config as mostly extracted but still carrying policy/preset mechanics.
+- curb-core/src/config.rs carried apply_preset, policy_for, refresh_agent_policies, apply_policy_to_agents, and keep_process_agents inline.
+- curb-core/src/config/ already had duration, defaults, storage, and tests modules.
+
+Do not do:
+- Do not split config into one module per struct.
+- Do not change Config::{load,save,validate,apply_preset} as the public facade.
+- Do not add async/config reload behavior in this slice.
+
+Lead disposition:
+- Accepted. Implemented config/preset.rs and config/policy_merge.rs while preserving the public Config facade.

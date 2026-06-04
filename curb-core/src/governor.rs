@@ -11,12 +11,13 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, Utc};
 
 use crate::config::Config;
-use crate::usagewatch::{Enforcer, PolicySession, UsageWatch, UsageWatchError};
+use crate::usagewatch::{Enforcer, PolicyScanReport, PolicySession, UsageWatch, UsageWatchError};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct GovernorReport {
     pub observed_sessions: usize,
     pub terminated_keys: BTreeSet<String>,
+    pub policy: PolicyScanReport,
 }
 
 /// Stateful governor for one environment.
@@ -43,11 +44,13 @@ impl GovernorEngine {
         now: DateTime<Utc>,
     ) -> Result<GovernorReport, UsageWatchError> {
         let window_start = now - chrono::Duration::from_std(cfg.usage.window.as_std()).unwrap();
-        self.watch
+        let policy = self
+            .watch
             .scan(cfg, sessions, enforcer, window_start, now)?;
         Ok(GovernorReport {
             observed_sessions: sessions.len(),
             terminated_keys: self.watch.terminated_keys(),
+            policy,
         })
     }
 

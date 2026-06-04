@@ -1,0 +1,9 @@
+provider: claude
+objective: Curb write-path expected-identity extraction planner
+scope: curb-core/src/write_path.rs, curb-core/src/write_path/*.rs, curb-core/src/platform.rs, curb-core/src/service.rs, docs/refactor-map.md, backlog.d/028-deep-module-refactor-path.md
+oracle: stop_session behavior unchanged; InvalidStop and StopConflict messages unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is confirmation evidence only
+result: Recommended moving validate_expected_stop_identity and validate_stop_expectation to write_path/stop_identity.rs with pub(super) visibility.
+accepted: yes
+notes:
+- Preserve validate_expected_stop_identity call before mode, ack, correlation, and platform capture.
+- Keep StopExpectedIdentity and StopRequest types in service.rs.

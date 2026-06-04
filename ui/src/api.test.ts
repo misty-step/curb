@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchOnboarding, fetchSession, fetchSessionTurns } from "./api";
+import { fetchOnboarding, fetchSession, fetchSessionTurns, saveConfig } from "./api";
 
 describe("selected-session API client", () => {
   it("fetches selected session detail and rich turn breakdowns from service endpoints", async () => {
@@ -63,10 +63,34 @@ describe("readiness API client", () => {
   });
 });
 
+describe("operator-visible API errors", () => {
+  it("surfaces config validation failures from structured error bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(input)).toBe("http://curb.test/v1/config");
+        expect(init?.method).toBe("PUT");
+        return errorResponse(400, { error: "unknown variant `surveillance`" });
+      }),
+    );
+
+    await expect(saveConfig(settings(), { mode: "surveillance" })).rejects.toThrow(
+      '400 : {"error":"unknown variant `surveillance`"}',
+    );
+  });
+});
+
 function settings() {
   return { baseUrl: "http://curb.test", token: "secret" };
 }
 
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function errorResponse(status: number, value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }

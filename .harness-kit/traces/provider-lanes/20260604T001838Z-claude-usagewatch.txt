@@ -1,0 +1,9 @@
+provider: claude
+objective: Curb usagewatch behavior-preserving refactor critic
+scope: current diff for curb-core/src/usagewatch.rs, curb-core/src/usagewatch/*.rs, docs/refactor-map.md, docs/agent-readiness-roadmap.md, backlog.d/028-deep-module-refactor-path.md, .harness-kit/agent-readiness.yaml
+oracle: behavior-preserving usage policy deep-module extraction; warning/grace/termination decisions unchanged; ledger payload/message helpers in usagewatch/events.rs; tests in usagewatch/tests.rs
+result: No blocking gaps.
+residual_risks:
+- usagewatch/tests.rs is intentionally omitted from the agent-readiness module ownership roster, matching other test-only modules.
+- behavior preservation rests on a mechanical move of event_data, usage_message, short_id, and format_tokens; scan/evaluate/retain_active/suppress/clear/terminated_keys and ledger ordering are untouched.
+- tests.rs relies on child-module access to private parent state, preserving the old inline test visibility.

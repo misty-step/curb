@@ -1,0 +1,3 @@
+curb usage
+  sources: codex 2405 events; claude 703 events; pi 337 events
+  sessions: 267

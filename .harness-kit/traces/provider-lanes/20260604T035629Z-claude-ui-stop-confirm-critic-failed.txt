@@ -1,0 +1,7 @@
+Role: read-only critic
+Objective: review the Curb UI destructive stop confirmation change for operator safety and readiness.
+Scope: ui/src/components/dashboard.tsx, ui/src/components/sessionActions.tsx, ui/src/App.tsx, ui/src/App.test.tsx, ui/scripts/smoke-dashboard.mjs, ui/src/styles.css.
+Provider: claude
+Status: failed
+Failure: claude returned "You've hit your monthly spend limit" before producing a verdict.
+Lead decision: record as failed roster attempt and proceed with Pi critic plus UI tests, deterministic smoke, embedded asset refresh, and check-fast.

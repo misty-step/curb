@@ -1,0 +1,7 @@
+Role: readiness critic
+Provider: claude
+Objective: Identify the single highest-leverage next backlog/refactor slice for agent readiness, modularity, headless observability, tests, and UI quality.
+Scope: backlog.d, docs/agent-readiness-roadmap.md, docs/refactor-map.md, .harness-kit/agent-readiness.yaml, and live code hotspots.
+Result: failed before a verdict.
+Evidence: Claude returned "You've hit your monthly spend limit - raise it at claude.ai/settings/usage".
+Lead decision: rejected as unavailable; no finding accepted from this lane.

@@ -1,0 +1,14 @@
+Objective: reduce the longer-real-dogfood gap by running Curb as a release-build headless sidecar against real local provider metadata for a longer local visibility-mode window.
+Command: CURB_DOGFOOD_SECONDS=180 bash scripts/dogfood-headless-observability.sh evidence/dogfood/2026-06-04-headless-observability-3min
+Artifact: evidence/dogfood/2026-06-04-headless-observability-3min/
+Behavior changed: none. This is dogfood evidence only.
+Live evidence:
+- build-release.txt: release binary build completed.
+- validate-config.txt: generated scratch-state config validated.
+- ready-final.status: 200.
+- event-summary.txt: events=72, usage_scan=1, watcher_tick=59, max_policy_duration_ms=3928.
+- overview-initial.json and overview-final.json: visibility/watch mode, working=1, warn=0, kill=0, source_errors=0, enforcement disabled because current mode will not terminate processes.
+- parse-observability-smoke.txt: parser accepted 72 events with required runtime policy fields.
+- redaction-check.txt: no token, auth header, prompt, response, screenshot, or keystroke terms in NDJSON.
+Repo-fit check: uses the repo-managed headless dogfood script, private scratch state outside the worktree, local notifications disabled, visibility mode only, and metadata-only provider ingestion.
+Residual risk: this is still local 3-minute dogfood, not hosted CI proof or a multi-hour production/server deployment window.

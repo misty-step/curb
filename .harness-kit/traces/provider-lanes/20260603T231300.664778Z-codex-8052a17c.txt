@@ -1,0 +1,9 @@
+# Codex provider lane summary
+
+Original raw transcript replaced before public PR closeout.
+
+- Objective: Curb API next deep-module extraction critic.
+- Provider: codex.
+- Outcome: accepted as planning evidence for route dispatch extraction.
+- Reason for replacement: raw provider transcript contained local absolute paths and verbose command logs; the committed artifact keeps only the decision-relevant receipt.
+- Follow-up evidence: see .harness-kit/delegation-receipts.jsonl and docs/refactor-map.md.

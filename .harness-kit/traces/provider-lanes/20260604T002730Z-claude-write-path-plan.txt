@@ -1,0 +1,9 @@
+provider: claude
+objective: Curb write-path ack-persistence extraction planner
+scope: curb-core/src/write_path.rs, curb-core/src/service/ack_state.rs, curb-core/src/platform.rs, docs/refactor-map.md, backlog.d/028-deep-module-refactor-path.md
+oracle: manual acknowledge and stop behavior unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is confirmation evidence only
+result: Recommended extracting write_session_ack, delete_session_ack, and rollback_session_ack into a write_path ack persistence submodule while leaving Service ack/stop orchestration and stop identity validation in write_path.rs.
+accepted: yes
+notes:
+- Keep ledger projection and stop path out of this slice.
+- Preserve Unix permission ordering and rollback restoration semantics.

@@ -1,0 +1,25 @@
+Objective: Curb deep-module refactor commit.
+Provider: codex lead.
+Provider status: waived_mechanical_semantic_commit.
+Commit: 4f95cb5 refactor(core): split deep service modules.
+
+Commands:
+- cargo test -p curb-core -- --nocapture
+- cargo test -p curb-core --test e2e_enforcement -- --nocapture
+- scripts/check-termination-boundary.sh
+- git add curb-core/src/config.rs curb-core/src/config/defaults.rs curb-core/src/config/duration.rs curb-core/src/config/policy_merge.rs curb-core/src/config/preset.rs curb-core/src/config/storage.rs curb-core/src/config/tests.rs curb-core/src/governor.rs curb-core/src/ledger.rs curb-core/src/ledger/taxonomy.rs curb-core/src/platform.rs curb-core/src/platform/capture.rs curb-core/src/platform/notification.rs curb-core/src/platform/target.rs curb-core/src/platform/termination.rs curb-core/src/platform/tests.rs curb-core/src/runtime.rs curb-core/src/runtime/cache.rs curb-core/src/runtime/config_store.rs curb-core/src/runtime/readiness.rs curb-core/src/runtime/tests.rs curb-core/src/runtime/usage_tick.rs curb-core/src/runtime/watcher.rs curb-core/src/service.rs curb-core/src/service/ack_state.rs curb-core/src/service/config_model.rs curb-core/src/service/correlation.rs curb-core/src/service/delta.rs curb-core/src/service/events_model.rs curb-core/src/service/snapshot_model.rs curb-core/src/service/tests.rs curb-core/src/usage.rs curb-core/src/usage/cache.rs curb-core/src/usage/discovery.rs curb-core/src/usage/events.rs curb-core/src/usage/lines.rs curb-core/src/usage/provider.rs curb-core/src/usage/tests.rs curb-core/src/usagewatch.rs curb-core/src/usagewatch/events.rs curb-core/src/usagewatch/tests.rs curb-core/src/write_path.rs curb-core/src/write_path/ack_store.rs curb-core/src/write_path/ledger_events.rs curb-core/src/write_path/stop_identity.rs curb-core/src/write_path/tests.rs curb-core/tests/e2e_enforcement.rs src/usage_cli.rs docs/adr/0003-termination-boundary-safety.md docs/refactor-map.md
+- git diff --cached --name-status
+- git diff --cached --check
+- git diff --cached --stat
+- git commit -m "refactor(core): split deep service modules"
+
+Evidence:
+- cargo test -p curb-core -- --nocapture passed: 126 unit tests, 2 e2e enforcement tests, 0 doctests.
+- cargo test -p curb-core --test e2e_enforcement -- --nocapture passed: 2 tests passed.
+- Termination boundary script passed: production termination remains sealed behind TerminationTarget.
+- Staged path list matched docs/readiness-tranche-commit-plan.md group 6 only, including src/usage_cli.rs and excluding docs/internal-desktop-app.md.
+- Whitespace check passed with no output.
+
+Residual:
+- Remaining readiness tranche closeout/docs group is still dirty and intentionally uncommitted.
+- Full branch validation already passed before semantic splitting; rerun after all semantic groups are committed.

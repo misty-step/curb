@@ -1,0 +1,11 @@
+Role: read-only critic
+Objective: review the dogfood-headless-observability oracle hardening.
+Scope: scripts/dogfood-headless-observability.sh, docs/runbooks/observability-dogfood.md, docs/dogfooding.md, docs/agent-readiness-roadmap.md, evidence/dogfood/2026-06-04-headless-observability-30s-oracle/event-summary.txt, redaction-check.txt.
+Provider: pi openrouter/moonshotai/kimi-k2.5
+Status: succeeded
+Verdict: approve with minor residual risk noted.
+Blocking risks: none.
+Accepted evidence: CURB_DOGFOOD_SECONDS validation, duration-scaled EXPECTED_WATCHER_TICKS with minimum 2, 30-second run captured 10 watcher ticks against a 6-tick minimum, and NDJSON did not contain token, auth header, or excluded sensitive terms.
+Readiness value: fixed-threshold oracle could pass a stalled longer run; max(2, duration/5) catches watcher-loop failures proportionally to the requested window.
+Residual risk: slow hosts could flake, literal redaction matching can miss obfuscated leaks, event semantic correctness is only partially checked, and 30-second windows do not prove multi-hour sidecar stability.
+Lead decision: accepted.

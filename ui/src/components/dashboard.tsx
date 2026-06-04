@@ -13,6 +13,7 @@ import {
   modeToConfig,
 } from "../types";
 import { SelectedSessionPanel } from "./sessionPanels";
+import { SessionActionStrip } from "./sessionActions";
 
 export function StatusPill({ status }: { status: Status }): ReactNode {
   const icon = status === "ACTION" ? <OctagonX size={14} /> : status === "WATCH" ? <TriangleAlert size={14} /> : <ShieldCheck size={14} />;
@@ -110,18 +111,7 @@ function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy, de
           </dl>
           {detail ? <SelectedSessionPanel detail={detail} /> : <p className="row-busy">Loading session detail…</p>}
           {session.cwd ? <p className="row-cwd">{session.cwd}</p> : null}
-          <div className="row-actions">
-            {session.can_acknowledge ? (
-              <button type="button" className="btn btn-ack" onClick={() => onAck(session)}>
-                Acknowledge
-              </button>
-            ) : null}
-            {session.can_stop ? (
-              <button type="button" className="btn btn-stop" onClick={() => onStop(session)}>
-                Stop now
-              </button>
-            ) : null}
-          </div>
+          <SessionActionStrip session={session} onAck={onAck} onStop={onStop} />
           {busy ? <p className="row-busy">{busy}</p> : null}
         </div>
       ) : null}

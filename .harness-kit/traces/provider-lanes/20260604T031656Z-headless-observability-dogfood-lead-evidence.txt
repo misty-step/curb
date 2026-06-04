@@ -1,0 +1,37 @@
+Curb timed headless-observability dogfood slice
+
+Scope:
+- scripts/dogfood-headless-observability.sh
+- evidence/dogfood/2026-06-04-headless-observability/
+- docs/runbooks/observability-dogfood.md
+- docs/dogfooding.md
+- docs/agent-readiness-roadmap.md
+- .harness-kit/agent-readiness.yaml
+- backlog.d/024-dogfood-evidence-matrix.md
+- backlog.d/026-structured-observability.md
+- backlog.d/032-readiness-latency-and-observability-completion.md
+
+Behavior changed:
+- Added a repeatable timed headless-observability dogfood script.
+- The script builds the release binary, copies the example config to evidence with private scratch state, disables local notifications, scans real local provider metadata through --home, captures live/ready/health/overview/sessions/events, parses NDJSON, summarizes event counts, and checks redaction.
+- The script runs in visibility mode and cannot terminate processes.
+
+Dogfood proof:
+- Command: CURB_DOGFOOD_SECONDS=20 scripts/dogfood-headless-observability.sh evidence/dogfood/2026-06-04-headless-observability
+- Evidence: evidence/dogfood/2026-06-04-headless-observability/
+- Event summary: 20 structured events, 1 usage_scan, 7 watcher_tick, max_policy_duration_ms=3955.
+- Readiness: ready-initial.status=503, ready-final.status=200 with all checks ok.
+- Sessions: sessions-final-count.txt recorded 267 sessions; protected per-session response dumps were not committed.
+- Parser: scripts/parse-observability-smoke.py accepted headless-observability.ndjson.
+- Redaction: no token, auth header, prompt, response, screenshot, or keystroke terms in NDJSON.
+
+Verification:
+- bash -n scripts/dogfood-headless-observability.sh scripts/dogfood-headless-enforcement.sh
+- python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-headless-observability/headless-observability.ndjson
+- python3 YAML parse for .harness-kit/agent-readiness.yaml
+- python3 scripts/check-secrets.py
+- git diff --check
+- scripts/check-fast.sh
+
+Provider note:
+- No fresh critic lane was spawned for this script/doc/evidence slice because recent attempts in this thread hit the agent thread limit; lead used repeatable command evidence and full fast gate instead.

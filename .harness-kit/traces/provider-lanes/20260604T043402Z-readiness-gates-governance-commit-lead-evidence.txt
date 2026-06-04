@@ -1,0 +1,38 @@
+Objective: create semantic closeout commit 1 for gates, governance, and the
+agent-readiness contract.
+
+Commit:
+- 25c9dc2 chore(readiness): add gates and governance baseline
+
+Staged path group:
+- .editorconfig
+- .github/CODEOWNERS
+- .github/workflows/ci.yml
+- .gitignore
+- .harness-kit/agent-readiness.yaml
+- SECURITY.md
+- Cargo.toml
+- Cargo.lock
+- README.md
+- docs/contributor-guide.md
+- scripts/check-fast.sh
+- scripts/check-setup.sh
+- scripts/check-secrets.py
+- scripts/check-termination-boundary.sh
+- scripts/check-dependency-audit.sh
+- scripts/install-git-hooks.sh
+- scripts/git-hooks/pre-commit
+- scripts/validate.sh
+
+Verification before commit:
+- scripts/check-setup.sh passed.
+- scripts/check-fast.sh passed.
+- scripts/check-dependency-audit.sh --offline passed against 1105 cached
+  RustSec advisories and 187 crate dependencies.
+- python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate passed.
+- git diff --cached --check passed.
+
+Residual risk:
+- This is commit 1 of the semantic closeout plan only. Remaining worktree paths
+  still cover API contracts, headless/observability, dogfood evidence, UI,
+  deep-module refactors, backlog/trace receipts, hosted proof, and push/PR.

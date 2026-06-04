@@ -1,8 +1,8 @@
 name: CI
 
 # Runs the repository gate (scripts/validate.sh) on every PR and on pushes to
-# master, across macOS and Linux. This is the automated enforcement of the gate
-# that previously only ran when a human remembered to.
+# master, across macOS and Linux, plus a focused Windows smoke for the portable
+# process/notification paths that the full desktop gate cannot exercise there.
 
 on:
   pull_request:
@@ -17,8 +17,46 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: validate (${{ matrix.os }})
+  fast-feedback:
+    name: fast feedback (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (rustfmt + clippy)
+        run: rustup component add rustfmt clippy
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm ci
+        working-directory: ui
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+        working-directory: ui
+
+      - name: Run fast feedback gate
+        run: bash scripts/check-fast.sh
+
+  full-validate:
+    name: full validate (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -53,8 +91,61 @@ jobs:
         run: npm ci
         working-directory: ui
 
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+        working-directory: ui
+
       - name: Run repository gate
         run: bash scripts/validate.sh
+
+  windows-smoke:
+    name: windows smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup component add rustfmt clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Compile Rust binary on Windows
+        run: cargo build --bin curb
+
+      - name: Validate example config
+        run: cargo run -- validate-config configs/curb.example.yaml
+
+      - name: Check notification capability contract
+        run: cargo test -p curb-core notification_capability_reports_platform_support -- --nocapture
+
+      - name: Check Windows termination command contract
+        run: cargo test -p curb-core windows_termination_command_uses_absolute_taskkill_path -- --nocapture
+
+  dependency-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm ci
+        working-directory: ui
+
+      - name: Run dependency advisory audit
+        run: bash scripts/check-dependency-audit.sh --online
 
   coverage:
     name: coverage

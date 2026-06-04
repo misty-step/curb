@@ -1,0 +1,9 @@
+provider: pi
+objective: Curb write-path expected-identity extraction planner
+scope: curb-core/src/write_path.rs, curb-core/src/write_path/*.rs, curb-core/src/platform.rs, curb-core/src/service.rs, docs/refactor-map.md, backlog.d/028-deep-module-refactor-path.md
+oracle: stop_session behavior unchanged; InvalidStop and StopConflict messages unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is confirmation evidence only
+result: Recommended extracting expected identity validation into write_path/stop_identity.rs while leaving stop_session orchestration in write_path.rs.
+accepted: yes
+notes:
+- Validation module must not construct TerminationTarget or accept bare PIDs as termination authority.
+- Message strings and call ordering are the main behavior contract.

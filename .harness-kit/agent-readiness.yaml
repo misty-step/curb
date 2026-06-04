@@ -1,0 +1,92 @@
+version: 1
+generated_at: '2026-06-04T02:40:00Z'
+profile:
+  repo_root: .
+  detected_stack:
+  - rust
+  - node
+  - tauri
+  stack_feedback_strength: strong
+gates:
+  local:
+  - scripts/check-setup.sh
+  - scripts/install-git-hooks.sh installs a repo-managed pre-commit hook that runs scripts/check-fast.sh
+  - scripts/check-fast.sh (includes deterministic dashboard browser smoke and offline secret scan)
+  - scripts/check-termination-boundary.sh
+  - scripts/validate.sh
+  ci:
+  - bash scripts/check-fast.sh on ubuntu-latest as fast feedback, including deterministic dashboard browser smoke and offline secret scan
+  - bash scripts/validate.sh on ubuntu-latest and macos-latest
+  - cargo build --bin curb plus focused config/platform tests on windows-latest
+  - bash scripts/check-dependency-audit.sh --online on ubuntu-latest with fresh RustSec and npm advisory data
+  - cargo llvm-cov --workspace --summary-only --fail-under-lines 84 on macos-latest
+  coverage:
+    command: cargo llvm-cov --workspace --summary-only --fail-under-lines 84
+    threshold: 84% line coverage
+adr_policy:
+  required_when: Decision is hard to reverse, surprising without context, and the
+    result of a real tradeoff.
+  paths:
+  - docs/adr/
+  accepted:
+  - docs/adr/0001-headless-service-contract.md
+  - docs/adr/0002-structured-observability-contract.md
+  - docs/adr/0003-termination-boundary-safety.md
+infrastructure:
+  manageability: cli_api_sdk
+  surfaces:
+  - CLI: cargo run -- <command> and installed curb binary
+  - Headless loopback API: curb serve --headless --addr 127.0.0.1:<port>
+  - Embedded dashboard: web/dist served by curb app or curb serve
+  - Deterministic dashboard smoke: cd ui && npm run smoke verifies desktop/narrow rendering, stoppable-row Stop requires identity checklist, Stop now affordance, and action-surface overflow
+  - Operator stop-action UI proof: in-app Browser selected a stoppable dashboard row and verified the Stop requires identity checklist with no console warnings/errors
+  - Desktop shell: src-tauri delegates to the Rust service
+  - Headless sidecar runbook: docs/runbooks/headless-sidecar.md
+  - Headless observability dogfood: scripts/dogfood-headless-observability.sh
+  - Headless enforcement dogfood: scripts/dogfood-headless-enforcement.sh
+module_boundaries:
+- src/main.rs owns CLI command declaration, argument normalization, and top-level dispatch only.
+- src/server_cmd.rs owns serve/app/watch lifecycle, headless/UI selection, shutdown handling, and observed watcher startup.
+- src/usage_cli.rs owns usage and tail CLI presentation without owning provider parsing or policy.
+- src/api.rs owns token-gated loopback HTTP routing and wire response shape.
+- src/http.rs owns low-level HTTP request parsing and response writing.
+- src/observability.rs owns public structured-log emit functions for the binary crate.
+- src/observability/event.rs owns the versioned log event schema, JSON enablement, and sanitized reason handling.
+- src/observability/registry.rs owns registered event names, request path templating, and HTTP status outcomes.
+- curb-core/src/config.rs owns the public config schema, strict YAML load/save, validation, and the stable Config policy/preset facade.
+- curb-core/src/config/duration.rs owns human-duration parsing, formatting, and serde.
+- curb-core/src/config/defaults.rs owns default state path discovery and built-in process-agent inventory.
+- curb-core/src/config/storage.rs owns private config-file writes and permission repair.
+- curb-core/src/config/preset.rs owns preset mutation mechanics without changing the Config facade.
+- curb-core/src/config/policy_merge.rs owns agent-policy override and refresh mechanics without owning validation or file IO.
+- curb-core/src/usage.rs owns metadata-only provider usage ingestion and source-health errors.
+- curb-core/src/usagewatch.rs owns usage policy evaluation, warning, acknowledgement, grace, termination, and killed-session state.
+- curb-core/src/usagewatch/events.rs owns metadata-only usage policy ledger payloads and usage warning message formatting.
+- curb-core/src/service.rs owns stable UI/API read models, actionability, and manual session actions.
+- curb-core/src/write_path.rs owns manual acknowledge/stop write-path orchestration, ledger append ordering, fresh process capture, and sealed termination-target use.
+- curb-core/src/write_path/ack_store.rs owns session-ack file write, delete, rollback, JSON serialization, and permissions.
+- curb-core/src/write_path/ledger_events.rs owns session-ack and manual-stop ledger event construction without deciding actionability or termination.
+- curb-core/src/write_path/stop_identity.rs owns expected stop identity request validation and fresh-process comparison without constructing termination targets.
+- curb-core/src/runtime.rs owns shared daemon state, snapshot caching, config updates, and watcher lifecycle.
+- curb-core/src/service/delta.rs owns overview delta projection across snapshots while preserving the service::annotate_overview_delta public export.
+- curb-core/src/platform.rs owns the public platform data model, Snapshot facade, TerminationTarget facade, and SystemPlatform composition.
+- curb-core/src/platform/target.rs owns sealed termination-target construction, process identity comparison, supervisor escalation, and child-first process-tree scoping.
+- curb-core/src/platform/capture.rs owns sysinfo process conversion, process liveness filtering, and metadata-only OS process facts.
+- curb-core/src/platform/notification.rs owns notification capability checks, notification command construction, and notification command execution.
+- curb-core/src/platform/termination.rs owns process-tree termination execution and OS-specific termination command construction behind sealed targets.
+- curb-core/src/ledger.rs owns append-only NDJSON audit ledger writes, reads, hash-chain state, metadata enrichment, and sensitive-field scrubbing.
+- curb-core/src/ledger/taxonomy.rs owns the closed LedgerEvent wire-string taxonomy plus alert/view classification.
+mock_policy: Mock only external boundaries; internal mocks are readiness regressions.
+observability:
+  access: logs
+  signals:
+  - CURB_LOG_FORMAT=json emits versioned NDJSON to stderr.
+  - config_loaded, server_started, api_request, readiness_check, usage_scan, source_health_error, notification_attempt, stop_decision, and stop_rejection are registered events.
+  - usage_scan and watcher_tick logs include policy outcome counts for warnings, would-stop, stop-blocked, grace-started, grace-pending, stop-attempted, stop-completed, stop-rejected, resumed, and terminated sessions.
+  - scripts/parse-observability-smoke.py validates startup/readiness NDJSON smoke logs and required runtime policy fields.
+  - scripts/dogfood-headless-observability.sh validates timed headless visibility-mode dogfood against real local provider metadata without writing service state into the worktree.
+  - scripts/dogfood-headless-observability.sh requires watcher_tick counts to scale with the requested timed window and checks NDJSON for token/auth, prompt/response, screenshot, keystroke, file-content, raw-provider, and payload markers.
+  - scripts/dogfood-headless-enforcement.sh validates a successful stop_decision through the protected headless API against a harmless synthetic subprocess.
+  - docs/runbooks/observability-dogfood.md defines dogfood capture, event triage, and redaction checks.
+readiness_state: improved
+waivers: []

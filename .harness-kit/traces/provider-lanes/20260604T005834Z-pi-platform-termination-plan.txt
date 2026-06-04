@@ -1,0 +1,7 @@
+Provider: pi
+Role: read-only planner
+Objective: Choose the next bounded platform extraction.
+Input: platform.rs, platform submodules, refactor map, backlog 028, agent-readiness profile.
+Verdict: Accepted as partial evidence.
+Summary: Recommended extracting process-capture helpers first because it is a small surgical split that avoids touching termination sealing.
+Lead disposition: Rejected priority order after comparison with Codex. Kept the risk note that capture/liveness output must not drift.

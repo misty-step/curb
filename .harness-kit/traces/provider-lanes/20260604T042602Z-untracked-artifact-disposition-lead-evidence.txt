@@ -1,0 +1,26 @@
+Objective: complete backlog 033's untracked-artifact disposition step without
+deleting evidence or user work.
+
+Commands/evidence:
+- git ls-files --others --exclude-standard
+- backlog.d/033-hosted-proof-and-tranche-closeout.md
+- docs/readiness-tranche-closeout.md
+- find evidence/dogfood -maxdepth 2 -type f
+
+Changes:
+- Added an Untracked Artifact Disposition section to
+  docs/readiness-tranche-closeout.md.
+- Marked the backlog 033 untracked-artifact item complete with the decision to
+  keep every currently untracked artifact for review.
+
+Decision:
+- Keep all current untracked artifacts for review.
+- Do not delete dogfood evidence; every current evidence directory has a README
+  and represents acceptance evidence for local release, active-session,
+  headless, stop-rejection, observability, or enforcement proof.
+
+Residual risk:
+- Keeping every artifact increases review volume. A later commit/PR closeout
+  may still split or reduce evidence, but deletion must preserve acceptance
+  proof elsewhere.
+- Worktree remains dirty and unpushed.

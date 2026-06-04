@@ -1,0 +1,9 @@
+provider: claude
+objective: Curb write-path ledger-event projection planner
+scope: curb-core/src/write_path.rs, curb-core/src/write_path/ack_store.rs, curb-core/src/ledger.rs, docs/refactor-map.md, backlog.d/028-deep-module-refactor-path.md
+oracle: stop_session behavior unchanged; ledger event types/data/message/order unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is confirmation evidence only
+result: Recommended extracting session_ack_event and manual_stop_event construction into write_path/ledger_events.rs while keeping Ledger append calls and stop orchestration in Service.
+accepted: yes
+notes:
+- Keep expected stop identity validation in write_path.rs for now.
+- Preserve reason-message elision and mode/agent attribution exactly.

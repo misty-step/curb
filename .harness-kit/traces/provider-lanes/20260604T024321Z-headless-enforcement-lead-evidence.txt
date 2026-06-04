@@ -1,0 +1,31 @@
+Role: lead implementer / verifier
+Objective: add and run repeatable headless enforcement dogfood against a harmless synthetic subprocess.
+
+Provider fanout:
+- Attempted read-only investigator subagent for the safe enforcement dogfood path.
+- Result: failed before dispatch because the current thread hit the agent limit.
+- Waiver: direct solo completion with reproducible script and live evidence.
+
+Accepted evidence:
+- Added scripts/dogfood-headless-enforcement.sh.
+- Ran: ./scripts/dogfood-headless-enforcement.sh evidence/dogfood/2026-06-04-headless-enforcement
+- Stop response: evidence/dogfood/2026-06-04-headless-enforcement/stop-response.txt returned HTTP/1.1 200 OK.
+- Selected session: evidence/dogfood/2026-06-04-headless-enforcement/selected-session.json had alert kill, can_stop true, PID, start time, owner, and executable identity.
+- Raw ledger: evidence/dogfood/2026-06-04-headless-enforcement/ledger.ndjson contains manual_stop_started and manual_stop_completed.
+- Structured logs: evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson contains stop_decision status 200.
+- Redaction: evidence/dogfood/2026-06-04-headless-enforcement/redaction-check.txt passed.
+
+Verification commands:
+- bash -n scripts/dogfood-headless-enforcement.sh
+- <agent-readiness-skill>/scripts/profile-crud.py validate
+- python3 scripts/parse-observability-smoke.py evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
+- jq -e 'select(.event == "stop_decision" and .fields.status == 200)' evidence/dogfood/2026-06-04-headless-enforcement/headless-enforcement.ndjson
+- jq -s -e 'map(.type) | index("manual_stop_started") and index("manual_stop_completed")' evidence/dogfood/2026-06-04-headless-enforcement/ledger.ndjson
+- python3 scripts/check-secrets.py
+- git diff --check
+- scripts/check-setup.sh
+- test ! -e .curb
+
+Residual risk:
+- Local macOS proof only; hosted CI proof and Windows behavior remain open.
+- UI operator-flow polish remains open.

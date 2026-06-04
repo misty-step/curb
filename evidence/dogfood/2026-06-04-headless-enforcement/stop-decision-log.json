@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-06-04T02:50:55.525Z",
+  "level": "info",
+  "component": "policy",
+  "event": "stop_decision",
+  "outcome": "ok",
+  "fields": {
+    "status": 200
+  }
+}

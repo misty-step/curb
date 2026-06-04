@@ -1,0 +1,18 @@
+Objective: validate the durable agent-readiness profile after the readiness
+closeout and local proof tranche.
+
+Command:
+- python3 <agent-readiness-skill>/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate
+
+Status: passed
+
+Output:
+- .harness-kit/agent-readiness.yaml: valid
+
+Repo-fit check:
+- Used the deterministic profile validator from the agent-readiness skill.
+- No profile changes were required.
+
+Residual risk:
+- This proves schema/profile validity only. Hosted CI proof and clean closeout
+  remain open.

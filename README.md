@@ -45,6 +45,9 @@ The implementation is active. The most useful entry points are:
 - [docs/contributor-guide.md](docs/contributor-guide.md) - contributor architecture and verification guide.
 - [docs/application-design.md](docs/application-design.md) - canonical dashboard architecture and UI design.
 - [docs/dogfooding.md](docs/dogfooding.md) - release-build dogfood guide and next grooming loop.
+- [docs/adr/README.md](docs/adr/README.md) - accepted architecture decisions for headless mode, observability, and termination safety.
+- [docs/runbooks/headless-sidecar.md](docs/runbooks/headless-sidecar.md) - headless server-side integration runbook.
+- [docs/runbooks/observability-dogfood.md](docs/runbooks/observability-dogfood.md) - structured log capture and triage runbook.
 - [docs/local-agent-watchdog-spec.md](docs/local-agent-watchdog-spec.md) - watchdog product spec.
 - [SPEC.md](SPEC.md) - launch implementation specification.
 
@@ -106,7 +109,36 @@ scripts/validate.sh
 ```
 
 It checks the embedded UI assets, Rust formatting, clippy, Rust tests, the
-synthetic demo dry-run, and UI typecheck/lint/test.
+synthetic demo dry-run, UI typecheck/lint/test, and the deterministic
+fixture-backed dashboard browser smoke.
+
+For faster agent iteration, run the gate ladder in this order:
+
+```sh
+scripts/check-setup.sh
+scripts/install-git-hooks.sh
+scripts/check-fast.sh
+scripts/validate.sh
+```
+
+`scripts/check-setup.sh` verifies the local Rust/Node prerequisites and example
+config without running the full suite, and syntax-checks the repo-managed Git
+hook scripts. `scripts/install-git-hooks.sh` installs a pre-commit hook into the
+current checkout; the hook runs `scripts/check-fast.sh` before a commit so
+agents get local feedback before CI. `scripts/check-fast.sh` runs the
+high-signal merge checks that normally catch code, type, lint, stale embed,
+secret, contract, and rendered dashboard regressions before the slower desktop
+and demo checks in `scripts/validate.sh`.
+
+CI runs a named `fast feedback (ubuntu)` lane for `scripts/check-fast.sh`, the
+full gate on Linux and macOS, and a focused `windows smoke` job for Rust
+compilation, example config validation, notification capability behavior, and
+Windows termination-command construction. It also runs a dedicated
+`dependency audit` job for RustSec and npm advisory checks.
+The rendered dashboard smoke is mandatory through `scripts/check-fast.sh`.
+Run `cd ui && npm run smoke` directly when iterating on UI. By default it
+starts Vite, serves committed API fixtures from `contracts/api/`, and writes
+screenshots plus `manifest.json` under `ui/artifacts/smoke-dashboard/`.
 
 `curb dashboard` shows live agent workers and recent usage in one terminal view.
 `curb app` serves the built dashboard and opens it in your browser. If a

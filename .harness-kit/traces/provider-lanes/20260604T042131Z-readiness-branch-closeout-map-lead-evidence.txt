@@ -1,0 +1,27 @@
+Objective: advance backlog 033 by giving the dirty readiness tranche a named
+branch and classifying the worktree into review groups.
+
+Commands/evidence:
+- git branch --show-current
+- git branch --list --format='%(refname:short)'
+- git status --short --branch --untracked-files=all
+- git switch -c agent-readiness-closeout
+- evidence/dogfood README presence scan
+- git diff --stat
+
+Changes:
+- Created branch agent-readiness-closeout from detached HEAD.
+- Added docs/readiness-tranche-closeout.md with review groups, keep decisions,
+  hosted proof requirements, split guidance, and residual risk.
+- Updated backlog.d/033-hosted-proof-and-tranche-closeout.md to mark branch
+  creation and dirty-tree classification complete while leaving artifact
+  pruning, local reruns, hosted CI proof, and clean worktree closeout open.
+
+Verification planned:
+- git diff --check for touched files.
+- delegation receipt JSONL parse.
+
+Residual risk:
+- No files were staged, committed, pushed, or validated with the full gate in
+  this slice.
+- Worktree remains dirty by design.

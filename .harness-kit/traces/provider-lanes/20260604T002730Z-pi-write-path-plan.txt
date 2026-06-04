@@ -1,0 +1,9 @@
+provider: pi
+objective: Curb write-path ack-persistence extraction planner
+scope: curb-core/src/write_path.rs, curb-core/src/service/ack_state.rs, curb-core/src/platform.rs, docs/refactor-map.md, backlog.d/028-deep-module-refactor-path.md
+oracle: manual acknowledge and stop behavior unchanged; no production termination API accepts a bare PID; fresh platform capture remains authority; UI expected identity is confirmation evidence only
+result: Recommended extracting session-ack file persistence mechanics into write_path/ack_store.rs or equivalent, keeping Service::acknowledge_session as the orchestrator and stop_session unchanged.
+accepted: yes
+notes:
+- Avoid creating a generic persistence grab-bag.
+- Keep session_ack_path single-sourced with the existing ack read side.

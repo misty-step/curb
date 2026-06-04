@@ -1,0 +1,28 @@
+Role: lead browser-smoke gate executor
+Objective: resolve the browser-smoke policy gap by making the deterministic
+dashboard smoke a mandatory fast/full gate and syncing the readiness contract.
+Provider target: codex lead
+Receipt id: 53AD8E0A-1ED3-475F-A951-FFF032F00011
+Status: completed
+
+Evidence:
+- `scripts/check-fast.sh` now runs `cd ui && npm run smoke`, so the dashboard
+  smoke is included in local fast feedback, `scripts/validate.sh`, and the
+  GitHub fast-feedback lane that runs the fast gate.
+- `README.md`, `docs/contributor-guide.md`, `docs/agent-readiness-roadmap.md`,
+  `.harness-kit/agent-readiness.yaml`, `backlog.d/027-quality-gates-and-contract-tests.md`,
+  and `backlog.d/031-fast-feedback-and-cross-platform-gates.md` now describe
+  the deterministic browser smoke as mandatory rather than advisory/manual.
+- `ui/artifacts/smoke-dashboard/manifest.json` recorded deterministic Vite mode,
+  desktop and narrow viewports, screenshot paths, and no failures.
+
+Verification:
+- `cd ui && npm run smoke` passed.
+- `bash scripts/check-fast.sh` passed with the smoke included.
+- `bash scripts/validate.sh` passed with the smoke included through the fast gate.
+- `<agent-readiness-skill>/scripts/profile-crud.py validate` passed.
+- `git diff --check` passed.
+
+Lead verdict:
+Accepted. Browser smoke policy is no longer an advisory gap; remaining proof is
+hosted CI on a pushed branch and continued UI dogfood.

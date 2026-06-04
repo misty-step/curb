@@ -1,0 +1,32 @@
+receipt_id: F69EF6DC-ABA8-478E-89BE-E55714C3F95D
+timestamp_utc: 2026-06-04T02:12:53Z
+role: lead
+lane: agent-readiness-precommit-feedback
+objective: Add repo-managed pre-commit feedback using existing Curb gates without introducing a new hook framework.
+scope:
+  - scripts/git-hooks/pre-commit
+  - scripts/install-git-hooks.sh
+  - scripts/check-setup.sh
+  - README.md
+  - docs/contributor-guide.md
+  - docs/agent-readiness-roadmap.md
+  - .harness-kit/agent-readiness.yaml
+  - backlog.d/029-agent-readiness-contract.md
+accepted_output:
+  - Added a versioned pre-commit hook template that runs scripts/check-fast.sh.
+  - Added an installer that resolves the correct Git hook path with git rev-parse --git-path hooks/pre-commit, including linked worktrees.
+  - Installer refuses to replace an existing non-Curb hook unless --force is supplied.
+  - scripts/check-setup.sh now syntax-checks the hook installer and hook template.
+  - README, contributor guide, readiness roadmap, readiness profile, and backlog 029 document the hook feedback path.
+verification:
+  - bash -n scripts/install-git-hooks.sh scripts/git-hooks/pre-commit scripts/check-setup.sh
+  - <agent-readiness-skill>/scripts/profile-crud.py validate
+  - git diff --check
+  - bash scripts/check-setup.sh
+  - bash scripts/git-hooks/pre-commit
+local_hook_state:
+  - scripts/install-git-hooks.sh refused to overwrite <user-git-hooks>/pre-commit because it is an existing non-Curb Lefthook hook.
+  - The refusal is intentional user-work preservation; the versioned Curb hook template itself was executed directly and passed.
+residual_risk:
+  - This checkout's active Git hook remains the user's global Lefthook hook unless the user intentionally chains or replaces it.
+  - Hosted CI proof and broad dirty-worktree closeout remain open.

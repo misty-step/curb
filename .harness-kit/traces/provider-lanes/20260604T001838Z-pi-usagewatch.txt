@@ -1,0 +1,8 @@
+provider: pi
+objective: Curb usagewatch behavior-preserving refactor critic
+scope: current diff for curb-core/src/usagewatch.rs, curb-core/src/usagewatch/*.rs, docs/refactor-map.md, docs/agent-readiness-roadmap.md, backlog.d/028-deep-module-refactor-path.md, .harness-kit/agent-readiness.yaml
+oracle: behavior-preserving usage policy deep-module extraction; warning/grace/termination decisions unchanged; ledger payload/message helpers in usagewatch/events.rs; tests in usagewatch/tests.rs
+result: No blocking gaps.
+residual_risks:
+- usagewatch.rs now depends on usagewatch/events.rs for notification copy and event payload projection, an intentional internal edge.
+- test module discovery is gated behind cfg(test), so test code does not enter release builds.
