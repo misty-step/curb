@@ -125,7 +125,82 @@ describe("Curb dashboard", () => {
     expect(requests.some((request) => request.url.includes("/v1/sessions/codex%3Aolympus"))).toBe(true);
     expect(requests.some((request) => request.url.includes("/v1/sessions/codex%3Aolympus/turns"))).toBe(true);
   });
+
+  it("shows the identity checklist beside a destructive stop action", async () => {
+    const requests = installFetch(stoppableSnapshot());
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const head = Array.from(document.querySelectorAll("button.row-head")).find((button) =>
+      button.textContent?.includes("olympus"),
+    );
+    expect(head).toBeTruthy();
+    await actRender(null, () => (head as HTMLButtonElement).click());
+
+    const page = document.body.textContent ?? "";
+    expect(page).toContain("Stop requires");
+    expect(page).toContain("PID");
+    expect(page).toContain("start time");
+    expect(page).toContain("owner");
+    expect(page).toContain("executable");
+    expect(page).toContain("Stop now");
+
+    const stop = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Stop now"));
+    expect(stop).toBeTruthy();
+    await actRender(null, () => (stop as HTMLButtonElement).click());
+    expect(requests.some((request) => request.url.includes("/stop"))).toBe(false);
+    expect(document.body.textContent).toContain("Confirm stop");
+  });
+
+  it("posts the stop request only after inline confirmation", async () => {
+    const snapshot = stoppableSnapshot();
+    const expectedSession = snapshot.sessions[0];
+    const requests = installFetch(snapshot);
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const head = Array.from(document.querySelectorAll("button.row-head")).find((button) =>
+      button.textContent?.includes("olympus"),
+    );
+    await actRender(null, () => (head as HTMLButtonElement).click());
+    const stop = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Stop now"));
+    await actRender(null, () => (stop as HTMLButtonElement).click());
+    const confirm = Array.from(document.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Confirm stop"),
+    );
+    expect(confirm).toBeTruthy();
+    await actRender(null, () => (confirm as HTMLButtonElement).click());
+
+    const stopRequest = requests.find((request) => request.url.includes("/stop"));
+    expect(stopRequest?.method).toBe("POST");
+    expect(JSON.parse(stopRequest?.body ?? "{}")).toMatchObject({
+      confirm: true,
+      scope: "tree",
+      expected: {
+        pid: expectedSession.pid,
+        owner: expectedSession.owner,
+        executable: expectedSession.executable,
+      },
+    });
+  });
 });
+
+function stoppableSnapshot(): Snapshot {
+    const stoppable: Snapshot = {
+      ...demoSnapshot,
+      sessions: [
+        {
+          ...demoSnapshot.sessions[0],
+          can_stop: true,
+          can_acknowledge: false,
+          explanation: "Over your kill line — stopping after the grace period.",
+        },
+      ],
+    };
+  return stoppable;
+}
 
 function installFetch(snapshot: Snapshot): RequestRecord[] {
   const requests: RequestRecord[] = [];
@@ -147,10 +222,10 @@ function fetchRoutes(snapshot: Snapshot): FetchRoute[] {
     { match: (url) => url.includes("/v1/config"), response: () => jsonResponse(demoConfig) },
     { match: (url) => url.includes("/v1/onboarding"), response: () => jsonResponse(onboardingFixture(snapshot)) },
     { match: (url) => url.includes("/v1/notifications"), response: () => jsonResponse(notificationFixture()) },
-    { match: (url) => url.includes("/v1/sessions/") && url.includes("/turns"), response: () => jsonResponse(turnFixtures()) },
-    { match: (url) => url.includes("/v1/sessions/"), response: () => jsonResponse(snapshot.sessions[0]) },
     { match: (url) => url.includes("/ack"), response: () => jsonResponse(ackFixture(snapshot)) },
     { match: (url) => url.includes("/stop"), response: () => jsonResponse(stopFixture(snapshot)) },
+    { match: (url) => url.includes("/v1/sessions/") && url.includes("/turns"), response: () => jsonResponse(turnFixtures()) },
+    { match: (url) => url.includes("/v1/sessions/"), response: () => jsonResponse(snapshot.sessions[0]) },
   ];
 }
 
