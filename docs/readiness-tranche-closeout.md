@@ -3,9 +3,9 @@
 Date: 2026-06-04
 Branch: `agent-readiness-closeout`
 
-This map classifies the current dirty readiness tranche for review and hosted
-proof. It is not a merge claim. The worktree is intentionally still dirty until
-the branch is split, validated, pushed, and reviewed.
+This map classifies the readiness tranche for review and hosted proof. It is
+not a merge claim; the branch is pushed as a draft PR with hosted CI evidence,
+but still needs human review/merge ownership.
 
 ## Review Groups
 
@@ -15,7 +15,7 @@ the branch is split, validated, pushed, and reviewed.
 | Structured observability | `src/observability.rs`, `src/observability/*`, `scripts/parse-observability-smoke.py`, `docs/observability.md`, `docs/runbooks/observability-dogfood.md` | Keep for review. | NDJSON schema, event registry, redaction, request path templating, runtime policy fields, and parser coverage must remain stable. |
 | Runtime/readiness deepening | `curb-core/src/runtime.rs`, `curb-core/src/runtime/*` | Keep for review. | Separates cache, config-store, usage-tick, watcher, and readiness behavior behind the `Runtime` facade; hosted CI must prove no lifecycle regression. |
 | Config and governance readiness | `curb-core/src/config.rs`, `curb-core/src/config/*`, `.harness-kit/agent-readiness.yaml`, `.editorconfig`, `SECURITY.md`, `.github/CODEOWNERS`, `README.md`, `docs/contributor-guide.md` | Keep for review. | Makes setup/gates/security policy durable; review for stale waivers, over-specific local paths, and no new toolchain churn. |
-| Quality gates and CI | `.github/workflows/ci.yml`, `scripts/check-fast.sh`, `scripts/check-setup.sh`, `scripts/check-secrets.py`, `scripts/check-termination-boundary.sh`, `scripts/check-dependency-audit.sh`, `scripts/install-git-hooks.sh`, `scripts/git-hooks/pre-commit`, `scripts/validate.sh` | Keep for review. | Defines fast feedback, full validation, Windows smoke, advisory audit, coverage, secret scan, and local hook path. Hosted proof is still missing. |
+| Quality gates and CI | `.github/workflows/ci.yml`, `scripts/check-fast.sh`, `scripts/check-setup.sh`, `scripts/check-secrets.py`, `scripts/check-termination-boundary.sh`, `scripts/check-dependency-audit.sh`, `scripts/install-git-hooks.sh`, `scripts/git-hooks/pre-commit`, `scripts/validate.sh` | Keep for review. | Defines fast feedback, full validation, Windows smoke, advisory audit, coverage, secret scan, and local hook path. Hosted proof passed on draft PR #1 run `26931762206`. |
 | API/UI contract fixtures | `contracts/api/*.json`, `src/api/tests.rs`, `ui/src/contract.test.ts`, `ui/src/api.test.ts`, `ui/src/types.ts`, `ui/src/readModel.ts` | Keep for review. | Prevents Rust/TypeScript drift. Fixture updates must be intentional and covered by both Rust and UI tests. |
 | UI stop-confirmation and smoke | `ui/src/components/dashboard.tsx`, `ui/src/components/sessionActions.tsx`, `ui/src/App.test.tsx`, `ui/scripts/smoke-dashboard.mjs`, `ui/src/styles.css` | Keep for review. | Destructive stop is now armed before POST. Browser smoke must keep desktop/narrow action surfaces inside viewport. |
 | Embedded UI assets | `web/dist/index.html`, `web/dist/assets/index-CbWlSMQl.js`, `web/dist/assets/index-D-vLLOwG.css`, deleted old `web/dist/assets/index-DN380y4E.js`, deleted old `web/dist/assets/index-CzY8TPgA.css` | Keep for review. | Generated from the UI tranche. Must be refreshed by `scripts/build-ui.sh` and checked by `scripts/build-ui.sh --check` inside the full gate. |
@@ -74,7 +74,7 @@ artifact was deleted in this pass.
 | `ui/src/contract.test.ts` | Keep. | TypeScript fixture contract test. |
 | `web/dist/assets/index-CbWlSMQl.js` and `web/dist/assets/index-D-vLLOwG.css` | Keep. | Refreshed embedded UI assets generated from the current UI tranche. |
 
-## Hosted Proof Required
+## Hosted Proof
 
 Local branch proof now exists:
 
@@ -87,16 +87,31 @@ Local branch proof now exists:
 - `python3 /Users/phaedrus/Development/harness-kit/skills/agent-readiness/scripts/profile-crud.py --profile .harness-kit/agent-readiness.yaml validate`
   passed, proving the durable readiness profile is valid.
 
-The tranche still does not reach L4 until these run on the pushed branch:
+Hosted branch proof now exists on draft PR #1:
+`https://github.com/misty-step/curb/pull/1`, head
+`2da127dc119e68aed2078b0cd39e0695900e34d7`, run
+`https://github.com/misty-step/curb/actions/runs/26931762206`.
 
-- `fast feedback (ubuntu)`
-- `full validate (ubuntu-latest)`
-- `full validate (macos-latest)`
-- `windows smoke`
-- `dependency audit`
-- `coverage`
+- `fast feedback (ubuntu)` passed:
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737951`
+- `full validate (ubuntu-latest)` passed:
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737949`
+- `full validate (macos-latest)` passed:
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737960`
+- `windows smoke` passed:
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737944`
+- `dependency audit` passed:
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452738000`
+- `coverage` passed:
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737946`
 
-Local commands to rerun before pushing if the tree changes again:
+Initial hosted run `https://github.com/misty-step/curb/actions/runs/26931405010`
+failed because CI had not installed the Playwright Chromium binary required by
+`ui/scripts/smoke-dashboard.mjs`; coverage also reported 82.78% against the
+84% floor. Follow-up commit `2da127d` installed Chromium in hosted UI gate jobs
+and added API backend-adapter behavior tests without lowering thresholds.
+
+Local commands to rerun before repushing if the tree changes again:
 
 ```sh
 scripts/validate.sh
@@ -131,8 +146,6 @@ The concrete pathspec and verification plan for each semantic commit lives in
 
 ## Current Residual Risk
 
-- The branch is local only and has not been pushed.
-- The worktree is not clean.
-- Hosted Windows smoke and dependency audit have not run.
+- The branch is a draft PR and still needs human review/merge ownership.
 - The dogfood windows are local and short; no multi-hour deployment run exists.
-- Evidence volume is high and should be reviewed intentionally before commit.
+- Evidence volume is high and should be reviewed intentionally before merge.

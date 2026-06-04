@@ -10,17 +10,18 @@ ordering, not a replacement for the pre-merge gate.
 
 | Pillar | Level | Evidence | Main gap |
 |---|---:|---|---|
-| Style and validation | L3 | `.editorconfig`, `cargo fmt`, `cargo clippy -D warnings`, ESLint, TypeScript strict mode, `scripts/check-fast.sh`, `scripts/validate.sh`, and repo-managed pre-commit hook installation all run in the gate ladder. | Hosted CI still needs a pushed-branch green run before this worktree can claim remote proof. |
-| Build and CI | L3 | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. | Hosted CI still needs a pushed-branch green run before this worktree can claim remote proof. |
-| Testing | L3 | Rust unit/integration tests, instrumented real-process E2E tests, CLI tests, UI Vitest tests, API/UI contract fixtures, mandatory deterministic dashboard browser smoke, demo dry-run, and coverage exist. | Remote CI still needs a pushed-branch green run before this worktree can claim hosted proof. |
-| Documentation | L3 | `AGENTS.md`, `README.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe workflows, decisions, runbooks, and readiness contracts. | Hosted CI still needs to prove the documented gates against a pushed branch. |
+| Style and validation | L4 candidate | `.editorconfig`, `cargo fmt`, `cargo clippy -D warnings`, ESLint, TypeScript strict mode, `scripts/check-fast.sh`, `scripts/validate.sh`, repo-managed pre-commit hook installation, and hosted PR CI all run the gate ladder. | Keep watching for gate runtime and flakes on later branches. |
+| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Draft PR #1 hosted run `26931762206` passed every job. | Branch remains draft; merge policy and review ownership still need human acceptance. |
+| Testing | L4 candidate | Rust unit/integration tests, instrumented real-process E2E tests, CLI tests, UI Vitest tests, API/UI contract fixtures, mandatory deterministic dashboard browser smoke, demo dry-run, hosted Windows smoke, and coverage exist. | Coverage is now above the floor but still has weak files worth targeting in future hardening. |
+| Documentation | L3 | `AGENTS.md`, `README.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe workflows, decisions, runbooks, and readiness contracts. | Needs post-merge trimming and operator-facing polish so the large evidence set stays navigable. |
 | Dev environment | L3 | `.editorconfig`, `.node-version`, `rust-toolchain.toml`, `Cargo.lock`, `ui/package-lock.json`, `scripts/check-setup.sh`, `scripts/install-git-hooks.sh`, and local scripts pin the basics. | No devcontainer. |
 | Code quality and architecture | L3 | `curb-core` owns policy/runtime, the binary owns CLI/API/web, termination safety is behind platform targets, and API/service/runtime/usage/config/platform/usagewatch/ledger/binary-shell/observability facades plus write-path persistence/projection/identity validation and overview-delta projection have been split into deep use-case modules. | Remaining pressure is residual presenter/UI surfaces and any final facade simplification after hosted CI proof. |
-| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, and successful headless-enforcement dogfood produced parsed NDJSON. | Hosted CI and longer real deployment dogfood still need to prove these logs outside the local worktree. |
-| Security and governance | L3 | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. | Hosted CI still needs a pushed-branch green audit run. |
+| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, and successful headless-enforcement dogfood produced parsed NDJSON. | Longer real deployment dogfood still needs to prove these logs outside the local worktree. |
+| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `26931762206` passed dependency audit and coverage. | Formal review/merge ownership is still draft-PR gated. |
 
-Overall: **L3 Standardized, with L4 candidates blocked by hosted CI proof,
-longer real deployment dogfood, UI polish, and remaining deep-module polish.**
+Overall: **L3 Standardized with several L4 candidates. Hosted CI proof is now
+green; remaining L4 blockers are longer real deployment dogfood, review/merge
+ownership, evidence/docs trimming, UI polish, and remaining deep-module polish.**
 
 ## Evidence Snapshot
 
@@ -28,6 +29,32 @@ longer real deployment dogfood, UI polish, and remaining deep-module polish.**
   observability, UI stop-confirmation, and dogfood-oracle hardening slices. The
   June 4, 2026 run covered `scripts/check-fast.sh`, the desktop shell check, and
   the demo 006 dry-run.
+- Hosted CI proof: draft PR #1
+  `https://github.com/misty-step/curb/pull/1` at head
+  `2da127dc119e68aed2078b0cd39e0695900e34d7` passed GitHub Actions run
+  `https://github.com/misty-step/curb/actions/runs/26931762206` on
+  June 4, 2026:
+  `fast feedback (ubuntu)`
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737951`,
+  `full validate (ubuntu-latest)`
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737949`,
+  `full validate (macos-latest)`
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737960`,
+  `windows smoke`
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737944`,
+  `dependency audit`
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452738000`,
+  and `coverage`
+  `https://github.com/misty-step/curb/actions/runs/26931762206/job/79452737946`.
+- Hosted failure root cause preserved: initial run
+  `https://github.com/misty-step/curb/actions/runs/26931405010` failed because
+  CI installed UI packages but not the Playwright Chromium binary used by
+  `ui/scripts/smoke-dashboard.mjs`; coverage also reported 82.78% against the
+  84% floor. The follow-up fix installed Chromium in hosted UI gate jobs and
+  added behavior tests for API backend adapters without lowering thresholds.
+- Local coverage proof: `cargo llvm-cov --workspace --summary-only
+  --fail-under-lines 84` passed on June 4, 2026 with TOTAL line coverage
+  84.60%; `src/api.rs` rose to 94.78% line coverage.
 - Local pre-commit feedback: `scripts/install-git-hooks.sh` installs the
   versioned `scripts/git-hooks/pre-commit` template into the current checkout,
   and `scripts/check-setup.sh` syntax-checks both hook scripts.
@@ -142,19 +169,14 @@ longer real deployment dogfood, UI polish, and remaining deep-module polish.**
 
 ## Ordered Work
 
-1. Close `backlog.d/033-hosted-proof-and-tranche-closeout.md`: put the dirty
-   readiness tranche on a named branch, classify the review groups, rerun full
-   local validation and dependency audits, push, and capture hosted evidence
-   for fast feedback, full Linux/macOS validation, Windows smoke, dependency
-   audit, and coverage.
-2. Extend structured-observability dogfood from local timed proofs to longer
+1. Extend structured-observability dogfood from local timed proofs to longer
    real deployment windows outside this worktree so policy outcome counts,
    source-health, and readiness behavior are observed over time.
-3. Continue behavior-preserving deep-module extractions in small milestones:
+2. Continue behavior-preserving deep-module extractions in small milestones:
    remaining presenter/UI surfaces and any final binary shell pressure,
    following `docs/refactor-map.md`. Fresh critic feedback rates more internal
    taxonomy-style splits below browser-verified operator-flow work.
-4. Continue UI polish through browser-verified operator flows, especially
+3. Continue UI polish through browser-verified operator flows, especially
    repeated real-session dogfood and narrow-viewport action states.
 
 ## Refactor Guardrails

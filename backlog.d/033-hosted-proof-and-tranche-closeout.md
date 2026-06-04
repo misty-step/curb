@@ -1,7 +1,7 @@
 # Hosted proof and readiness tranche closeout
 
 Priority: P0
-Status: ready
+Status: complete
 Estimate: M
 
 ## Goal
@@ -70,18 +70,32 @@ Remaining trust gaps:
       RustSec advisories and 187 crate dependencies, and
       `bash scripts/check-dependency-audit.sh --online` fetched RustSec,
       updated crates.io, found 0 Rust vulnerabilities, and completed npm audit.
-- [ ] Push the branch and capture hosted job evidence for:
+- [x] Push the branch and capture hosted job evidence for:
       `fast feedback (ubuntu)`, `full validate (ubuntu-latest)`,
       `full validate (macos-latest)`, `windows smoke`, `dependency audit`, and
-      `coverage`.
-- [ ] If any hosted job fails, preserve the failure log or URL, root-cause it,
+      `coverage`. Draft PR:
+      `https://github.com/misty-step/curb/pull/1`. Passing CI run:
+      `https://github.com/misty-step/curb/actions/runs/26931762206` at head
+      `2da127dc119e68aed2078b0cd39e0695900e34d7`.
+- [x] If any hosted job fails, preserve the failure log or URL, root-cause it,
       and fix the product or gate without lowering thresholds.
-- [ ] Update `docs/agent-readiness-roadmap.md` with the hosted evidence links,
+      Initial hosted run
+      `https://github.com/misty-step/curb/actions/runs/26931405010` failed
+      because CI installed UI packages but not the Playwright Chromium binary
+      required by `ui/scripts/smoke-dashboard.mjs`; coverage also reported
+      82.78% against the 84% floor. The fix installed Chromium in hosted UI
+      gate jobs and added API backend-adapter coverage without lowering the
+      threshold.
+- [x] Update `docs/agent-readiness-roadmap.md` with the hosted evidence links,
       exact commands, and any residual waivers.
-- [ ] Update `.harness-kit/agent-readiness.yaml` only if the remote evidence
+- [x] Update `.harness-kit/agent-readiness.yaml` only if the remote evidence
       changes the durable readiness contract.
-- [ ] Leave the closeout worktree clean or explicitly document every remaining
+      No profile update was needed; the durable gate inventory was already
+      accurate.
+- [x] Leave the closeout worktree clean or explicitly document every remaining
       dirty path as user-owned or follow-up work.
+      The remaining edits are this closeout evidence update and will be
+      committed before final report.
 
 ## Non-Goals
 
