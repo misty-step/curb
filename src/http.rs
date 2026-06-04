@@ -1,5 +1,8 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use chrono::Utc;
 use thiserror::Error;
@@ -32,16 +35,25 @@ pub fn bind_loopback(addr: &str) -> Result<TcpListener, HttpError> {
     Ok(listener)
 }
 
-pub fn serve_blocking<B: Backend>(
+pub fn serve_until<B: Backend>(
     listener: TcpListener,
     server: &Server<B>,
+    mut should_shutdown: impl FnMut() -> bool,
 ) -> Result<(), HttpError> {
+    listener.set_nonblocking(true)?;
     for stream in listener.incoming() {
+        if should_shutdown() {
+            break;
+        }
         match stream {
             Ok(stream) => {
                 let _ = handle_stream(stream, server);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(50));
+                continue;
+            }
             Err(_) => continue,
         }
     }
@@ -53,8 +65,13 @@ pub fn handle_stream<B: Backend>(
     server: &Server<B>,
 ) -> Result<(), HttpError> {
     let request = read_request(&mut stream, "http")?;
+    let started = Instant::now();
+    let method = request.method.clone();
+    let path = request.path.clone();
     let response = server.handle(request, Utc::now());
+    let status = response.status;
     write_response(&mut stream, &response)?;
+    crate::observability::emit_api_request(&method, &path, status, started.elapsed());
     Ok(())
 }
 
@@ -165,6 +182,9 @@ fn reason_phrase(status: u16) -> &'static str {
 mod tests {
     use std::cell::RefCell;
     use std::io::Cursor;
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use chrono::{DateTime, TimeZone, Utc};
 
@@ -235,6 +255,26 @@ mod tests {
     }
 
     #[test]
+    fn serve_until_returns_when_shutdown_is_requested() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = Server::new("test-token", FakeBackend::default()).unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let checks = RefCell::new(0usize);
+
+        serve_until(listener, &server, || {
+            let mut checks = checks.borrow_mut();
+            *checks += 1;
+            if *checks > 1 {
+                shutdown.store(true, Ordering::SeqCst);
+            }
+            shutdown.load(Ordering::SeqCst)
+        })
+        .unwrap();
+
+        assert!(shutdown.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn handle_stream_serves_embedded_ui_when_enabled() {
         let mut server = Server::new("test-token", FakeBackend::default()).unwrap();
         server.serve_ui();
@@ -288,6 +328,15 @@ mod tests {
                 agents: Vec::new(),
                 sessions: Vec::new(),
                 turns: Vec::new(),
+            })
+        }
+
+        fn readiness(&self) -> Result<curb_core::service::ReadinessView, ApiError> {
+            Ok(curb_core::service::ReadinessView {
+                status: "ready".to_string(),
+                app: "curb".to_string(),
+                api_version: 1,
+                checks: Vec::new(),
             })
         }
 

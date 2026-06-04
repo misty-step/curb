@@ -8,24 +8,23 @@ mod api;
 mod cli;
 mod dashboard;
 mod http;
+mod observability;
+mod server_cmd;
+mod usage_cli;
 mod web;
 
-use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, Subcommand};
-use curb_core::usage::{Event, SourceReport};
-use serde::Serialize;
 
 use crate::cli::{
     ack_command, config_command, config_set_command, dashboard_command, default_config_path,
-    default_home_dir, doctor_command, init_config, install_binary, load_or_default_config,
-    runs_command, scan_command, status_command,
+    default_home_dir, doctor_command, init_config, install_binary, runs_command, scan_command,
+    status_command,
 };
+use crate::server_cmd::{serve_dashboard, watch_command};
+use crate::usage_cli::{tail_command, usage_command};
 
 #[derive(Debug, Parser)]
 #[command(name = "curb")]
@@ -202,6 +201,9 @@ enum Command {
         /// Home directory containing provider log roots.
         #[arg(long)]
         home: Option<PathBuf>,
+        /// Serve the API/runtime without the embedded web UI.
+        #[arg(long)]
+        headless: bool,
     },
     /// Serve the Rust dashboard and open it in the browser.
     App {
@@ -301,45 +303,10 @@ fn run() -> Result<()> {
             since,
             all,
         }) => {
-            let home = home.unwrap_or(std::env::current_dir()?);
-            let since = if all {
-                None
-            } else {
-                let duration = curb_core::config::parse_duration_for_cli(&since)
-                    .map_err(anyhow::Error::msg)?;
-                Some(Utc::now() - Duration::from_std(duration)?)
-            };
-            let scan = curb_core::usage::Reader::new(home).scan_since(since)?;
-            if let Some(error) = scan.error {
-                bail!("usage scan: {error}");
-            }
-            let report = UsageReport {
-                generated_at: Utc::now(),
-                sources: scan.sources,
-                sessions: summarize_usage_sessions(&scan.events),
-            };
-            if json {
-                serde_json::to_writer_pretty(std::io::stdout(), &report)?;
-                println!();
-            } else {
-                println!("curb usage");
-                println!("  sources: {}", usage_source_line(&report.sources));
-                println!("  sessions: {}", report.sessions.len());
-                for session in report.sessions.iter().take(12) {
-                    println!(
-                        "  {} {} calls={} total={} cwd={}",
-                        session.provider,
-                        session.session_id,
-                        session.events,
-                        session.total_tokens,
-                        session
-                            .cwd
-                            .as_ref()
-                            .map(|path| path.display().to_string())
-                            .unwrap_or_else(|| "-".to_string())
-                    );
-                }
-            }
+            let home = home
+                .or_else(default_home_dir)
+                .context("home directory is required for usage log discovery")?;
+            usage_command(home, json, since, all)?;
         }
         Some(Command::Tail {
             home,
@@ -408,30 +375,31 @@ fn run() -> Result<()> {
                 reason,
             )?;
         }
-        Some(Command::Serve { config, addr, home }) => serve_dashboard(
+        Some(Command::Serve {
+            config,
+            addr,
+            home,
+            headless,
+        }) => serve_dashboard(
             config.unwrap_or_else(default_config_path),
             addr,
             home,
             false,
+            headless,
         )?,
         Some(Command::App { config, addr, home }) => {
-            serve_dashboard(config.unwrap_or_else(default_config_path), addr, home, true)?;
+            serve_dashboard(
+                config.unwrap_or_else(default_config_path),
+                addr,
+                home,
+                true,
+                false,
+            )?;
         }
         Some(Command::Watch { config, home, once }) => watch_command(config, home, once)?,
         None => watch_command(None, None, false)?,
     }
     Ok(())
-}
-
-fn usage_source_line(sources: &[SourceReport]) -> String {
-    sources
-        .iter()
-        .map(|source| match &source.error {
-            Some(_) => format!("{} unavailable", source.provider),
-            None => format!("{} {} events", source.provider, source.events),
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
 }
 
 fn print_advanced_help() {
@@ -442,7 +410,7 @@ fn print_advanced_help() {
     println!("  config set        update first-class policy fields");
     println!("  dashboard         show live agents plus recent usage");
     println!("  app               serve and open the local dashboard");
-    println!("  serve|daemon|api  serve token-gated local API");
+    println!("  serve|daemon|api  serve token-gated local API; use --headless for API-only mode");
     println!("  usage             summarize local Codex and Claude usage logs");
     println!("  tail              stream new usage events");
     println!("  run|start|watch   run the usage policy loop");
@@ -452,219 +420,4 @@ fn print_advanced_help() {
     println!("  runs|sessions     summarize usage sessions");
     println!("  ack               acknowledge a usage session");
     println!("  doctor            check local capabilities");
-}
-
-fn watch_command(config: Option<PathBuf>, home: Option<PathBuf>, once: bool) -> Result<()> {
-    let config = config.unwrap_or_else(default_config_path);
-    let cfg = load_or_default_config(&config)?;
-    let home = home
-        .or_else(default_home_dir)
-        .context("home directory is required for usage log discovery")?;
-    let interval = cfg.usage.scan_interval.as_std();
-    let runtime =
-        curb_core::runtime::Runtime::new(cfg.clone(), home, curb_core::platform::SystemPlatform)
-            .with_config_path(config);
-    println!("curb watcher");
-    println!("  mode: {}", cfg.mode);
-    println!(
-        "  usage: warn {} tokens/turn, stop {} tokens/turn, window {}s",
-        cfg.usage.warn_turn_tokens,
-        cfg.usage.kill_turn_tokens,
-        cfg.usage.window.as_std().as_secs()
-    );
-    println!("  ledger: {}", cfg.ledger.path.display());
-    loop {
-        let snapshot = runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
-        println!(
-            "scan: status={} working={} warn={} kill={}",
-            snapshot.overview.status,
-            snapshot.overview.working,
-            snapshot.overview.warn,
-            snapshot.overview.kill
-        );
-        if once {
-            break;
-        }
-        std::thread::sleep(interval);
-    }
-    Ok(())
-}
-
-fn tail_command(
-    home: PathBuf,
-    since: StdDuration,
-    interval: StdDuration,
-    once: bool,
-) -> Result<()> {
-    let reader = curb_core::usage::Reader::new(home);
-    let mut state = curb_core::tail::TailState::default();
-    println!("curb tail");
-    if once {
-        println!(
-            "  scanning usage events from the last {}",
-            short_duration(since)
-        );
-    } else {
-        println!(
-            "  watching usage events every {}; Ctrl-C to stop",
-            short_duration(interval)
-        );
-    }
-    println!();
-    loop {
-        let now = Utc::now();
-        let since_at = now - Duration::from_std(since)?;
-        let scan =
-            curb_core::tail::scan_once(&reader, &mut state, std::io::stdout(), since_at, now)?;
-        if let Some(error) = scan.source_error {
-            eprintln!("curb: tail: {error}");
-        }
-        if once {
-            break;
-        }
-        std::thread::sleep(interval);
-    }
-    Ok(())
-}
-
-fn serve_dashboard(
-    config: PathBuf,
-    addr: String,
-    home: Option<PathBuf>,
-    open_browser: bool,
-) -> Result<()> {
-    if !crate::http::is_loopback_host(&addr) {
-        bail!("serve address must be loopback, got {addr:?}");
-    }
-    let cfg = curb_core::config::Config::load(&config)?;
-    let (token, token_path) =
-        crate::api::load_or_create_token(&cfg.service.state_dir).map_err(anyhow::Error::msg)?;
-    let home = home
-        .or_else(default_home_dir)
-        .context("home directory is required for usage log discovery")?;
-    let runtime = Arc::new(
-        curb_core::runtime::Runtime::new(cfg, home, curb_core::platform::SystemPlatform)
-            .with_config_path(config),
-    );
-    runtime.usage_tick(Utc::now()).map_err(anyhow::Error::msg)?;
-    let _watcher = Arc::clone(&runtime).start_usage_watcher();
-    let mut server = crate::api::Server::new(token, runtime).map_err(anyhow::Error::msg)?;
-    server.serve_ui();
-    let listener = crate::http::bind_loopback(&addr).map_err(anyhow::Error::msg)?;
-    let url = format!("http://{}/", listener.local_addr()?);
-    println!("curb rust app");
-    println!("  listening: {url}");
-    println!("  token: {}", token_path.display());
-    println!("  auth: Authorization: Bearer $(cat token-file)");
-    println!("  watcher: usage policy scans run in this process");
-    if open_browser && let Err(error) = open_dashboard(&url) {
-        eprintln!("curb: could not open dashboard: {error}");
-    }
-    crate::http::serve_blocking(listener, &server).map_err(anyhow::Error::msg)
-}
-
-fn open_dashboard(url: &str) -> Result<()> {
-    let status = if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(url).status()
-    } else if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .status()
-    } else {
-        std::process::Command::new("xdg-open").arg(url).status()
-    };
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => bail!("open dashboard command exited with {status}"),
-        Err(error) => bail!("open dashboard: {error}"),
-    }
-}
-
-#[derive(Serialize)]
-struct UsageReport {
-    generated_at: DateTime<Utc>,
-    sources: Vec<SourceReport>,
-    sessions: Vec<UsageSessionSummary>,
-}
-
-#[derive(Serialize)]
-struct UsageSessionSummary {
-    provider: String,
-    session_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cwd: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last: Option<DateTime<Utc>>,
-    events: usize,
-    models: Vec<String>,
-    input_tokens: i64,
-    cached_input_tokens: i64,
-    cache_creation_input_tokens: i64,
-    output_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
-}
-
-fn summarize_usage_sessions(events: &[Event]) -> Vec<UsageSessionSummary> {
-    let mut by_key: HashMap<String, UsageSessionSummary> = HashMap::new();
-    let mut models: HashMap<String, BTreeSet<String>> = HashMap::new();
-    for event in events {
-        let session_id = event.session_id.clone().unwrap_or_default();
-        let key = if session_id.is_empty() {
-            format!("{}:{}", event.provider, event.source_path.display())
-        } else {
-            format!("{}:{session_id}", event.provider)
-        };
-        let summary = by_key
-            .entry(key.clone())
-            .or_insert_with(|| UsageSessionSummary {
-                provider: event.provider.clone(),
-                session_id: session_id.clone(),
-                cwd: event.cwd.clone(),
-                last: None,
-                events: 0,
-                models: Vec::new(),
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                cache_creation_input_tokens: 0,
-                output_tokens: 0,
-                reasoning_output_tokens: 0,
-                total_tokens: 0,
-            });
-        if event.timestamp > summary.last {
-            summary.last = event.timestamp;
-        }
-        if summary.cwd.is_none() {
-            summary.cwd = event.cwd.clone();
-        }
-        summary.events += 1;
-        summary.input_tokens += event.input_tokens;
-        summary.cached_input_tokens += event.cached_input_tokens;
-        summary.cache_creation_input_tokens += event.cache_creation_input_tokens;
-        summary.output_tokens += event.output_tokens;
-        summary.reasoning_output_tokens += event.reasoning_output_tokens;
-        summary.total_tokens += event.total_tokens;
-        if let Some(model) = &event.model {
-            models.entry(key).or_default().insert(model.clone());
-        }
-    }
-    for (key, summary) in &mut by_key {
-        summary.models = models.remove(key).unwrap_or_default().into_iter().collect();
-    }
-    let mut out = by_key.into_values().collect::<Vec<_>>();
-    out.sort_by_key(|right| std::cmp::Reverse(right.last));
-    out
-}
-
-fn short_duration(duration: StdDuration) -> String {
-    let seconds = duration.as_secs();
-    if seconds != 0 && seconds.is_multiple_of(3600) {
-        format!("{}h", seconds / 3600)
-    } else if seconds != 0 && seconds.is_multiple_of(60) {
-        format!("{}m", seconds / 60)
-    } else if seconds == 0 && duration.subsec_millis() > 0 {
-        format!("{}ms", duration.as_millis())
-    } else {
-        format!("{seconds}s")
-    }
 }
