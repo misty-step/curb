@@ -30,7 +30,9 @@ try {
       await expectVisibleText(page, "repo", viewport.name);
       await expectVisibleText(page, "over warn", viewport.name);
       await expectVisibleText(page, "Limits & mode", viewport.name);
-      await expectVisibleText(page, "Ready", viewport.name);
+      await expectVisibleText(page, "Using safe defaults", viewport.name);
+      await expectVisibleText(page, "Diagnostics", viewport.name);
+      await expectVisibleText(page, "Optional", viewport.name);
       await page.getByText("repo", { exact: false }).first().click();
       await expectVisibleText(page, "This turn", viewport.name);
       await expectVisibleText(page, "Model calls", viewport.name);

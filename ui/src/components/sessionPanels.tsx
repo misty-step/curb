@@ -54,18 +54,36 @@ export function ReadinessPanel({ model }: { model: ReadinessModel }): ReactNode 
   return (
     <section className={`readiness ${model.attention ? "readiness-attention" : ""}`}>
       <div className="readiness-head">
-        <span>Readiness</span>
-        <strong>{model.summary}</strong>
+        <div>
+          <span>Setup</span>
+          <strong>{model.summary}</strong>
+          <p>{model.nextStep}</p>
+        </div>
+        <strong className={`readiness-status readiness-status-${model.primary.tone}`}>{readinessStatus(model.primary.status)}</strong>
       </div>
-      <div className="readiness-grid">
-        {model.items.map((item) => (
-          <div className="readiness-item" key={item.label}>
-            <span>{item.label}</span>
-            <strong>{item.status}</strong>
-            <em>{item.message}</em>
-          </div>
-        ))}
-      </div>
+      <details className="readiness-details">
+        <summary>
+          <span>Diagnostics</span>
+          <em>Optional</em>
+        </summary>
+        <div className="readiness-list">
+          {model.details.map((item) => (
+            <div className={`readiness-item readiness-item-${item.tone}`} key={item.label}>
+              <span className="readiness-dot" aria-hidden="true" />
+              <div className="readiness-copy">
+                <span>{item.label}</span>
+                <em>{item.message}</em>
+              </div>
+              <strong>{item.status}</strong>
+            </div>
+          ))}
+        </div>
+      </details>
     </section>
   );
+}
+
+function readinessStatus(status: string): string {
+  if (status === "required" || status === "ready") return "OK";
+  return status;
 }

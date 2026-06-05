@@ -64,6 +64,7 @@ pub fn handle_stream<B: Backend>(
     mut stream: TcpStream,
     server: &Server<B>,
 ) -> Result<(), HttpError> {
+    stream.set_nonblocking(false)?;
     let request = read_request(&mut stream, "http")?;
     let started = Instant::now();
     let method = request.method.clone();
@@ -182,9 +183,14 @@ fn reason_phrase(status: u16) -> &'static str {
 mod tests {
     use std::cell::RefCell;
     use std::io::Cursor;
+    use std::io::{Read as _, Write as _};
+    use std::net::Shutdown;
     use std::net::TcpListener;
+    use std::net::TcpStream;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+    use std::time::Duration;
 
     use chrono::{DateTime, TimeZone, Utc};
 
@@ -198,6 +204,7 @@ mod tests {
         AckRequest, AckView, AlertView, ConfigUpdate, ConfigView, EventView, Overview, SessionView,
         Snapshot, StopRequest, StopView, TurnView,
     };
+    use curb_core::usage::SourceReport;
 
     #[test]
     fn read_request_preserves_target_headers_and_body() {
@@ -275,6 +282,59 @@ mod tests {
     }
 
     #[test]
+    fn accepted_nonblocking_listener_stream_writes_complete_large_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_thread = thread::spawn(move || {
+            let stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                }
+            };
+            let server = Server::new(
+                "test-token",
+                FakeBackend {
+                    source_error_bytes: 600_000,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            handle_stream(stream, &server).unwrap();
+        });
+        let mut client = TcpStream::connect(addr).unwrap();
+        client
+            .write_all(
+                b"GET /v1/snapshot HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nAuthorization: Bearer test-token\r\n\r\n",
+            )
+            .unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).unwrap();
+        server_thread.join().unwrap();
+        let separator = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("response has headers");
+        let headers = String::from_utf8_lossy(&response[..separator]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Content-Length: ")
+                    .and_then(|value| value.parse::<usize>().ok())
+            })
+            .expect("response has content length");
+        let body = &response[separator + 4..];
+
+        assert_eq!(body.len(), content_length);
+        assert!(body.ends_with(b"}"));
+    }
+
+    #[test]
     fn handle_stream_serves_embedded_ui_when_enabled() {
         let mut server = Server::new("test-token", FakeBackend::default()).unwrap();
         server.serve_ui();
@@ -307,6 +367,7 @@ mod tests {
     #[derive(Default)]
     struct FakeBackend {
         _calls: RefCell<usize>,
+        source_error_bytes: usize,
     }
 
     impl Backend for FakeBackend {
@@ -321,7 +382,7 @@ mod tests {
                     kill: 0,
                     busiest_turn_tokens: 0,
                     last_scan: fixed_now(),
-                    sources: Vec::new(),
+                    sources: self.large_sources(),
                     changes: Default::default(),
                     capabilities: Default::default(),
                 },
@@ -410,6 +471,20 @@ mod tests {
 
         fn test_notification(&self, _now: DateTime<Utc>) -> Result<NotificationView, ApiError> {
             Ok(notification_view("delivered"))
+        }
+    }
+
+    impl FakeBackend {
+        fn large_sources(&self) -> Vec<SourceReport> {
+            if self.source_error_bytes == 0 {
+                return Vec::new();
+            }
+            vec![SourceReport {
+                provider: "codex".to_string(),
+                files: 1,
+                events: 0,
+                error: Some("x".repeat(self.source_error_bytes)),
+            }]
         }
     }
 

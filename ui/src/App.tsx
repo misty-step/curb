@@ -14,11 +14,12 @@ import {
   testNotification,
   type ApiSettings,
 } from "./api";
-import { AgentList, ConnectionNote, Settings, StatusPill } from "./components/dashboard";
+import { AgentList, ConnectionBanner, ConnectionNote, Settings, StatusPill } from "./components/dashboard";
 import { ReadinessPanel } from "./components/sessionPanels";
 import { demoConfig, demoNotifications, demoSnapshot } from "./demo";
+import { commas } from "./format";
 import { selectDashboard, selectReadiness, selectSessionExplanation } from "./readModel";
-import type { ConfigUpdate, ConfigView, NotificationView, OnboardingView, SessionView, Snapshot, TurnView } from "./types";
+import { modeFromConfig, type ConfigUpdate, type ConfigView, type NotificationView, type OnboardingView, type SessionView, type Snapshot, type TurnView } from "./types";
 
 // curb app serves the dashboard same-origin and authenticates with an HttpOnly
 // cookie, so there is no URL or token to enter — we just talk to our own origin.
@@ -110,12 +111,16 @@ export function App() {
   }, [selectedKey, snapshot.sessions]);
 
   async function persist(update: ConfigUpdate) {
+    const previous = config;
+    setConfig((current) => ({ ...current, ...update }));
+    setSettingsMsg("");
     try {
       const saved = await saveConfig(SETTINGS, update);
       setConfig(saved);
       setSettingsMsg(SAME_ORIGIN ? "Saved." : "Demo only — run curb app to save.");
-      await refresh();
+      void refresh();
     } catch (caught) {
+      setConfig(previous);
       setSettingsMsg(caught instanceof Error ? caught.message : "Could not save settings");
     }
   }
@@ -145,7 +150,7 @@ export function App() {
         bundle_id: session.bundle_id,
         team_id: session.team_id,
       });
-      setBusyMsg(`Stopped — ${stopped.scope_pids.length} process${stopped.scope_pids.length === 1 ? "" : "es"} in scope.`);
+      setBusyMsg(`Stopped: ${stopped.scope_pids.length} process${stopped.scope_pids.length === 1 ? "" : "es"} in scope.`);
       await refresh(true);
     } catch (caught) {
       setBusyMsg(caught instanceof Error ? caught.message : "Could not stop");
@@ -157,6 +162,20 @@ export function App() {
     setNotifications(await testNotification(SETTINGS));
   }
 
+  const mode = modeFromConfig(config.mode);
+  const headerDetail =
+    connection === "error"
+      ? "Showing demo data until the local API responds."
+      : readiness.attention
+        ? readiness.nextStep
+        : mode === "enforce"
+          ? "Stop runaways is armed for correlated worker processes."
+          : "Warn only is armed; Curb will not stop processes.";
+  const policySummary =
+    mode === "enforce"
+      ? `Warn at ${commas(config.warn_turn_tokens)} · stop at ${commas(config.kill_turn_tokens)}`
+      : `Warn at ${commas(config.warn_turn_tokens)} · stop disabled`;
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -166,15 +185,20 @@ export function App() {
           </span>
           <span>Curb</span>
         </div>
-        <p className="headline">{model.headline}</p>
+        <div className="top-copy">
+          <p className="headline">{model.headline}</p>
+          <p className="top-subline">{headerDetail}</p>
+        </div>
         <div className="top-actions">
           <StatusPill status={snapshot.overview.status} />
-          <span className="mode-tag">{snapshot.overview.mode}</span>
+          <span className="mode-tag">{mode === "enforce" ? "enforce" : "watch"}</span>
           <button type="button" className="icon-btn" aria-label="Rescan now" onClick={() => void refresh(true)}>
             <RefreshCw size={15} />
           </button>
         </div>
       </header>
+
+      {connection === "error" ? <ConnectionBanner error={error} /> : null}
 
       <AgentList
         active={model.active}
@@ -194,7 +218,8 @@ export function App() {
       <details className="drawer">
         <summary>
           <SlidersHorizontal size={15} />
-          Limits &amp; mode
+          <span>Limits &amp; mode</span>
+          <em>{policySummary}</em>
         </summary>
         <Settings
           config={config}

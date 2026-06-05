@@ -25,6 +25,26 @@ export function StatusPill({ status }: { status: Status }): ReactNode {
   );
 }
 
+export function connectionMessage(error: string): string {
+  if (!error) return "Unable to reach the local Curb API.";
+  if (error.includes("<!doctype") || error.includes("not valid JSON")) {
+    return "The dashboard reached the dev server instead of the Curb API. Run curb app for live data.";
+  }
+  return error;
+}
+
+export function ConnectionBanner({ error }: { error: string }): ReactNode {
+  return (
+    <div className="connection-banner" role="status">
+      <TriangleAlert size={16} />
+      <div>
+        <strong>Live data unavailable</strong>
+        <span>{connectionMessage(error)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function providerLabel(provider: string): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
@@ -245,8 +265,7 @@ export function Settings({ config, notifications, message, onSave, onTestNotific
             <span className="setting-check-text">
               Also stop supervised desktop agents
               <span className="note">
-                Desktop apps like Codex respawn killed tasks. This stops the app's supervisor
-                instead — ending every task running under it.
+                Desktop apps can respawn workers. This stops the supervisor and every task running under it.
               </span>
             </span>
           </label>
@@ -334,13 +353,13 @@ export function ConnectionNote({
   connection: "demo" | "live" | "error";
   error: string;
 }): ReactNode {
-  const label = connection === "live" ? "Live — local daemon" : connection === "error" ? "Connection issue" : "Demo data";
+  const label = connection === "live" ? "Live local daemon" : connection === "error" ? "Connection issue" : "Demo data";
   return (
     <div className={`connection connection-${connection}`}>
       <CircleDot size={12} />
       <span>{label}</span>
       {connection === "demo" ? <span className="note">Run curb app for live agent data.</span> : null}
-      {error ? <span className="note note-warn">{error}</span> : null}
+      {error ? <span className="note note-warn">{connectionMessage(error)}</span> : null}
     </div>
   );
 }

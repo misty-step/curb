@@ -80,7 +80,7 @@ describe("shared API contract fixtures", () => {
       onboarding.notifications,
       onboarding.capabilities,
     );
-    expect(readiness.summary).toBe("Setup needs attention");
-    expect(readiness.items.some((item) => item.label === "First run")).toBe(true);
+    expect(readiness.summary).toBe("Using safe defaults");
+    expect(readiness.items.some((item) => item.label === "Setup")).toBe(true);
   });
 });

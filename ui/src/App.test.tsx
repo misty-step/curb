@@ -3,6 +3,7 @@
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { connectionMessage } from "./components/dashboard";
 import { demoConfig, demoSnapshot } from "./demo";
 import type { Snapshot } from "./types";
 
@@ -35,6 +36,12 @@ afterEach(() => {
 });
 
 describe("Curb dashboard", () => {
+  it("turns dev-server HTML fetch failures into operator copy", () => {
+    expect(connectionMessage('Unexpected token \'<\', "<!doctype "... is not valid JSON')).toBe(
+      "The dashboard reached the dev server instead of the Curb API. Run curb app for live data.",
+    );
+  });
+
   it("leads with the status headline and one row per working agent, no jargon", async () => {
     installFetch(demoSnapshot);
     const { App } = await import("./App");
@@ -43,11 +50,13 @@ describe("Curb dashboard", () => {
 
     const page = document.body.textContent ?? "";
     expect(page).toContain("1 over the kill line");
+    expect(page).toContain("Curb will notify on high-token turns.");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
     expect(page).toContain("over warn");
     expect(page).toContain("over kill");
     expect(page).toContain("Limits & mode");
+    expect(page).toContain("Warn at 1,000,000 · stop disabled");
     // Idle agents fold into a count rather than cluttering the list.
     expect(page).toContain("idle agent");
     // Redundant and confusing copy is gone.
@@ -94,6 +103,31 @@ describe("Curb dashboard", () => {
     expect(requests.some((request) => request.url.includes("/ack") && request.method === "POST")).toBe(true);
   });
 
+  it("reflects mode changes immediately while config save is still pending", async () => {
+    const pendingSave = deferred<Response>();
+    installFetch(demoSnapshot, pendingSave.promise);
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const drawer = document.querySelector(".drawer") as HTMLDetailsElement;
+    await actRender(null, () => {
+      drawer.open = true;
+    });
+    const stop = Array.from(document.querySelectorAll(".toggle button")).find((button) =>
+      button.textContent?.includes("Stop runaways"),
+    );
+    expect(stop).toBeTruthy();
+    await actRender(null, () => (stop as HTMLButtonElement).click());
+
+    expect((stop as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect(document.body.textContent).toContain("Warn at 1,000,000 · stop at 3,000,000");
+
+    pendingSave.resolve(jsonResponse({ ...demoConfig, mode: "enforcement" }));
+    await actRender(null);
+    await actRender(null);
+  });
+
   it("opens a selected-session cockpit with turn timeline, evidence, and readiness", async () => {
     const requests = installFetch(demoSnapshot);
     const { App } = await import("./App");
@@ -107,9 +141,13 @@ describe("Curb dashboard", () => {
     await actRender(null, () => (head as HTMLButtonElement).click());
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("Readiness");
-    expect(page).toContain("First run");
-    expect(page).toContain("identity evidence available");
+    expect(page).toContain("Setup");
+    expect(page).toContain("Using safe defaults");
+    expect(page).toContain("OK");
+    expect(page).toContain("Diagnostics");
+    expect(page).toContain("Optional");
+    expect(page).not.toContain("checks clear");
+    expect((document.querySelector(".readiness-details") as HTMLDetailsElement).open).toBe(false);
     expect(page).toContain("Turn timeline");
     expect(page).toContain("gpt-5.5");
     expect(page).toContain("Input 1.2M");
@@ -202,7 +240,7 @@ function stoppableSnapshot(): Snapshot {
   return stoppable;
 }
 
-function installFetch(snapshot: Snapshot): RequestRecord[] {
+function installFetch(snapshot: Snapshot, pendingConfigSave?: Promise<Response>): RequestRecord[] {
   const requests: RequestRecord[] = [];
   const routes = fetchRoutes(snapshot);
   vi.stubGlobal(
@@ -210,6 +248,7 @@ function installFetch(snapshot: Snapshot): RequestRecord[] {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, method: init?.method ?? "GET", body: String(init?.body ?? "") });
+      if (pendingConfigSave && url.includes("/v1/config") && init?.method === "PUT") return pendingConfigSave;
       return routes.find((route) => route.match(url))?.response() ?? new Response("not found", { status: 404 });
     }),
   );
@@ -290,7 +329,7 @@ async function actRender(element: React.ReactElement | null, action?: () => void
     if (element) root!.render(element);
   });
   // Let async fetch chains and the state updates they trigger settle.
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 6; i++) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -299,6 +338,14 @@ async function actRender(element: React.ReactElement | null, action?: () => void
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 function memoryStorage(): Storage {
