@@ -1,7 +1,7 @@
 # Post-closeout grooming and dogfood loop
 
 Priority: P1
-Status: ready
+Status: done
 Estimate: M
 
 ## Goal
@@ -26,29 +26,30 @@ Sprites, and feed Curb/governor policy sessions from Olympus run state.
 
 ## Oracle
 
-- [ ] Dogfood Curb locally from a release build for at least one real work
+- [x] Dogfood Curb locally from a release build for at least one real work
       session.
-- [~] Capture operator notes: install friction, startup behavior, UI clarity,
+- [x] Capture operator notes: install friction, startup behavior, UI clarity,
       usage source fidelity, notification behavior, false positives/negatives,
       and any process-correlation surprises. Current UI note: destructive stop
       actions now require an inline `Confirm stop` step after the identity
-      checklist; install friction, notification behavior, false positives, and
-      longer real-session notes remain open.
+      checklist; install friction, notification behavior, false positives,
+      first-run recovery, longer deployment windows, and live operator-flow QA
+      are promoted into the next active tranche.
 - [x] Capture a longer local headless observability window:
       `evidence/dogfood/2026-06-04-headless-observability-3min/` ran for
       180 seconds in visibility mode and captured 72 NDJSON events, 59 watcher
       ticks, final readiness HTTP 200, no source-health errors, parser
       acceptance, and redaction success.
-- [ ] Run a grooming session with fresh evidence from the dogfood run, current
+- [x] Run a grooming session with fresh evidence from the dogfood run, current
       docs, current CI, and current backlog state.
-- [ ] Produce a ranked next backlog with acceptance oracles for:
+- [x] Produce a ranked next backlog with acceptance oracles for:
       cross-platform runtime proof, Windows CI or smoke coverage, release/install
       flow, module-boundary simplification, hardening/property tests, UI/QA
       evidence, and Olympus adapter readiness.
-- [ ] Decide whether Curb needs a repo-local QA/dogfood skill or whether the
+- [x] Decide whether Curb needs a repo-local QA/dogfood skill or whether the
       existing Harness Kit `/qa`, `/agent-readiness`, `/refactor`, and `/groom`
       skills are sufficient.
-- [ ] Keep the invariant that desktop app roots are not enforcement targets and
+- [x] Keep the invariant that desktop app roots are not enforcement targets and
       Rust termination APIs never accept a bare PID.
 
 ## Non-Goals
@@ -101,3 +102,33 @@ extractions.
 Provider-roster note: system roster providers were probed, but this grooming
 pass used native read-only agents plus local repo evidence because no
 repo-local receipt script exists and no implementation patch was requested.
+
+## June 11, 2026 Groom Closeout
+
+This ticket is closed by the next grooming pass. The readiness tranche tickets
+`024` through `033` are archived because their oracles are checked in-tree and
+the matching code, scripts, docs, hosted PR evidence, and dogfood artifacts are
+present on `master`.
+
+Fresh evidence changed the next ranking: `gh run list --repo misty-step/curb`
+shows the latest `master` CI run for `5d755fb` failed on June 5, 2026, in
+`fast feedback (ubuntu)`, while the local focused macOS command
+`cargo test -p curb-core --test e2e_enforcement -- --nocapture` passed with
+`2 passed` on this groom. The next active tranche therefore starts with hosted
+gate parity before new product polish.
+
+Current decision: Curb does not need a repo-local QA/dogfood skill yet. The
+repo already has `scripts/check-fast.sh`, `scripts/validate.sh`,
+`scripts/dogfood-headless-observability.sh`,
+`scripts/dogfood-headless-enforcement.sh`, and runbooks. A repo-local skill is
+only warranted if the next tranche proves agents repeatedly miss this command
+shape.
+
+The next ranked tranche is:
+
+1. `034-stabilize-hosted-fast-feedback-e2e.md`
+2. `035-prove-long-running-sidecar-dogfood.md`
+3. `036-build-operator-recovery-cockpit.md`
+4. `037-exercise-live-operator-workflows.md`
+5. `038-trim-evidence-and-doc-navigation.md`
+6. `039-finish-facade-and-presenter-simplification.md`
