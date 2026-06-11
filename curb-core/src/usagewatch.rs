@@ -332,6 +332,8 @@ impl UsageWatch {
                     None,
                 )?;
                 report.stop_rejected += 1;
+                self.grace.remove(key);
+                self.targets.remove(key);
             }
             StopResolution::Stopped(result) => {
                 append_event(

@@ -460,6 +460,8 @@ fn pid_reuse_at_kill_time_records_termination_failed() {
     );
     assert!(enforcer.terminated.lock().unwrap().is_empty());
     assert!(watch.terminated_keys().is_empty());
+    assert!(!watch.grace.contains_key("codex:s1"));
+    assert!(!watch.targets.contains_key("codex:s1"));
 }
 
 /// Scenario 5: a killed worker logs fresh usage after the kill — it came

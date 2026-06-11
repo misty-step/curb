@@ -79,3 +79,10 @@ June 11, 2026:
 - Fresh-context peer review: Claude initially found the production-reachable
   incomplete-identity blocker; after the local stop-token sealability gate was
   added, re-review returned `NO BLOCKERS`.
+- Hosted PR run `27373609901` moved the failure forward: the original
+  incomplete-token rejection was gone, but `fast feedback (ubuntu)` still failed
+  because scan 2 captured `can_terminate=false` and emitted
+  `usage_kill_blocked` while a later diagnostic snapshot showed the same worker
+  had become sealable. The product fix now drops rejected grace-time tokens so
+  stale seals cannot be retried forever, and the E2E harness waits for stable
+  sealed identity before asserting the kill lifecycle.
