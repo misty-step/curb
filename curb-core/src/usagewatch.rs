@@ -92,7 +92,7 @@ pub enum StopResolution {
     /// already-serialized termination result for the completed ledger event.
     Stopped(Value),
     /// The safety guard rejected the stop (e.g. pid reuse). Nothing died.
-    Rejected,
+    Rejected(String),
 }
 
 /// The side-effecting actions the policy delegates. The local implementation
@@ -315,18 +315,20 @@ impl UsageWatch {
         // completed, or a lone failed) matches the old inline platform path; the
         // policy just no longer holds OS concepts to resolve the target itself.
         match enforcer.stop(stop_target, escalate) {
-            StopResolution::Rejected => {
+            StopResolution::Rejected(reason) => {
                 notify_user(
                     cfg,
                     enforcer,
                     "Curb stop failed",
-                    "Safety guard rejected termination for a stop-pending session.",
+                    &format!(
+                        "Safety guard rejected termination for a stop-pending session: {reason}."
+                    ),
                 );
                 append_event(
                     cfg,
                     LedgerEvent::UsageTerminationFailed,
                     session,
-                    "safety guard rejected termination",
+                    &reason,
                     None,
                 )?;
                 report.stop_rejected += 1;

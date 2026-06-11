@@ -104,7 +104,9 @@ mod tests {
 
         fn stop(&self, token: &dyn StopToken, _escalate: bool) -> StopResolution {
             let Some(token) = token.as_any().downcast_ref::<OlympusRunToken>() else {
-                return StopResolution::Rejected;
+                return StopResolution::Rejected(
+                    "stop token did not belong to Olympus enforcer".into(),
+                );
             };
             self.stopped.borrow_mut().push(token.clone());
             StopResolution::Stopped(json!({

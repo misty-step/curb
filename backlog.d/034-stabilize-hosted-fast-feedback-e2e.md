@@ -1,7 +1,7 @@
 # Stabilize hosted fast-feedback enforcement proof
 
 Priority: P0
-Status: ready
+Status: in-progress
 Estimate: M
 
 ## Goal
@@ -10,19 +10,19 @@ Linux enforcement E2E failure without weakening process-termination safety or
 removing the gate.
 
 ## Oracle
-- [ ] Reproduce or explain the latest hosted failure from run `27037199553`, job
+- [x] Reproduce or explain the latest hosted failure from run `27037199553`, job
       `79804074637`: `terminated_session_is_not_rekilled_on_the_next_scan`
       ended with `usage_termination_failed` and `worker pid ... was not
       terminated on scan 2`.
-- [ ] Preserve the local macOS contrast: `cargo test -p curb-core --test
+- [x] Preserve the local macOS contrast: `cargo test -p curb-core --test
       e2e_enforcement -- --nocapture` passes or any local failure is captured
       with diagnostics before code changes.
-- [ ] Root cause whether the Ubuntu failure is product behavior,
+- [x] Root cause whether the Ubuntu failure is product behavior,
       shell/process-tree semantics, process-capture liveness, test timing, or CI
       environment drift.
-- [ ] Fix the product or the test harness at the root cause while preserving the
+- [x] Fix the product or the test harness at the root cause while preserving the
       invariant that production termination APIs never accept a bare PID.
-- [ ] Keep `scripts/check-fast.sh` running the Rust workspace tests; do not skip
+- [x] Keep `scripts/check-fast.sh` running the Rust workspace tests; do not skip
       `curb-core/tests/e2e_enforcement.rs` from the fast gate to get green.
 - [ ] Capture a passing hosted `fast feedback (ubuntu)` run on `master` or a PR
       branch, plus the full `scripts/validate.sh` local proof.
@@ -44,3 +44,38 @@ locally during this groom.
 
 Do not turn this into a broad CI cleanup. The only acceptable outcome is a green
 hosted fast lane with the enforcement proof still meaningful.
+
+## Delivery Notes
+
+June 11, 2026:
+- Preserved the hosted failure receipt from run `27037199553`, job
+  `79804074637`: `terminated_session_is_not_rekilled_on_the_next_scan` failed
+  because the worker stayed alive and the ledger ended at
+  `usage_termination_failed`.
+- Preserved the local macOS contrast before edits:
+  `cargo test -p curb-core --test e2e_enforcement -- --nocapture` passed with
+  both real subprocess E2E tests green.
+- Root cause: CI exposed a Linux process-capture timing race that was also
+  reachable in production. A worker could appear in the process table before
+  sysinfo exposed enough PID/start/owner/executable evidence to seal a
+  grace-time stop token; the later stop correctly rejected the incomplete
+  identity instead of killing by bare PID, but the stale unsealable token could
+  be retried.
+- Fix: local policy sessions now require a sealable process identity before
+  advertising/storing a stop token, so grace cannot start on an unsealable
+  process. The E2E worker observation loop mirrors that boundary by waiting for
+  a revalidatable `TerminationTarget` before starting policy scans, and
+  diagnostics now print termination identity and target scope.
+  `usage_termination_failed` also carries the concrete rejection reason from the
+  enforcer.
+- Focused local proof after edits:
+  `cargo test -p curb-core usagewatch::tests::pid_reuse_at_kill_time_records_termination_failed -- --nocapture`
+  passed; `cargo test -p curb-core --test e2e_enforcement -- --nocapture`
+  passed; `cargo test -p curb-core -- --nocapture` passed with 128 unit tests
+  plus 2 E2E tests.
+- Local gate proof: `scripts/check-fast.sh` passed with the Rust workspace tests
+  still enabled; `scripts/validate.sh` passed, including UI typecheck/lint/unit
+  tests, dashboard smoke, Tauri checks, and demo 006 dry run.
+- Fresh-context peer review: Claude initially found the production-reachable
+  incomplete-identity blocker; after the local stop-token sealability gate was
+  added, re-review returned `NO BLOCKERS`.

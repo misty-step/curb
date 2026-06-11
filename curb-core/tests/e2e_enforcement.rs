@@ -116,19 +116,25 @@ fn is_alive(pid: Pid) -> bool {
 }
 
 /// Capture the live snapshot and return a clone of the worker's `Process`,
-/// retrying briefly so the test does not race the spawn settling into the table.
+/// retrying briefly so the test does not race the spawn settling into the table
+/// before `/proc`/sysinfo exposes enough identity to seal a stop target.
 fn observe(pid: Pid) -> (Snapshot, Process) {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last_seen = None;
     loop {
         let snapshot = SystemPlatform.capture().expect("capture");
         if let Some(process) = snapshot.process(pid) {
             let process = process.clone();
-            return (snapshot, process);
+            if snapshot.termination_target(&process).is_some() {
+                return (snapshot, process);
+            }
+            last_seen = Some(process);
         }
         assert!(
             Instant::now() < deadline,
-            "worker pid {} never appeared in the process table",
-            pid.get()
+            "worker pid {} never exposed a revalidatable termination identity; last_seen={:?}",
+            pid.get(),
+            last_seen
         );
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -211,20 +217,31 @@ fn ledger_event_types(cfg: &Config) -> Vec<String> {
 fn process_diag(pid: Pid, marker: &str) -> String {
     match SystemPlatform.capture() {
         Ok(snapshot) => match snapshot.process(pid) {
-            Some(process) => format!(
-                "pid={} alive=true name={:?} ppid={:?} cwd={:?} started_at={:?} user_present={} executable={:?} command_has_marker={}",
-                pid.get(),
-                process.name,
-                process.ppid.map(|ppid| ppid.get()),
-                process.cwd,
-                process.started_at,
-                process
-                    .username
-                    .as_ref()
-                    .is_some_and(|user| !user.is_empty()),
-                process.executable,
-                process.command.contains(marker),
-            ),
+            Some(process) => {
+                let target_scope = snapshot.termination_target(process).map(|target| {
+                    target
+                        .scope()
+                        .iter()
+                        .map(|pid| pid.get())
+                        .collect::<Vec<_>>()
+                });
+                format!(
+                    "pid={} alive=true name={:?} ppid={:?} cwd={:?} started_at={:?} user_present={} executable={:?} has_termination_identity={} target_scope={:?} command_has_marker={}",
+                    pid.get(),
+                    process.name,
+                    process.ppid.map(|ppid| ppid.get()),
+                    process.cwd,
+                    process.started_at,
+                    process
+                        .username
+                        .as_ref()
+                        .is_some_and(|user| !user.is_empty()),
+                    process.executable,
+                    process.has_termination_identity(),
+                    target_scope,
+                    process.command.contains(marker),
+                )
+            }
             None => format!("pid={} alive=false", pid.get()),
         },
         Err(error) => format!("pid={} capture_error={error}", pid.get()),
