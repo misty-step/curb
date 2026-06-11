@@ -1,7 +1,7 @@
 # Stabilize hosted fast-feedback enforcement proof
 
 Priority: P0
-Status: in-progress
+Status: complete
 Estimate: M
 
 ## Goal
@@ -24,7 +24,7 @@ removing the gate.
       invariant that production termination APIs never accept a bare PID.
 - [x] Keep `scripts/check-fast.sh` running the Rust workspace tests; do not skip
       `curb-core/tests/e2e_enforcement.rs` from the fast gate to get green.
-- [ ] Capture a passing hosted `fast feedback (ubuntu)` run on `master` or a PR
+- [x] Capture a passing hosted `fast feedback (ubuntu)` run on `master` or a PR
       branch, plus the full `scripts/validate.sh` local proof.
 
 ## Children
@@ -86,3 +86,7 @@ June 11, 2026:
   had become sealable. The product fix now drops rejected grace-time tokens so
   stale seals cannot be retried forever, and the E2E harness waits for stable
   sealed identity before asserting the kill lifecycle.
+- Hosted proof: PR run `27374332183` passed `fast feedback (ubuntu)` in 1m47s,
+  `full validate (ubuntu-latest)` in 4m0s, `full validate (macos-latest)` in
+  3m41s, `windows smoke` in 1m44s, `coverage` in 1m12s, `dependency audit` in
+  24s, and CodeRabbit review completed with pass.
