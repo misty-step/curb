@@ -74,17 +74,23 @@ pub fn build_policy_sessions(
 fn agent_target(cfg: &Config, correlation: &service::Correlation) -> AgentTarget {
     let agent = correlation.agent.as_ref();
     let stop_token = match (agent, correlation.process.as_ref()) {
-        (Some(agent), Some(process)) => Some(Box::new(LocalToken {
-            process: process.clone(),
-            supervisor_names: agent.matcher.process_names.clone(),
-        }) as Box<dyn StopToken>),
+        (Some(agent), Some(process))
+            if process.has_termination_identity()
+                || (agent.is_supervised() && cfg.usage.escalate_supervised) =>
+        {
+            Some(Box::new(LocalToken {
+                process: process.clone(),
+                supervisor_names: agent.matcher.process_names.clone(),
+            }) as Box<dyn StopToken>)
+        }
         _ => None,
     };
+    let can_stop = agent.is_some_and(|agent| agent.can_terminate(cfg.usage.escalate_supervised))
+        && stop_token.is_some();
     AgentTarget {
         matched: correlation.matched,
         agent_id: agent.map(|agent| agent.id.clone()),
-        can_terminate: agent
-            .is_some_and(|agent| agent.can_terminate(cfg.usage.escalate_supervised)),
+        can_terminate: can_stop,
         supervised: agent.is_some_and(|agent| agent.is_supervised()),
         pid: correlation
             .process
@@ -130,7 +136,7 @@ impl<P: Platform> Enforcer for LocalEnforcer<'_, P> {
 
     fn stop(&self, token: &dyn StopToken, escalate: bool) -> StopResolution {
         let Some(token) = token.as_any().downcast_ref::<LocalToken>() else {
-            return StopResolution::Rejected;
+            return StopResolution::Rejected("stop token did not belong to local enforcer".into());
         };
         let resolved = if escalate {
             self.processes
@@ -140,11 +146,121 @@ impl<P: Platform> Enforcer for LocalEnforcer<'_, P> {
             self.processes.termination_target(&token.process)
         };
         let Some(target) = resolved else {
-            return StopResolution::Rejected;
+            let reason = if token.process.has_termination_identity() {
+                format!(
+                    "process identity could not be revalidated for pid {}",
+                    token.process.pid.get()
+                )
+            } else {
+                format!(
+                    "grace-time process identity was incomplete for pid {}",
+                    token.process.pid.get()
+                )
+            };
+            return StopResolution::Rejected(reason);
         };
         let result = self
             .platform
             .terminate(&target, self.cfg.usage.grace_period.as_std());
         StopResolution::Stopped(serde_json::json!(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use chrono::TimeZone;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::config::{Agent, AgentKind, Match, Mode};
+    use crate::platform::{Pid, Process, Snapshot};
+    use crate::usage::{Event as UsageEvent, EventKind};
+
+    #[test]
+    fn local_policy_session_requires_sealable_identity_before_stop_token() {
+        let temp = tempdir().unwrap();
+        let mut cfg = Config::local_default(Mode::Enforcement, temp.path().join("state"));
+        cfg.agents = vec![Agent {
+            id: "synthetic-worker".to_string(),
+            label: "Synthetic Worker".to_string(),
+            family: "codex".to_string(),
+            kind: AgentKind::Process,
+            matcher: Match {
+                process_names: vec!["sh".to_string()],
+                command_regex: vec!["curb-e2e-worker".to_string()],
+                require_command_regex: vec!["curb-e2e-worker".to_string()],
+                ..Match::default()
+            },
+            policy: None,
+        }];
+        cfg.refresh_agent_policies();
+
+        let now = Utc.with_ymd_and_hms(2026, 6, 11, 12, 0, 0).unwrap();
+        let cwd = temp.path().join("work");
+        let event = usage_event(now, &cwd);
+        let incomplete = Process {
+            executable: None,
+            ..process(&cwd)
+        };
+        let sessions = build_policy_sessions(
+            &cfg,
+            std::slice::from_ref(&event),
+            &Snapshot::new([incomplete]),
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions[0].target.matched);
+        assert!(!sessions[0].target.can_terminate);
+        assert!(sessions[0].target.stop_token.is_none());
+
+        let complete = process(&cwd);
+        let sessions =
+            build_policy_sessions(&cfg, &[event], &Snapshot::new([complete]), now).unwrap();
+
+        assert!(sessions[0].target.can_terminate);
+        assert!(sessions[0].target.stop_token.is_some());
+    }
+
+    fn process(cwd: &std::path::Path) -> Process {
+        Process {
+            pid: Pid::new(4242),
+            ppid: None,
+            name: "sh".to_string(),
+            executable: Some(PathBuf::from("/bin/sh")),
+            command: "sh -c 'while :; do sleep 1; done # curb-e2e-worker'".to_string(),
+            cwd: Some(cwd.to_path_buf()),
+            started_at: Some(Utc.with_ymd_and_hms(2026, 6, 11, 12, 0, 0).unwrap()),
+            username: Some("tester".to_string()),
+            bundle_id: None,
+            team_id: None,
+        }
+    }
+
+    fn usage_event(now: DateTime<Utc>, cwd: &std::path::Path) -> UsageEvent {
+        UsageEvent {
+            kind: EventKind::TokenCheckpoint,
+            provider: "codex".to_string(),
+            source: "test".to_string(),
+            source_path: PathBuf::from("test.jsonl"),
+            session_id: Some("session".to_string()),
+            turn_id: None,
+            request_id: None,
+            model: None,
+            cwd: Some(cwd.to_path_buf()),
+            timestamp: Some(now),
+            input_tokens: 250,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 250,
+            spent_tokens: 250,
+            cumulative_tokens: 250,
+            model_context_window: 0,
+        }
     }
 }

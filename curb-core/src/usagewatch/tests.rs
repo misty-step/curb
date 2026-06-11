@@ -48,7 +48,7 @@ impl Enforcer for FakeEnforcer {
             .downcast_ref::<FakeToken>()
             .expect("fake token");
         if !token.valid {
-            return StopResolution::Rejected;
+            return StopResolution::Rejected("stored stop token no longer revalidates".into());
         }
         let scope = if escalate && !token.supervisor_pids.is_empty() {
             token.supervisor_pids.clone()
@@ -124,6 +124,10 @@ fn ledger_event_types(cfg: &Config) -> Vec<String> {
         .into_iter()
         .map(|event| event.event_type)
         .collect()
+}
+
+fn ledger_events(cfg: &Config) -> Vec<ledger::Event> {
+    ledger::read(&cfg.ledger.path).unwrap()
 }
 
 #[test]
@@ -448,8 +452,16 @@ fn pid_reuse_at_kill_time_records_termination_failed() {
             "usage_termination_failed"
         ]
     );
+    assert_eq!(
+        ledger_events(&cfg)
+            .last()
+            .and_then(|event| event.message.as_deref()),
+        Some("stored stop token no longer revalidates")
+    );
     assert!(enforcer.terminated.lock().unwrap().is_empty());
     assert!(watch.terminated_keys().is_empty());
+    assert!(!watch.grace.contains_key("codex:s1"));
+    assert!(!watch.targets.contains_key("codex:s1"));
 }
 
 /// Scenario 5: a killed worker logs fresh usage after the kill — it came

@@ -116,22 +116,44 @@ fn is_alive(pid: Pid) -> bool {
 }
 
 /// Capture the live snapshot and return a clone of the worker's `Process`,
-/// retrying briefly so the test does not race the spawn settling into the table.
+/// retrying briefly so the test does not race the spawn settling into the table
+/// before `/proc`/sysinfo exposes enough identity to seal a stop target.
 fn observe(pid: Pid) -> (Snapshot, Process) {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last_seen = None;
+    let mut previous_sealable: Option<Process> = None;
     loop {
         let snapshot = SystemPlatform.capture().expect("capture");
         if let Some(process) = snapshot.process(pid) {
             let process = process.clone();
-            return (snapshot, process);
+            if snapshot.termination_target(&process).is_some() {
+                if previous_sealable
+                    .as_ref()
+                    .is_some_and(|previous| stable_identity(previous, &process))
+                {
+                    return (snapshot, process);
+                }
+                previous_sealable = Some(process.clone());
+            }
+            last_seen = Some(process);
         }
         assert!(
             Instant::now() < deadline,
-            "worker pid {} never appeared in the process table",
-            pid.get()
+            "worker pid {} never exposed a revalidatable termination identity; last_seen={:?}",
+            pid.get(),
+            last_seen
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn stable_identity(previous: &Process, current: &Process) -> bool {
+    previous.pid == current.pid
+        && previous.started_at == current.started_at
+        && previous.username == current.username
+        && previous.executable == current.executable
+        && previous.bundle_id == current.bundle_id
+        && previous.team_id == current.team_id
 }
 
 /// An agent matcher that matches ONLY a worker carrying `marker` in its command
@@ -211,20 +233,31 @@ fn ledger_event_types(cfg: &Config) -> Vec<String> {
 fn process_diag(pid: Pid, marker: &str) -> String {
     match SystemPlatform.capture() {
         Ok(snapshot) => match snapshot.process(pid) {
-            Some(process) => format!(
-                "pid={} alive=true name={:?} ppid={:?} cwd={:?} started_at={:?} user_present={} executable={:?} command_has_marker={}",
-                pid.get(),
-                process.name,
-                process.ppid.map(|ppid| ppid.get()),
-                process.cwd,
-                process.started_at,
-                process
-                    .username
-                    .as_ref()
-                    .is_some_and(|user| !user.is_empty()),
-                process.executable,
-                process.command.contains(marker),
-            ),
+            Some(process) => {
+                let target_scope = snapshot.termination_target(process).map(|target| {
+                    target
+                        .scope()
+                        .iter()
+                        .map(|pid| pid.get())
+                        .collect::<Vec<_>>()
+                });
+                format!(
+                    "pid={} alive=true name={:?} ppid={:?} cwd={:?} started_at={:?} user_present={} executable={:?} has_termination_identity={} target_scope={:?} command_has_marker={}",
+                    pid.get(),
+                    process.name,
+                    process.ppid.map(|ppid| ppid.get()),
+                    process.cwd,
+                    process.started_at,
+                    process
+                        .username
+                        .as_ref()
+                        .is_some_and(|user| !user.is_empty()),
+                    process.executable,
+                    process.has_termination_identity(),
+                    target_scope,
+                    process.command.contains(marker),
+                )
+            }
             None => format!("pid={} alive=false", pid.get()),
         },
         Err(error) => format!("pid={} capture_error={error}", pid.get()),
@@ -329,7 +362,7 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
 
     // Resolve the real, OS-normalized cwd from the captured process so the
     // synthetic session correlates by exact working directory.
-    let (_, worker_process) = observe(worker_pid);
+    let (snapshot, worker_process) = observe(worker_pid);
     let session_cwd = worker_process.cwd.expect("worker has a captured cwd");
     // Sanity: both spawned in the same dir, so the sibling shares the cwd.
     let (_, sibling_process) = observe(sibling_pid);
@@ -349,7 +382,6 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
 
     // Scan 1: over the kill line — grace starts, nothing terminated yet.
     let now = Utc::now();
-    let snapshot = SystemPlatform.capture().expect("capture");
     let first_sessions = local_scan(
         &mut watch,
         &cfg,
@@ -372,7 +404,7 @@ fn enforcement_terminates_the_correlated_worker_and_spares_the_sibling() {
 
     // Scan 2: grace has elapsed — terminate the worker tree.
     let after = now + chrono::Duration::seconds(2);
-    let snapshot = SystemPlatform.capture().expect("capture");
+    let (snapshot, _) = observe(worker_pid);
     let second_sessions = local_scan(
         &mut watch,
         &cfg,
@@ -443,7 +475,7 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
     let mut worker = Worker::spawn(&cwd, &worker_marker);
     let worker_pid = worker.pid();
 
-    let (_, worker_process) = observe(worker_pid);
+    let (snapshot, worker_process) = observe(worker_pid);
     let session_cwd = worker_process.cwd.expect("worker cwd");
 
     let state = TempDir::new().expect("state dir");
@@ -456,7 +488,6 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
 
     let now = Utc::now();
     // Scan 1: grace.
-    let snapshot = SystemPlatform.capture().expect("capture");
     let first_sessions = local_scan(
         &mut watch,
         &cfg,
@@ -479,7 +510,7 @@ fn terminated_session_is_not_rekilled_on_the_next_scan() {
 
     // Scan 2: terminate.
     let killed_at = now + chrono::Duration::seconds(1);
-    let snapshot = SystemPlatform.capture().expect("capture");
+    let (snapshot, _) = observe(worker_pid);
     let second_sessions = local_scan(
         &mut watch,
         &cfg,
