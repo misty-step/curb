@@ -86,8 +86,7 @@ pub(crate) fn lookback_start(cfg: &Config, now: DateTime<Utc>) -> DateTime<Utc> 
 }
 
 fn append_usage_scan_failed(cfg: &Config, error: &RuntimeError) -> Result<(), RuntimeError> {
-    let mut event =
-        Event::new(LedgerEvent::UsageScanFailed.as_str()).with_message(error.to_string());
+    let mut event = Event::new(LedgerEvent::UsageScanFailed).with_message(error.to_string());
     event.mode = Some(cfg.mode.to_string());
     Ledger::open(&cfg.ledger.path)?.append(event)?;
     Ok(())

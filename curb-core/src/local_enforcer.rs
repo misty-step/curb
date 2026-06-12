@@ -127,7 +127,7 @@ impl<P: Platform> Enforcer for LocalEnforcer<'_, P> {
             && let Ok(ledger) = Ledger::open(&self.cfg.ledger.path)
         {
             let _ = ledger.append(
-                ledger::Event::new(LedgerEvent::NotificationFailed.as_str())
+                ledger::Event::new(LedgerEvent::NotificationFailed)
                     .with_message(error.to_string())
                     .with_mode(self.cfg.mode.to_string()),
             );

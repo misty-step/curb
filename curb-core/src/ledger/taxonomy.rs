@@ -37,6 +37,7 @@ pub enum LedgerEvent {
     UsageScanFailed,
     ScanFailed,
     NotificationFailed,
+    Doctor,
     ManualStopStarted,
     ManualStopCompleted,
 }
@@ -86,6 +87,7 @@ impl LedgerEvent {
             "usage_scan_failed" => Self::UsageScanFailed,
             "scan_failed" => Self::ScanFailed,
             "notification_failed" => Self::NotificationFailed,
+            "doctor" => Self::Doctor,
             "manual_stop_started" => Self::ManualStopStarted,
             "manual_stop_completed" => Self::ManualStopCompleted,
             _ => return None,
@@ -118,6 +120,7 @@ impl LedgerEvent {
             Self::UsageScanFailed => "usage_scan_failed",
             Self::ScanFailed => "scan_failed",
             Self::NotificationFailed => "notification_failed",
+            Self::Doctor => "doctor",
             Self::ManualStopStarted => "manual_stop_started",
             Self::ManualStopCompleted => "manual_stop_completed",
         }
@@ -144,6 +147,7 @@ impl LedgerEvent {
             Self::UsageTerminationFailed | Self::TerminationFailed => ("termination", "failed"),
             Self::ScanFailed | Self::UsageScanFailed => ("error", "scan_failed"),
             Self::NotificationFailed => ("error", "notification_failed"),
+            Self::Doctor => ("service", "doctor"),
             Self::ManualStopStarted | Self::ManualStopCompleted => ("other", "recorded"),
         };
         ViewClass { category, kind }
@@ -270,6 +274,7 @@ mod tests {
             "usage_scan_failed",
             "scan_failed",
             "notification_failed",
+            "doctor",
             "manual_stop_started",
             "manual_stop_completed",
         ];

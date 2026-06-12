@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
 use curb_core::config::{Config, HumanDuration, Mode, Preset};
-use curb_core::ledger::{Event, Ledger};
+use curb_core::ledger::{Event, Ledger, LedgerEvent};
 use curb_core::platform::SystemPlatform;
 use curb_core::platform::{NotificationCapability, PlatformError};
 use curb_core::runtime::Runtime;
@@ -318,7 +318,7 @@ pub fn doctor_with_platform(
 
     let ledger = Ledger::open(&cfg.ledger.path)?;
     ledger.append(
-        Event::new("doctor")
+        Event::new(LedgerEvent::Doctor)
             .with_message("ledger write check")
             .with_mode(cfg.mode.to_string()),
     )?;
