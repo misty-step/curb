@@ -1,7 +1,7 @@
 # Build the operator recovery cockpit
 
 Priority: P1
-Status: pending
+Status: done
 Estimate: L
 
 ## Goal
@@ -10,18 +10,18 @@ process-correlation failures recoverable from the product surface without log
 spelunking.
 
 ## Oracle
-- [ ] Define the operator recovery states from existing `/v1/onboarding`,
+- [x] Define the operator recovery states from existing `/v1/onboarding`,
       `/v1/ready`, `/v1/health`, `/v1/overview`, notification health, and
       source-health data before adding UI.
-- [ ] The app shows a single actionable recovery surface for missing
+- [x] The app shows a single actionable recovery surface for missing
       config/state, API/auth mismatch, unavailable notifications, provider
       source errors, degraded readiness, and no correlated worker.
-- [ ] Each recovery item names the exact command, config path, state path, or
+- [x] Each recovery item names the exact command, config path, state path, or
       runbook section needed to fix it, without exposing tokens or private
       provider content.
-- [ ] Rust contract fixtures and UI tests cover the recovery states through
+- [x] Rust contract fixtures and UI tests cover the recovery states through
       public API payloads, not ad hoc component branches.
-- [ ] A deterministic browser smoke captures desktop and narrow recovery screens
+- [x] A deterministic browser smoke captures desktop and narrow recovery screens
       with no overflow and no generic `Failed to fetch` dead ends.
 
 ## Children

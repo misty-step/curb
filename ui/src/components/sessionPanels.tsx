@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { relativeTime, tokens } from "../format";
-import type { ReadinessModel, SelectedSessionExplanation } from "../readModel";
+import type { ReadinessModel, RecoveryModel, SelectedSessionExplanation } from "../readModel";
 
 export function SelectedSessionPanel({ detail }: { detail: SelectedSessionExplanation }): ReactNode {
   return (
@@ -79,6 +79,55 @@ export function ReadinessPanel({ model }: { model: ReadinessModel }): ReactNode 
           ))}
         </div>
       </details>
+    </section>
+  );
+}
+
+export function RecoveryPanel({ model }: { model: RecoveryModel }): ReactNode {
+  if (!model.attention) return null;
+  return (
+    <section className="recovery">
+      <div className="recovery-head">
+        <div>
+          <span>Recovery</span>
+          <strong>{model.summary}</strong>
+          <p>{model.nextStep}</p>
+        </div>
+      </div>
+      <div className="recovery-list">
+        {model.items.map((item) => (
+          <article className="recovery-item" key={item.id}>
+            <div className="recovery-copy">
+              <div className="recovery-title">
+                <strong>{item.label}</strong>
+                <em>{item.status}</em>
+              </div>
+              <p>{item.message}</p>
+              <p>{item.action}</p>
+            </div>
+            <div className="recovery-facts">
+              {item.command ? (
+                <span>
+                  <b>Command</b>
+                  <code>{item.command}</code>
+                </span>
+              ) : null}
+              {item.path ? (
+                <span>
+                  <b>Path</b>
+                  <code>{item.path}</code>
+                </span>
+              ) : null}
+              {item.runbook ? (
+                <span>
+                  <b>Runbook</b>
+                  <code>{item.runbook}</code>
+                </span>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

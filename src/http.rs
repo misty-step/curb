@@ -398,6 +398,7 @@ mod tests {
                 app: "curb".to_string(),
                 api_version: 1,
                 checks: Vec::new(),
+                recovery: Vec::new(),
             })
         }
 
@@ -510,6 +511,7 @@ mod tests {
             sources: Vec::new(),
             final_sentence: "Curb will record local agent activity.".to_string(),
             steps: Vec::new(),
+            recovery: Vec::new(),
         }
     }
 

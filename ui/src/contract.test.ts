@@ -8,7 +8,7 @@ import readyFixture from "../../contracts/api/ready.json";
 import sessionFixture from "../../contracts/api/session.json";
 import snapshotFixture from "../../contracts/api/snapshot.json";
 import turnsFixture from "../../contracts/api/turns.json";
-import { selectDashboard, selectReadiness, selectSessionExplanation } from "./readModel";
+import { selectDashboard, selectReadiness, selectRecovery, selectSessionExplanation } from "./readModel";
 import type {
   ConfigView,
   LiveView,
@@ -46,6 +46,10 @@ describe("shared API contract fixtures", () => {
     });
     expect(config.mode).toBe("alert");
     expect(onboarding.capabilities.process_capture.status).toBe("ready");
+    expect(onboarding.recovery[0]).toMatchObject({
+      id: "setup",
+      command: "curb init --config /tmp/curb/config.yaml",
+    });
     expect(live).toEqual({ status: "live", app: "curb", api_version: 1 });
     expect(ready.checks.map((check) => check.name)).toEqual([
       "config",
@@ -82,5 +86,8 @@ describe("shared API contract fixtures", () => {
     );
     expect(readiness.summary).toBe("Using safe defaults");
     expect(readiness.items.some((item) => item.label === "Setup")).toBe(true);
+
+    const recovery = selectRecovery(onboarding, readyFixture as ReadinessView);
+    expect(recovery.items.map((item) => item.id)).toEqual(["setup"]);
   });
 });

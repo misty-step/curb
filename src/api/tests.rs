@@ -1068,6 +1068,20 @@ fn onboarding_view(required: bool) -> OnboardingView {
         sources: snapshot().overview.sources,
         final_sentence: "Curb will notify on high-token turns.".to_string(),
         steps: Vec::new(),
+        recovery: vec![curb_core::service::RecoveryItemView {
+            id: "setup".to_string(),
+            label: "First-run setup".to_string(),
+            status: "required".to_string(),
+            message:
+                "Curb is using safe defaults until setup is confirmed at /tmp/curb/config.yaml."
+                    .to_string(),
+            action:
+                "Run `curb init --config /tmp/curb/config.yaml` and inspect /tmp/curb/config.yaml."
+                    .to_string(),
+            command: Some("curb init --config /tmp/curb/config.yaml".to_string()),
+            path: Some("/tmp/curb/config.yaml".to_string()),
+            runbook: Some("docs/user-guide.md#recovery-surface".to_string()),
+        }],
     }
 }
 
@@ -1110,6 +1124,7 @@ fn readiness_view() -> ReadinessView {
             reason: None,
         })
         .collect(),
+        recovery: Vec::new(),
     }
 }
 

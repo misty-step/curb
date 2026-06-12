@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchOnboarding, fetchSession, fetchSessionTurns, saveConfig } from "./api";
+import { fetchOnboarding, fetchReadiness, fetchSession, fetchSessionTurns, saveConfig } from "./api";
 
 describe("selected-session API client", () => {
   it("fetches selected session detail and rich turn breakdowns from service endpoints", async () => {
@@ -59,6 +59,36 @@ describe("readiness API client", () => {
     await expect(fetchOnboarding(settings())).resolves.toMatchObject({
       required: true,
       final_sentence: "Curb will notify on high-token turns.",
+    });
+  });
+
+  it("fetches daemon readiness recovery from the public ready endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(String(input)).toBe("http://curb.test/v1/ready");
+        return jsonResponse({
+          status: "degraded",
+          app: "curb",
+          api_version: 1,
+          checks: [{ name: "watcher_runtime", status: "error", reason: "cache busy" }],
+          recovery: [
+            {
+              id: "readiness-watcher_runtime",
+              label: "Watcher runtime",
+              status: "error",
+              message: "The daemon snapshot cache is not ready: cache busy",
+              action: "Run `curb watch --once`.",
+              command: "curb watch --once",
+            },
+          ],
+        });
+      }),
+    );
+
+    await expect(fetchReadiness(settings())).resolves.toMatchObject({
+      status: "degraded",
+      recovery: [{ id: "readiness-watcher_runtime", command: "curb watch --once" }],
     });
   });
 });

@@ -5,6 +5,7 @@ import type {
   ConfigView,
   NotificationView,
   OnboardingView,
+  ReadinessView,
   SessionView,
   Snapshot,
   StopExpectedIdentity,
@@ -81,9 +82,34 @@ export async function fetchOnboarding(settings: ApiSettings): Promise<Onboarding
       sources: demoSnapshot.overview.sources,
       final_sentence: "Curb will notify on high-token turns.",
       steps: [],
+      recovery: [
+        {
+          id: "setup",
+          label: "First-run setup",
+          status: "required",
+          message: `Curb is using safe defaults until setup is confirmed at ${demoConfig.path}.`,
+          action: `Run \`curb init --config ${demoConfig.path}\` and inspect ${demoConfig.path}.`,
+          command: `curb init --config ${demoConfig.path}`,
+          path: demoConfig.path,
+          runbook: "docs/user-guide.md#recovery-surface",
+        },
+      ],
     };
   }
   return getJSON(settings, "/v1/onboarding") as Promise<OnboardingView>;
+}
+
+export async function fetchReadiness(settings: ApiSettings): Promise<ReadinessView> {
+  if (!settings.baseUrl) {
+    return {
+      status: "ready",
+      app: "curb",
+      api_version: 1,
+      checks: [],
+      recovery: [],
+    };
+  }
+  return getJSON(settings, "/v1/ready") as Promise<ReadinessView>;
 }
 
 export async function testNotification(settings: ApiSettings): Promise<NotificationView> {

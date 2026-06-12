@@ -39,5 +39,17 @@
   },
   "sources": [],
   "final_sentence": "Curb will notify on high-token turns.",
-  "steps": []
+  "steps": [],
+  "recovery": [
+    {
+      "id": "setup",
+      "label": "First-run setup",
+      "status": "required",
+      "message": "Curb is using safe defaults until setup is confirmed at /tmp/curb/config.yaml.",
+      "action": "Run `curb init --config /tmp/curb/config.yaml` and inspect /tmp/curb/config.yaml.",
+      "command": "curb init --config /tmp/curb/config.yaml",
+      "path": "/tmp/curb/config.yaml",
+      "runbook": "docs/user-guide.md#recovery-surface"
+    }
+  ]
 }

@@ -3,6 +3,8 @@ import type {
   NotificationView,
   OnboardingView,
   PlatformCapabilities,
+  ReadinessView,
+  RecoveryItemView,
   SessionView,
   Snapshot,
   TurnView,
@@ -67,6 +69,24 @@ export interface ReadinessModel {
   primary: ReadinessItem;
   details: ReadinessItem[];
   items: ReadinessItem[];
+}
+
+export interface RecoveryItem {
+  id: string;
+  label: string;
+  status: string;
+  message: string;
+  action: string;
+  command?: string;
+  path?: string;
+  runbook?: string;
+}
+
+export interface RecoveryModel {
+  attention: boolean;
+  summary: string;
+  nextStep: string;
+  items: RecoveryItem[];
 }
 
 const ALERT_RANK: Record<string, number> = { kill: 0, warn: 1, ok: 2 };
@@ -197,6 +217,26 @@ export function selectReadiness(
   };
 }
 
+export function selectRecovery(
+  onboarding: OnboardingView | undefined,
+  readiness: ReadinessView | undefined,
+  connectionError = "",
+  configPath?: string,
+): RecoveryModel {
+  const items = dedupeRecovery([
+    ...connectionRecovery(connectionError, configPath ?? onboarding?.config_path),
+    ...(onboarding?.recovery ?? []),
+    ...(readiness?.recovery ?? []),
+  ]);
+  const attention = items.length > 0;
+  return {
+    attention,
+    summary: attention ? `${items.length} recovery ${items.length === 1 ? "item" : "items"}` : "No recovery needed",
+    nextStep: items[0]?.action ?? "Curb has no operator recovery items.",
+    items,
+  };
+}
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
@@ -270,4 +310,48 @@ function setupSummary(status: string): string {
   if (status === "unknown") return "Setup status unavailable";
   if (status === "required") return "Using safe defaults";
   return "Setup needs attention";
+}
+
+function dedupeRecovery(items: RecoveryItemView[]): RecoveryItem[] {
+  const seen = new Set<string>();
+  const deduped: RecoveryItem[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+function connectionRecovery(error: string, configPath: string | undefined): RecoveryItemView[] {
+  if (!error) return [];
+  const hasConfigPath = Boolean(configPath && configPath !== "demo");
+  const command = hasConfigPath ? `curb serve --config ${configPath}` : "curb app";
+  const tokenPath = hasConfigPath ? `${parentPath(configPath!)}/api.token` : "<state_dir>/api.token";
+  const authFailure = /^40[13]\b/.test(error);
+  const devServer = error.includes("<!doctype") || error.includes("not valid JSON");
+  const message = authFailure
+    ? "The dashboard reached the Curb API, but the browser session is not authenticated for protected routes."
+    : devServer
+      ? "The dashboard reached the frontend dev server instead of the Curb API."
+      : "The dashboard could not reach the local Curb API.";
+  return [
+    {
+      id: "api-connection",
+      label: authFailure ? "API authentication" : "API connection",
+      status: authFailure ? "auth required" : "unavailable",
+      message,
+      action: `Run \`${command}\` from the same config and inspect ${tokenPath}.`,
+      command,
+      path: tokenPath,
+      runbook: "docs/user-guide.md#local-ui-api",
+    },
+  ];
+}
+
+function parentPath(path: string): string {
+  const normalized = path.replace(/\/+$/, "");
+  const index = normalized.lastIndexOf("/");
+  if (index <= 0) return ".curb";
+  return normalized.slice(0, index);
 }

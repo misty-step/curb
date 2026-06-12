@@ -1,0 +1,193 @@
+// @vitest-environment jsdom
+
+import React from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { demoConfig, demoSnapshot } from "./demo";
+import type { ReadinessView, Snapshot } from "./types";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root | undefined;
+
+beforeEach(() => {
+  vi.resetModules();
+  document.body.innerHTML = '<div id="root"></div>';
+});
+
+afterEach(() => {
+  root?.unmount();
+  root = undefined;
+  vi.restoreAllMocks();
+});
+
+describe("operator recovery", () => {
+  it("shows actionable recovery without leaking raw provider source errors", async () => {
+    installRecoveryFetch();
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const page = document.body.textContent ?? "";
+    expect(page).toContain("Recovery");
+    expect(page).toContain("codex source");
+    expect(page).toContain("Process correlation");
+    expect(page).toContain("Watcher runtime");
+    expect(page).toContain("curb usage --since 24h");
+    expect(page).toContain("curb scan --json --config /tmp/curb/config.yaml");
+    expect(page).toContain("curb watch --once");
+    expect(page).not.toContain("/Users/phaedrus/.codex/private");
+    expect(page).not.toContain("prompt payload");
+    expect(page).not.toContain("Failed to fetch");
+  });
+
+  it("routes API connection failures through the recovery panel", async () => {
+    installConnectionFailureFetch();
+    const { App } = await import("./App");
+    root = createRoot(document.getElementById("root")!);
+    await actRender(<App />);
+
+    const page = document.body.textContent ?? "";
+    expect(page).toContain("Recovery");
+    expect(page).toContain("API connection");
+    expect(page).toContain("curb app");
+    expect(page).toContain("<state_dir>/api.token");
+    expect(page).toContain("docs/user-guide.md#local-ui-api");
+    expect(page).not.toContain("Failed to fetch");
+  });
+});
+
+function installRecoveryFetch() {
+  const snapshot = recoverySnapshot();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/v1/snapshot") || url.includes("/v1/service/rescan")) return jsonResponse(snapshot);
+      if (url.includes("/v1/config")) return jsonResponse(demoConfig);
+      if (url.includes("/v1/ready")) return jsonResponse(readinessFixture());
+      if (url.includes("/v1/onboarding")) return jsonResponse(onboardingFixture(snapshot));
+      if (url.includes("/v1/notifications")) {
+        return jsonResponse({ enabled: true, available: true, status: "ready", message: "ready" });
+      }
+      if (url.includes("/v1/sessions/")) return jsonResponse(snapshot.sessions[0]);
+      return new Response("not found", { status: 404 });
+    }),
+  );
+}
+
+function installConnectionFailureFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/v1/ready")) return jsonResponse(readinessFixture());
+      if (url.includes("/v1/snapshot")) throw new TypeError("Failed to fetch");
+      return new Response("not reached", { status: 500 });
+    }),
+  );
+}
+
+function recoverySnapshot(): Snapshot {
+  return {
+    ...demoSnapshot,
+    overview: {
+      ...demoSnapshot.overview,
+      sources: [
+        {
+          provider: "codex",
+          files: 1,
+          events: 0,
+          error: "/Users/phaedrus/.codex/private/transcript.json: permission denied prompt payload",
+        },
+      ],
+    },
+    sessions: [
+      {
+        ...demoSnapshot.sessions[0],
+        alert: "kill",
+        can_stop: false,
+        pid: undefined,
+        process_started_at: undefined,
+        explanation: "Over your kill line, but no live process matched to stop.",
+      },
+    ],
+  };
+}
+
+function onboardingFixture(snapshot: Snapshot) {
+  return {
+    required: true,
+    config_path: "/tmp/curb/config.yaml",
+    mode: "alert",
+    action: "notify only; never kill",
+    mode_can_terminate: false,
+    detected_providers: ["codex"],
+    detected_workers: ["Codex Worker"],
+    enforceable_agent_types: 1,
+    watch_only_agent_types: 1,
+    notifications: { enabled: true, available: true, status: "ready", message: "notifications ready" },
+    capabilities: snapshot.overview.capabilities,
+    sources: snapshot.overview.sources,
+    final_sentence: "Curb will notify on high-token turns.",
+    steps: [],
+    recovery: [
+      {
+        id: "source-codex",
+        label: "codex source",
+        status: "error",
+        message: "codex usage metadata could not be read. Raw provider paths and payloads are not shown in recovery.",
+        action: "Run `curb usage --since 24h`.",
+        command: "curb usage --since 24h",
+        runbook: "docs/user-guide.md#recovery-surface",
+      },
+      {
+        id: "process-correlation",
+        label: "Process correlation",
+        status: "uncorrelated",
+        message: "One or more over-limit sessions do not have a sealed live worker identity, so stop is disabled.",
+        action: "Run `curb scan --json --config /tmp/curb/config.yaml` and inspect /tmp/curb/config.yaml.",
+        command: "curb scan --json --config /tmp/curb/config.yaml",
+        path: "/tmp/curb/config.yaml",
+        runbook: "docs/user-guide.md#recovery-surface",
+      },
+    ],
+  };
+}
+
+function readinessFixture(): ReadinessView {
+  return {
+    status: "degraded",
+    app: "curb",
+    api_version: 1,
+    checks: [{ name: "watcher_runtime", status: "error", reason: "cache busy" }],
+    recovery: [
+      {
+        id: "readiness-watcher_runtime",
+        label: "Watcher runtime",
+        status: "error",
+        message: "The daemon snapshot cache is not ready: cache busy",
+        action: "Run `curb watch --once` and inspect /tmp/curb/state.",
+        command: "curb watch --once",
+        path: "/tmp/curb/state",
+        runbook: "docs/user-guide.md#recovery-surface",
+      },
+    ],
+  };
+}
+
+async function actRender(element: React.ReactElement) {
+  const { act } = await import("react");
+  await act(async () => {
+    root!.render(element);
+  });
+  for (let i = 0; i < 6; i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } });
+}

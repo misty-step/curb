@@ -76,6 +76,7 @@ pub struct ReadinessView {
     pub app: String,
     pub api_version: u8,
     pub checks: Vec<ReadinessCheckView>,
+    pub recovery: Vec<RecoveryItemView>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -84,6 +85,21 @@ pub struct ReadinessCheckView {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RecoveryItemView {
+    pub id: String,
+    pub label: String,
+    pub status: String,
+    pub message: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runbook: Option<String>,
 }
 
 /// Machine-wide rollup. `status` is the single colour of the dashboard and is
