@@ -3,6 +3,10 @@
 Date: 2026-06-04
 Branch: `agent-readiness-closeout`
 
+Historical note, 2026-06-12: this is the June 4 readiness tranche review map,
+not current release status. Current release proof and artifact disposition live
+in `docs/release-evidence.md`.
+
 This map classifies the readiness tranche for review and hosted proof. It is
 not a merge claim; the branch is pushed as a draft PR with hosted CI evidence,
 but still needs human review/merge ownership.

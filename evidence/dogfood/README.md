@@ -19,6 +19,8 @@ Each run should record:
 
 Dogfood evidence is the acceptance source for future post-closeout backlog
 ranking. Do not open speculative feature tranches when the evidence is missing.
+Use `../../docs/release-evidence.md` to identify the canonical current packets
+before scanning every historical run directory.
 
 Start each run from `evidence/dogfood/TEMPLATE.md`, keep command output
 summaries short, and link to larger logs only when needed.
