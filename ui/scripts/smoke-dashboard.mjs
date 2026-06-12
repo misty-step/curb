@@ -184,7 +184,9 @@ async function payloadFor(pathname) {
 
 async function expectVisibleText(page, text, viewportName) {
   const locator = page.getByText(text, { exact: false }).first();
-  if (!(await locator.isVisible().catch(() => false))) {
+  try {
+    await locator.waitFor({ state: "visible", timeout: 5000 });
+  } catch {
     failures.push(`${viewportName}: missing visible text ${JSON.stringify(text)}`);
   }
 }

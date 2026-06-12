@@ -38,3 +38,10 @@ auth, config, or identity state drifts.
 
 Do not let the React app infer platform or process policy. Service-owned
 recovery states must carry the explanation.
+
+Long sidecar dogfood in
+`evidence/dogfood/2026-06-12-long-sidecar/` sharpened this ticket: recovery
+must surface provider source-health failures such as oversized Claude JSONL
+lines and repeated Claude/Codex session read failures, plus degraded readiness
+when `watcher_runtime` reports `cache busy`, without requiring the operator to
+read NDJSON logs.

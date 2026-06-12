@@ -1,0 +1,15 @@
+duration_seconds=7200
+events=3168
+usage_scan=1
+watcher_tick=1506
+expected_watcher_tick_min=1200
+source_error_total=22
+source_health_error_events=1548
+ready_statuses={'degraded': 7, 'ready': 18}
+ready_status_codes={'200': 18, '503': 7}
+snapshots=25
+max_policy_duration_ms=19961
+max_probe_latency_seconds=1.269932
+rss_kb_min=48144
+rss_kb_max=135020
+max_cpu_percent=94.4

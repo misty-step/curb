@@ -1,0 +1,1 @@
+{"status":"ready","app":"curb","api_version":1,"checks":[{"name":"config","status":"ok"},{"name":"ledger","status":"ok"},{"name":"usage_reader","status":"ok"},{"name":"platform_capabilities","status":"ok"},{"name":"notifications","status":"ok"},{"name":"watcher_runtime","status":"ok"}]}

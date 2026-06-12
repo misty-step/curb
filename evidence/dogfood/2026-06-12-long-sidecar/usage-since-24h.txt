@@ -1,0 +1,2 @@
+exit_status=1
+curb: usage scan: usage scan: usage line exceeds 1048576 bytes: /Users/phaedrus/.claude/projects/-Users-phaedrus-Development-web-presence/3981f428-e4c4-4074-b881-14b09f57eb5f.jsonl
