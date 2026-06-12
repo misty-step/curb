@@ -1,0 +1,1 @@
+ok config=evidence/dogfood/2026-06-12-live-dashboard-qa/config.yaml mode=enforcement agents=1 ledger=evidence/dogfood/2026-06-12-live-dashboard-qa/ledger.ndjson

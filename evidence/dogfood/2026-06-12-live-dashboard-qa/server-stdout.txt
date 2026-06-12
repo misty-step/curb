@@ -1,0 +1,5 @@
+curb rust app
+  listening: http://127.0.0.1:62716/
+  token: /private/var/folders/jr/0kj0xfdd4s1ggs921sr2d7f80000gn/T/curb-live-dashboard-qa.TFOZ92/state/api.token
+  auth: Authorization: Bearer $(cat token-file)
+  watcher: usage policy scans run in this process

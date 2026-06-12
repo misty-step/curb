@@ -31,6 +31,20 @@ For repeatable timed observability evidence, prefer the repo script:
 CURB_DOGFOOD_SECONDS=60 bash scripts/dogfood-headless-observability.sh
 ```
 
+For browser-backed live UI evidence, use the advisory QA script:
+
+```sh
+bash scripts/qa-live-dashboard.sh evidence/dogfood/$(date +%F)-live-dashboard-qa
+```
+
+This starts a real `curb serve` endpoint with scratch state and synthetic
+metadata-only Codex usage, then drives the served dashboard with Playwright. It
+captures desktop and narrow screenshots, browser console errors, viewport
+overflow checks, ack, settings save/revert, notification test, stale stop
+rejection, confirmed synthetic stop, and API failure recovery. Keep it advisory
+until repeated runs show it is stable enough for `scripts/check-fast.sh` or
+`scripts/validate.sh`.
+
 For a stronger local sidecar proof, run a longer window into a unique evidence
 directory:
 

@@ -1,0 +1,18 @@
+[
+  {
+    "viewport": "desktop",
+    "text": "Failed to load resource: the server responded with a status of 503 (OK)"
+  },
+  {
+    "viewport": "desktop",
+    "text": "Failed to load resource: the server responded with a status of 409 (Conflict)"
+  },
+  {
+    "viewport": "desktop",
+    "text": "Failed to load resource: the server responded with a status of 409 (Conflict)"
+  },
+  {
+    "viewport": "desktop",
+    "text": "Failed to load resource: net::ERR_FAILED"
+  }
+]
