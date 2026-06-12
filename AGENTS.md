@@ -13,6 +13,7 @@ Curb-specific.
 - Product: local AI-agent visibility and watchdog tool.
 - Backend: Rust.
 - Frontend: React/Vite, embedded into the Rust binary from `web/dist`.
+- Product doctrine: `docs/product-principles.md`.
 - Primary docs: `README.md`, `SPEC.md`, `docs/contributor-guide.md`,
   `docs/user-guide.md`, `docs/application-design.md`.
 

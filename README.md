@@ -41,6 +41,7 @@ many tool calls do not re-count the context the model re-reads each call.
 
 The implementation is active. The most useful entry points are:
 
+- [docs/product-principles.md](docs/product-principles.md) - product philosophy, vision, and engineering principles.
 - [docs/user-guide.md](docs/user-guide.md) - user operating guide.
 - [docs/contributor-guide.md](docs/contributor-guide.md) - contributor architecture and verification guide.
 - [docs/application-design.md](docs/application-design.md) - canonical dashboard architecture and UI design.
