@@ -34,6 +34,17 @@ export interface OnboardingStepView {
   message: string;
 }
 
+export interface RecoveryItemView {
+  id: string;
+  label: string;
+  status: string;
+  message: string;
+  action: string;
+  command?: string;
+  path?: string;
+  runbook?: string;
+}
+
 export interface OnboardingView {
   required: boolean;
   config_path?: string;
@@ -49,6 +60,7 @@ export interface OnboardingView {
   sources: SourceHealth[];
   final_sentence: string;
   steps: OnboardingStepView[];
+  recovery: RecoveryItemView[];
 }
 
 export interface OverviewDelta {
@@ -201,6 +213,7 @@ export interface ReadinessView {
   app: string;
   api_version: number;
   checks: ReadinessCheckView[];
+  recovery: RecoveryItemView[];
 }
 
 export interface AckView {

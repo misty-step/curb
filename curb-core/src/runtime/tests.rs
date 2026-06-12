@@ -428,6 +428,13 @@ fn onboarding_projects_first_run_state_and_completion_marker() {
     assert!(view.steps.iter().any(|step| {
         step.id == "sources" && step.status == "done" && step.message.contains("usage event")
     }));
+    assert!(view.recovery.iter().any(|item| {
+        item.id == "setup"
+            && item
+                .command
+                .as_deref()
+                .is_some_and(|command| command.contains(config_path.to_str().unwrap()))
+    }));
 
     let completed = runtime.complete_onboarding(now).unwrap();
 
@@ -701,6 +708,11 @@ fn readiness_reports_busy_runtime_without_blocking_on_cache() {
         .unwrap();
     assert_eq!(watcher.status, "error");
     assert_eq!(watcher.reason.as_deref(), Some("cache busy"));
+    assert!(view.recovery.iter().any(|item| {
+        item.id == "readiness-watcher_runtime"
+            && item.message.contains("cache busy")
+            && item.command.as_deref() == Some("curb watch --once")
+    }));
 }
 
 #[test]
@@ -720,11 +732,18 @@ fn readiness_reports_degraded_until_initial_snapshot_exists() {
         .find(|check| check.name == "watcher_runtime")
         .unwrap();
     assert_eq!(watcher.reason.as_deref(), Some("snapshot unavailable"));
+    assert!(
+        before
+            .recovery
+            .iter()
+            .any(|item| item.label == "Watcher runtime" && item.path.is_some())
+    );
 
     runtime.rescan(Utc::now()).unwrap();
 
     let after = runtime.readiness();
     assert_eq!(after.status, "ready");
+    assert!(after.recovery.is_empty());
 }
 
 #[test]

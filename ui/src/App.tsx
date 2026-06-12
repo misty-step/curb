@@ -5,6 +5,7 @@ import {
   fetchConfig,
   fetchNotificationHealth,
   fetchOnboarding,
+  fetchReadiness,
   fetchSession,
   fetchSessionTurns,
   fetchSnapshot,
@@ -15,11 +16,11 @@ import {
   type ApiSettings,
 } from "./api";
 import { AgentList, ConnectionBanner, ConnectionNote, Settings, StatusPill } from "./components/dashboard";
-import { ReadinessPanel } from "./components/sessionPanels";
+import { ReadinessPanel, RecoveryPanel } from "./components/sessionPanels";
 import { demoConfig, demoNotifications, demoSnapshot } from "./demo";
 import { commas } from "./format";
-import { selectDashboard, selectReadiness, selectSessionExplanation } from "./readModel";
-import { modeFromConfig, type ConfigUpdate, type ConfigView, type NotificationView, type OnboardingView, type SessionView, type Snapshot, type TurnView } from "./types";
+import { selectDashboard, selectReadiness, selectRecovery, selectSessionExplanation } from "./readModel";
+import { modeFromConfig, type ConfigUpdate, type ConfigView, type NotificationView, type OnboardingView, type ReadinessView, type SessionView, type Snapshot, type TurnView } from "./types";
 
 // curb app serves the dashboard same-origin and authenticates with an HttpOnly
 // cookie, so there is no URL or token to enter — we just talk to our own origin.
@@ -32,6 +33,7 @@ export function App() {
   const [config, setConfig] = useState<ConfigView>(demoConfig);
   const [notifications, setNotifications] = useState<NotificationView>(demoNotifications);
   const [onboarding, setOnboarding] = useState<OnboardingView>();
+  const [readinessView, setReadinessView] = useState<ReadinessView>();
   const [connection, setConnection] = useState<"demo" | "live" | "error">(SAME_ORIGIN ? "live" : "demo");
   const [error, setError] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
@@ -42,6 +44,7 @@ export function App() {
   const [busyMsg, setBusyMsg] = useState("");
 
   const refresh = useCallback(async (forceRescan = false) => {
+    const nextReadiness = await fetchReadiness(SETTINGS).catch<ReadinessView | undefined>(() => undefined);
     try {
       const data = forceRescan ? await rescanService(SETTINGS) : await fetchSnapshot(SETTINGS);
       const [nextConfig, nextNotifications] = await Promise.all([
@@ -58,9 +61,11 @@ export function App() {
       setConfig(nextConfig);
       setNotifications(nextNotifications);
       setOnboarding(nextOnboarding);
+      setReadinessView(nextReadiness);
       setConnection(SAME_ORIGIN ? "live" : "demo");
       setError("");
     } catch (caught) {
+      setReadinessView(nextReadiness);
       setConnection("error");
       setError(caught instanceof Error ? caught.message : "Unable to reach the Curb daemon");
     }
@@ -80,6 +85,10 @@ export function App() {
   const readiness = useMemo(
     () => selectReadiness(onboarding, notifications, snapshot.overview.capabilities),
     [onboarding, notifications, snapshot.overview.capabilities],
+  );
+  const recovery = useMemo(
+    () => selectRecovery(onboarding, readinessView, connection === "error" ? error : "", config.path ?? onboarding?.config_path),
+    [onboarding, readinessView, connection, error, config.path],
   );
 
   useEffect(() => {
@@ -168,6 +177,8 @@ export function App() {
       ? "Showing demo data until the local API responds."
       : readiness.attention
         ? readiness.nextStep
+        : recovery.attention
+          ? recovery.nextStep
         : mode === "enforce"
           ? "Stop runaways is armed for correlated worker processes."
           : "Warn only is armed; Curb will not stop processes.";
@@ -212,6 +223,8 @@ export function App() {
         busyMessage={busyMsg}
         selectedDetail={selectedDetail}
       />
+
+      <RecoveryPanel model={recovery} />
 
       <ReadinessPanel model={readiness} />
 

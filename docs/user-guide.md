@@ -211,6 +211,20 @@ curb ack codex:session-id --config configs/curb.example.yaml --extend 30m --reas
 curb doctor --config configs/curb.example.yaml
 ```
 
+## Recovery Surface
+
+The local dashboard has one Recovery section for operator-actionable setup and
+runtime problems. The service builds those recovery items from `/v1/onboarding`,
+`/v1/ready`, notification health, provider source health, and process
+correlation; the UI only renders the service-owned labels, explanations,
+commands, paths, and runbook links.
+
+Recovery items intentionally do not include raw provider payloads, prompt text,
+response text, screenshots, keystrokes, or private file contents. Source-health
+errors name the provider and the recovery command, then point you at
+`curb usage --since 24h` or `curb doctor --config <path>` for a local
+diagnostic loop.
+
 Usage enforcement uses session acknowledgements. Use the selected session's
 Extend button in the local UI to record a bounded acknowledgement; Curb will
 project the session as acknowledged and will not escalate that session again

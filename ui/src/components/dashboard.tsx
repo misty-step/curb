@@ -30,6 +30,12 @@ export function connectionMessage(error: string): string {
   if (error.includes("<!doctype") || error.includes("not valid JSON")) {
     return "The dashboard reached the dev server instead of the Curb API. Run curb app for live data.";
   }
+  if (error === "Failed to fetch" || error.includes("NetworkError")) {
+    return "The dashboard could not reach the local Curb API. Open the Recovery section for the daemon command and token path.";
+  }
+  if (/^40[13]\b/.test(error)) {
+    return "The dashboard reached the Curb API, but this browser session is not authenticated. Open the Recovery section for the token path.";
+  }
   return error;
 }
 

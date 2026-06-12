@@ -6,10 +6,11 @@ import {
   isActive,
   selectDashboard,
   selectReadiness,
+  selectRecovery,
   selectSessionExplanation,
   warnRatio,
 } from "./readModel";
-import type { NotificationView, OnboardingView, SessionView, TurnView } from "./types";
+import type { NotificationView, OnboardingView, ReadinessView, SessionView, TurnView } from "./types";
 
 function session(overrides: Partial<SessionView>): SessionView {
   return {
@@ -178,6 +179,70 @@ describe("selectReadiness", () => {
   });
 });
 
+describe("selectRecovery", () => {
+  it("renders service-owned recovery items from onboarding and readiness without duplicating them", () => {
+    const currentOnboarding = onboarding(true);
+    currentOnboarding.recovery = [
+      {
+        id: "source-codex",
+        label: "codex source",
+        status: "error",
+        message: "codex usage metadata could not be read. Raw provider paths and payloads are not shown in recovery.",
+        action: "Run `curb usage --since 24h`.",
+        command: "curb usage --since 24h",
+      },
+      {
+        id: "readiness-watcher_runtime",
+        label: "Watcher runtime",
+        status: "error",
+        message: "duplicate should lose",
+        action: "Run `curb watch --once`.",
+      },
+    ];
+    const currentReadiness: ReadinessView = {
+      status: "degraded",
+      app: "curb",
+      api_version: 1,
+      checks: [{ name: "watcher_runtime", status: "error", reason: "cache busy" }],
+      recovery: [
+        {
+          id: "readiness-watcher_runtime",
+          label: "Watcher runtime",
+          status: "error",
+          message: "The daemon snapshot cache is not ready: cache busy",
+          action: "Run `curb watch --once`.",
+          command: "curb watch --once",
+        },
+      ],
+    };
+
+    const model = selectRecovery(currentOnboarding, currentReadiness);
+
+    expect(model.attention).toBe(true);
+    expect(model.summary).toBe("2 recovery items");
+    expect(model.nextStep).toBe("Run `curb usage --since 24h`.");
+    expect(model.items.map((item) => item.id)).toEqual(["source-codex", "readiness-watcher_runtime"]);
+    expect(model.items[0].message).not.toContain("/Users/");
+  });
+
+  it("turns API failures into sanitized recovery actions", () => {
+    const model = selectRecovery(undefined, undefined, "Failed to fetch", "/tmp/curb/config.yaml");
+
+    expect(model.items).toEqual([
+      expect.objectContaining({
+        id: "api-connection",
+        label: "API connection",
+        message: "The dashboard could not reach the local Curb API.",
+        command: "curb serve --config /tmp/curb/config.yaml",
+        path: "/tmp/curb/api.token",
+        runbook: "docs/user-guide.md#local-ui-api",
+      }),
+    ]);
+    expect(model.nextStep).toBe("Run `curb serve --config /tmp/curb/config.yaml` from the same config and inspect /tmp/curb/api.token.");
+    expect(model.nextStep).not.toContain("Failed to fetch");
+  });
+});
+
 function turn(overrides: Partial<TurnView>): TurnView {
   return {
     id: "turn-1",
@@ -222,6 +287,7 @@ function onboarding(required: boolean): OnboardingView {
     sources: [],
     final_sentence: "Curb will notify on high-token turns.",
     steps: [],
+    recovery: [],
   };
 }
 

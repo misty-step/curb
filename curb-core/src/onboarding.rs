@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{Agent, Config, Mode};
 use crate::platform::{self, NotificationCapability, TerminationCapability};
-use crate::service::{AgentView, ConfigAgentView, ConfigView, Snapshot};
+use crate::service::{
+    AgentView, ConfigAgentView, ConfigView, RecoveryItemView, SessionView, Snapshot,
+};
 use crate::usage::SourceReport;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -62,6 +64,7 @@ pub struct OnboardingView {
     pub sources: Vec<SourceReport>,
     pub final_sentence: String,
     pub steps: Vec<OnboardingStepView>,
+    pub recovery: Vec<RecoveryItemView>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -143,6 +146,14 @@ pub fn onboarding_view(
         notification_step(&config.mode, &notifications),
         safety_step(&config),
     ];
+    let recovery = onboarding_recovery(
+        &config,
+        required,
+        &notifications,
+        &capabilities,
+        &snapshot.overview.sources,
+        &snapshot.sessions,
+    );
     OnboardingView {
         required,
         config_path: config.path.clone(),
@@ -158,6 +169,7 @@ pub fn onboarding_view(
         sources: snapshot.overview.sources,
         final_sentence: onboarding_final_sentence(&config.mode),
         steps,
+        recovery,
     }
 }
 
@@ -535,6 +547,127 @@ fn notification_step(mode: &str, notifications: &NotificationView) -> Onboarding
         "done",
         notifications.message.clone(),
     )
+}
+
+fn onboarding_recovery(
+    config: &ConfigView,
+    required: bool,
+    notifications: &NotificationView,
+    capabilities: &PlatformCapabilities,
+    sources: &[SourceReport],
+    sessions: &[SessionView],
+) -> Vec<RecoveryItemView> {
+    let config_path = config.path.clone();
+    let mut items = Vec::new();
+    if required {
+        items.push(recovery_item(
+            "setup",
+            "First-run setup",
+            "required",
+            match &config_path {
+                Some(path) => {
+                    format!("Curb is using safe defaults until setup is confirmed at {path}.")
+                }
+                None => "Curb is using safe defaults until setup is confirmed.".to_string(),
+            },
+            command_for_config("curb init", config_path.as_deref()),
+            config_path.clone(),
+        ));
+    }
+    if notifications.enabled && !notifications.available {
+        items.push(recovery_item(
+            "notifications",
+            "Notifications",
+            &notifications.status,
+            notifications.message.clone(),
+            command_for_config("curb doctor", config_path.as_deref()),
+            config_path.clone(),
+        ));
+    }
+    for capability in [
+        (
+            "process-capture",
+            "Process capture",
+            &capabilities.process_capture,
+        ),
+        (
+            "process-identity",
+            "Process identity",
+            &capabilities.process_identity,
+        ),
+        ("enforcement", "Enforcement", &capabilities.enforcement),
+    ] {
+        if !capability.2.available && capability.2.status != "disabled" {
+            items.push(recovery_item(
+                capability.0,
+                capability.1,
+                &capability.2.status,
+                capability.2.message.clone(),
+                command_for_config("curb doctor", config_path.as_deref()),
+                config_path.clone(),
+            ));
+        }
+    }
+    for source in sources.iter().filter(|source| source.error.is_some()) {
+        items.push(recovery_item(
+            &format!("source-{}", source.provider),
+            &format!("{} source", source.provider),
+            "error",
+            format!("{} usage metadata could not be read. Raw provider paths and payloads are not shown in recovery.", source.provider),
+            Some("curb usage --since 24h".to_string()),
+            None,
+        ));
+    }
+    if sessions
+        .iter()
+        .any(|session| session.alert != "ok" && session.pid.is_none())
+    {
+        items.push(recovery_item(
+            "process-correlation",
+            "Process correlation",
+            "uncorrelated",
+            "One or more over-limit sessions do not have a sealed live worker identity, so stop is disabled.".to_string(),
+            command_for_config("curb scan --json", config_path.as_deref()),
+            config_path,
+        ));
+    }
+    items
+}
+
+fn recovery_item(
+    id: &str,
+    label: &str,
+    status: &str,
+    message: String,
+    command: Option<String>,
+    path: Option<String>,
+) -> RecoveryItemView {
+    RecoveryItemView {
+        id: id.to_string(),
+        label: label.to_string(),
+        status: status.to_string(),
+        message,
+        action: recovery_action(command.as_deref(), path.as_deref()),
+        command,
+        path,
+        runbook: Some("docs/user-guide.md#recovery-surface".to_string()),
+    }
+}
+
+fn recovery_action(command: Option<&str>, path: Option<&str>) -> String {
+    match (command, path) {
+        (Some(command), Some(path)) => format!("Run `{command}` and inspect {path}."),
+        (Some(command), None) => format!("Run `{command}`."),
+        (None, Some(path)) => format!("Inspect {path}."),
+        (None, None) => "Open the linked runbook.".to_string(),
+    }
+}
+
+fn command_for_config(command: &str, config_path: Option<&str>) -> Option<String> {
+    Some(match config_path {
+        Some(path) if !path.is_empty() => format!("{command} --config {path}"),
+        _ => command.to_string(),
+    })
 }
 
 fn safety_step(config: &ConfigView) -> OnboardingStepView {

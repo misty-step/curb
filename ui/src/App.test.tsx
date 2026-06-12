@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectionMessage } from "./components/dashboard";
 import { demoConfig, demoSnapshot } from "./demo";
-import type { Snapshot } from "./types";
+import type { ReadinessView, Snapshot } from "./types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +51,8 @@ describe("Curb dashboard", () => {
     const page = document.body.textContent ?? "";
     expect(page).toContain("1 over the kill line");
     expect(page).toContain("Curb will notify on high-token turns.");
+    expect(page).toContain("Recovery");
+    expect(page).toContain("First-run setup");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
     expect(page).toContain("over warn");
@@ -160,6 +162,7 @@ describe("Curb dashboard", () => {
     expect(page).toContain("Stop Unavailable");
     expect(page).toContain("watch-only");
     expect(requests.some((request) => request.url.includes("/v1/onboarding"))).toBe(true);
+    expect(requests.some((request) => request.url.includes("/v1/ready"))).toBe(true);
     expect(requests.some((request) => request.url.includes("/v1/sessions/codex%3Aolympus"))).toBe(true);
     expect(requests.some((request) => request.url.includes("/v1/sessions/codex%3Aolympus/turns"))).toBe(true);
   });
@@ -240,9 +243,9 @@ function stoppableSnapshot(): Snapshot {
   return stoppable;
 }
 
-function installFetch(snapshot: Snapshot, pendingConfigSave?: Promise<Response>): RequestRecord[] {
+function installFetch(snapshot: Snapshot, pendingConfigSave?: Promise<Response>, readiness = readinessFixture()): RequestRecord[] {
   const requests: RequestRecord[] = [];
-  const routes = fetchRoutes(snapshot);
+  const routes = fetchRoutes(snapshot, readiness);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -255,9 +258,10 @@ function installFetch(snapshot: Snapshot, pendingConfigSave?: Promise<Response>)
   return requests;
 }
 
-function fetchRoutes(snapshot: Snapshot): FetchRoute[] {
+function fetchRoutes(snapshot: Snapshot, readiness: ReadinessView): FetchRoute[] {
   return [
     { match: (url) => url.includes("/v1/snapshot") || url.includes("/v1/service/rescan"), response: () => jsonResponse(snapshot) },
+    { match: (url) => url.includes("/v1/ready"), response: () => jsonResponse(readiness) },
     { match: (url) => url.includes("/v1/config"), response: () => jsonResponse(demoConfig) },
     { match: (url) => url.includes("/v1/onboarding"), response: () => jsonResponse(onboardingFixture(snapshot)) },
     { match: (url) => url.includes("/v1/notifications"), response: () => jsonResponse(notificationFixture()) },
@@ -284,6 +288,28 @@ function onboardingFixture(snapshot: Snapshot) {
     sources: snapshot.overview.sources,
     final_sentence: "Curb will notify on high-token turns.",
     steps: [],
+    recovery: [
+      {
+      id: "setup",
+      label: "First-run setup",
+      status: "required",
+      message: "Curb is using safe defaults until setup is confirmed at /tmp/curb/config.yaml.",
+      action: "Run `curb init --config /tmp/curb/config.yaml` and inspect /tmp/curb/config.yaml.",
+      command: "curb init --config /tmp/curb/config.yaml",
+      path: "/tmp/curb/config.yaml",
+      runbook: "docs/user-guide.md#recovery-surface",
+      },
+    ],
+  };
+}
+
+function readinessFixture(): ReadinessView {
+  return {
+    status: "ready",
+    app: "curb",
+    api_version: 1,
+    checks: [],
+    recovery: [],
   };
 }
 
