@@ -16,7 +16,7 @@ pub(super) fn session_ack_event(ack: &SessionAck, extend: std::time::Duration) -
         Value::Number(extend.as_secs().into()),
     );
     data.insert("until".to_string(), Value::String(ack.until.to_rfc3339()));
-    ledger::Event::new(LedgerEvent::SessionAckReceived.as_str())
+    ledger::Event::new(LedgerEvent::SessionAckReceived)
         .with_data(data)
         .with_message(ack.reason.clone())
 }
@@ -30,7 +30,7 @@ pub(super) fn manual_stop_event(
     reason: &str,
     mode: Mode,
 ) -> ledger::Event {
-    let mut event = ledger::Event::new(event_type.as_str()).with_data(manual_stop_event_data(
+    let mut event = ledger::Event::new(event_type).with_data(manual_stop_event_data(
         session,
         correlation,
         target,

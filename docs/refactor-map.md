@@ -638,6 +638,54 @@ Behavior oracle:
 - Usagewatch/write-path tests prove emitted `LedgerEvent` variants still drive
   policy and manual-stop ledger flows without changing safety behavior.
 
+## Milestone 11: Bounded Loopback Transport And Typed Audit Writes
+
+Goal: close the highest remaining no-behavior-change simplification pressure
+from backlog 039 without changing public wire formats or safety policy.
+
+Transport progress:
+
+- `src/http.rs` keeps the existing synchronous loopback facade, but accepted
+  streams now set bounded read/write deadlines before request parsing or
+  response writing.
+- `http::tests::serve_until_bounds_slow_partial_header_before_next_live_probe`
+  proves a slow partial-header client cannot indefinitely occupy the accepted
+  stream path and prevent a later `/v1/live` probe from completing.
+- Existing loopback host, API routing, embedded UI, oversized body, shutdown,
+  and large-response HTTP tests remain the behavior oracle.
+
+Ledger progress:
+
+- `ledger::Event::new` now accepts the closed `LedgerEvent` taxonomy.
+- `ledger::Event::custom` is the explicit escape hatch for historical fixtures
+  or custom integration rows.
+- The previous raw production `doctor` event is now `LedgerEvent::Doctor` and
+  round-trips through the taxonomy with service classification.
+- Production audit writes in CLI, runtime, local enforcer, usagewatch, and
+  write-path modules use typed `LedgerEvent` constructors.
+
+Compatibility plan:
+
+- Process-duration config fields stay in `ConfigView`, `ConfigUpdate`, API
+  fixtures, and TypeScript types for now. They are compatibility fields for
+  existing configs and clients; active UI/docs continue naming token policy as
+  the enforced behavior.
+- Retiring `process_warn_seconds` and `process_kill_seconds` should be a
+  fixture-backed wire migration, not a drive-by removal in this milestone.
+- The broad `api::Backend` port is intentionally unchanged here. Split it only
+  when a route/use-case change creates real fake-implementation pressure.
+
+Behavior oracle:
+
+- Focused HTTP tests for slow partial headers, large responses, UI serving,
+  route handling, loopback host validation, and shutdown.
+- Focused ledger taxonomy/persistence tests for typed event round-trips,
+  historical custom event persistence, redaction, metadata merge, hash-chain
+  continuation, and after-append hooks.
+- CLI doctor test proving the typed `doctor` event still writes the same wire
+  string.
+- `scripts/validate.sh` remains the pre-merge gate.
+
 ## Milestone Gates
 
 Each milestone must satisfy all of these before the next extraction begins:

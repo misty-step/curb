@@ -413,7 +413,7 @@ fn append_event(
     message: &str,
     result: Option<Value>,
 ) -> Result<(), UsageWatchError> {
-    let mut event = ledger::Event::new(event_type.as_str())
+    let mut event = ledger::Event::new(event_type)
         .with_message(message.to_string())
         .with_data(events::event_data(session, result));
     event.agent_id = session.target.agent_id.clone();

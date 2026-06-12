@@ -498,16 +498,20 @@ fn runtime_projects_events_and_alerts_from_ledger_with_live_session_affordance()
     let cfg = runtime.config();
     let ledger = crate::ledger::Ledger::open(&cfg.ledger.path).unwrap();
     ledger
-        .append(crate::ledger::Event::new("run_started"))
+        .append(crate::ledger::Event::new(
+            crate::ledger::LedgerEvent::RunStarted,
+        ))
         .unwrap();
     ledger
         .append(
-            crate::ledger::Event::new("usage_warning")
+            crate::ledger::Event::new(crate::ledger::LedgerEvent::UsageWarning)
                 .with_data(alert_data("codex", "s1", "/repo")),
         )
         .unwrap();
     ledger
-        .append(crate::ledger::Event::new("usage_would_terminate"))
+        .append(crate::ledger::Event::new(
+            crate::ledger::LedgerEvent::UsageWouldTerminate,
+        ))
         .unwrap();
 
     let events = runtime.events(2).unwrap();

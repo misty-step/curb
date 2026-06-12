@@ -12,6 +12,8 @@ use crate::api::{Backend, Request, Response, Server};
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_HEADER_LINES: usize = 100;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
+const ACCEPTED_STREAM_READ_TIMEOUT: Duration = Duration::from_millis(250);
+const ACCEPTED_STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Error)]
 pub enum HttpError {
@@ -65,6 +67,8 @@ pub fn handle_stream<B: Backend>(
     server: &Server<B>,
 ) -> Result<(), HttpError> {
     stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(ACCEPTED_STREAM_READ_TIMEOUT))?;
+    stream.set_write_timeout(Some(ACCEPTED_STREAM_WRITE_TIMEOUT))?;
     let request = read_request(&mut stream, "http")?;
     let started = Instant::now();
     let method = request.method.clone();
@@ -332,6 +336,39 @@ mod tests {
 
         assert_eq!(body.len(), content_length);
         assert!(body.ends_with(b"}"));
+    }
+
+    #[test]
+    fn serve_until_bounds_slow_partial_header_before_next_live_probe() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let server_thread = thread::spawn(move || {
+            let server = Server::new("test-token", FakeBackend::default()).unwrap();
+            serve_until(listener, &server, || server_shutdown.load(Ordering::SeqCst)).unwrap();
+        });
+        let mut slow_client = TcpStream::connect(addr).unwrap();
+        slow_client.write_all(b"GET /v1").unwrap();
+        thread::sleep(Duration::from_millis(50));
+        let started = Instant::now();
+        let mut live_client = TcpStream::connect(addr).unwrap();
+        live_client
+            .write_all(b"GET /v1/live HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n")
+            .unwrap();
+        live_client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut response = Vec::new();
+
+        live_client.read_to_end(&mut response).unwrap();
+        shutdown.store(true, Ordering::SeqCst);
+        server_thread.join().unwrap();
+
+        let text = String::from_utf8(response).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(text.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(text.contains(r#""status":"live""#));
     }
 
     #[test]

@@ -54,7 +54,13 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn new(event_type: impl Into<String>) -> Self {
+    pub fn new(event_type: LedgerEvent) -> Self {
+        Self::custom(event_type.as_str())
+    }
+
+    /// Explicit escape hatch for historical fixtures or custom integrations.
+    /// Production Curb writes should use [`Event::new`] with [`LedgerEvent`].
+    pub fn custom(event_type: impl Into<String>) -> Self {
         Self {
             event_type: event_type.into(),
             seq: 0,
@@ -301,8 +307,8 @@ mod tests {
         let path = dir.path().join("runs.ndjson");
         let ledger = Ledger::open(&path).unwrap();
 
-        ledger.append(Event::new("run_started")).unwrap();
-        ledger.append(Event::new("run_stopped")).unwrap();
+        ledger.append(Event::new(LedgerEvent::RunStarted)).unwrap();
+        ledger.append(Event::new(LedgerEvent::RunStopped)).unwrap();
 
         let events = read(&path).unwrap();
         assert_eq!(events.len(), 2);
@@ -328,9 +334,11 @@ mod tests {
         explicit.insert("machine_id".to_string(), json!("explicit"));
         explicit.insert("session".to_string(), json!("s1"));
         ledger
-            .append(Event::new("usage_warning").with_data(explicit))
+            .append(Event::new(LedgerEvent::UsageWarning).with_data(explicit))
             .unwrap();
-        ledger.append(Event::new("usage_warning")).unwrap();
+        ledger
+            .append(Event::new(LedgerEvent::UsageWarning))
+            .unwrap();
 
         let events = read(&path).unwrap();
         assert_eq!(
@@ -360,7 +368,7 @@ mod tests {
         );
 
         ledger
-            .append(Event::new("usage_warning").with_data(data))
+            .append(Event::new(LedgerEvent::UsageWarning).with_data(data))
             .unwrap();
 
         let events = read(&path).unwrap();
@@ -388,7 +396,9 @@ mod tests {
         )
         .unwrap();
 
-        ledger.append(Event::new("usage_warning")).unwrap();
+        ledger
+            .append(Event::new(LedgerEvent::UsageWarning))
+            .unwrap();
 
         assert_eq!(read(&path).unwrap().len(), 1);
         assert_eq!(
@@ -403,12 +413,12 @@ mod tests {
         let path = dir.path().join("runs.ndjson");
         Ledger::open(&path)
             .unwrap()
-            .append(Event::new("one"))
+            .append(Event::custom("one"))
             .unwrap();
 
         Ledger::open(&path)
             .unwrap()
-            .append(Event::new("two"))
+            .append(Event::custom("two"))
             .unwrap();
 
         let events = read(&path).unwrap();
