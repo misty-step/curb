@@ -88,6 +88,25 @@ visibility-mode run with repeated watcher ticks, final readiness HTTP 200,
 parser acceptance, and NDJSON redaction checks. Treat this as local dogfood
 evidence, not hosted or multi-hour deployment proof.
 
+Current long sidecar evidence includes
+`evidence/dogfood/2026-06-12-long-sidecar/`, a 7,200-second release-built
+`curb serve --headless` run with private runtime state outside the worktree,
+periodic live/ready/health/overview snapshots, final readiness HTTP 200, parser
+acceptance, and redaction checks. It also found recurring provider
+source-health errors and intermittent `watcher_runtime: cache busy` readiness
+degradation while `/v1/live` and protected health stayed available.
+
+For the next long operator window, use:
+
+```sh
+CURB_LONG_DOGFOOD_SECONDS=7200 CURB_LONG_DOGFOOD_SNAPSHOT_SECONDS=300 \
+  bash scripts/dogfood-long-sidecar.sh evidence/dogfood/$(date +%F)-long-sidecar
+```
+
+Keep the wrapper as the current long-dogfood path; a repo-local QA/dogfood
+skill is not justified until browser-backed live operator workflow evidence
+adds another repeatable procedure.
+
 The headless observability script now fails weak timed runs: it validates
 `CURB_DOGFOOD_SECONDS`, requires watcher ticks to scale with the requested
 window, and checks NDJSON for token/auth, prompt/response, screenshot,

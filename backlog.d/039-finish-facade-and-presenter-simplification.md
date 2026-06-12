@@ -61,3 +61,9 @@ port that test fakes must implement wholesale.
 
 Do not start this until `034` is green; red hosted gates make refactor feedback
 unreliable.
+
+Long sidecar dogfood in
+`evidence/dogfood/2026-06-12-long-sidecar/` found repeated `/v1/ready` 503
+samples for `watcher_runtime: cache busy` while `/v1/live` and protected health
+stayed HTTP 200. Treat bounded readiness/cache snapshotting as part of the
+loopback transport/readiness milestone before broader facade work.
