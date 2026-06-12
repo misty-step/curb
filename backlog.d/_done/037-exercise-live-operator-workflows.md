@@ -1,7 +1,7 @@
 # Exercise live operator workflows with browser-backed QA
 
 Priority: P1
-Status: pending
+Status: done
 Estimate: L
 
 ## Goal
@@ -9,17 +9,30 @@ Move beyond fixture-only dashboard confidence by proving realistic operator
 workflows against a running Curb service and generated evidence artifacts.
 
 ## Oracle
-- [ ] Add or document a browser QA path that drives a live `curb app` or
+- [x] Add or document a browser QA path that drives a live `curb app` or
       `curb serve` endpoint, not only Vite fixtures.
-- [ ] Cover the core operator flows: first launch, active session selection,
+- [x] Cover the core operator flows: first launch, active session selection,
       readiness triage, ack, safe stop rejection, confirmed synthetic stop,
       settings save/revert, notification test, and live API failure/recovery.
-- [ ] Produce screenshots or videos for desktop and narrow viewports with
+- [x] Produce screenshots or videos for desktop and narrow viewports with
       console-error capture and viewport-overflow checks.
-- [ ] Keep destructive stop proof limited to a harmless synthetic subprocess with
+- [x] Keep destructive stop proof limited to a harmless synthetic subprocess with
       PID/start-time/owner/executable evidence.
-- [ ] Wire the live workflow as manual or advisory at first, then decide whether
+- [x] Wire the live workflow as manual or advisory at first, then decide whether
       any subset belongs in `scripts/check-fast.sh` or `scripts/validate.sh`.
+
+## Closeout
+- Added advisory `scripts/qa-live-dashboard.sh` and
+  `ui/scripts/live-dashboard-qa.mjs`.
+- Evidence:
+  `evidence/dogfood/2026-06-12-live-dashboard-qa/manifest.json`,
+  `dashboard-desktop.png`, `dashboard-narrow.png`,
+  `safe-stop-rejection.json`, `worker-start.json`, `worker-exit.json`,
+  `server.ndjson`, `parse-observability-smoke.txt`, and
+  `redaction-check.txt`.
+- Decision: keep advisory for now; do not wire into `scripts/check-fast.sh` or
+  `scripts/validate.sh` until repeated local runs prove it is stable enough for
+  mandatory gates.
 
 ## Children
 1. Reuse `ui/scripts/smoke-dashboard.mjs` assertions where possible, but

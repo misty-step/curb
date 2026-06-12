@@ -1,0 +1,57 @@
+version: 1
+profile: live-dashboard-qa
+mode: enforcement
+service:
+  scan_interval: 1s
+  policy_interval: 1s
+  state_dir: /private/var/folders/jr/0kj0xfdd4s1ggs921sr2d7f80000gn/T/curb-live-dashboard-qa.TFOZ92/state
+  min_confidence: 50
+  heartbeat_interval: 5s
+usage:
+  enabled: true
+  scan_interval: 1s
+  lookback: 1h
+  window: 1m
+  warn_turn_tokens: 100
+  kill_turn_tokens: 200
+  grace_period: 1s
+  escalate_supervised: false
+defaults:
+  warn_after: 1h
+  kill_after: 2h
+  ack_extension: 10s
+  max_extensions: 1
+  kill_grace_period: 1s
+  cooldown_after_kill: 1s
+  min_lifetime: 10s
+  max_run_gap: 1s
+  allow_app_root_kill: false
+agents:
+- id: codex-live-qa-worker
+  label: Codex Live QA Worker
+  family: codex
+  kind: process
+  match:
+    bundle_ids: []
+    code_signatures: []
+    app_paths: []
+    windows_paths: []
+    linux_paths: []
+    executable_paths: []
+    process_names:
+    - python3
+    - python
+    parent_process_names: []
+    command_regex:
+    - curb-live-dashboard-qa-56186-1781288552
+    require_command_regex:
+    - curb-live-dashboard-qa-56186-1781288552
+    exclude_process_names: []
+    exclude_command_regex: []
+    exclude_parent_command_regex: []
+  policy: null
+alerts:
+  local_notifications: false
+ledger:
+  path: evidence/dogfood/2026-06-12-live-dashboard-qa/ledger.ndjson
+  include_prompt_content: false

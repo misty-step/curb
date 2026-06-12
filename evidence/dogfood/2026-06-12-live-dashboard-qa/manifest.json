@@ -1,0 +1,55 @@
+{
+  "baseURL": "http://127.0.0.1:62716/",
+  "mode": "live-curb-serve",
+  "configPath": "evidence/dogfood/2026-06-12-live-dashboard-qa/config.yaml",
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "screenshots": [
+    "dashboard-desktop.png",
+    "dashboard-narrow.png"
+  ],
+  "actions": [
+    "desktop: selected ack",
+    "desktop: clicked Acknowledge",
+    "acknowledged uncorrelated live-ack session",
+    "desktop: opened settings",
+    "desktop: clicked Test",
+    "saved and reverted notification setting, then exercised notification test",
+    "started synthetic worker pid=57246",
+    "desktop: selected stop",
+    "safe stop rejection returned HTTP 409",
+    "desktop: clicked Stop now",
+    "desktop: clicked Confirm stop",
+    "confirmed browser stop terminated synthetic live-stop worker",
+    "verified live API failure renders recovery copy without raw Failed to fetch"
+  ],
+  "consoleErrors": [
+    {
+      "viewport": "desktop",
+      "text": "Failed to load resource: the server responded with a status of 503 (OK)"
+    },
+    {
+      "viewport": "desktop",
+      "text": "Failed to load resource: the server responded with a status of 409 (Conflict)"
+    },
+    {
+      "viewport": "desktop",
+      "text": "Failed to load resource: the server responded with a status of 409 (Conflict)"
+    },
+    {
+      "viewport": "desktop",
+      "text": "Failed to load resource: net::ERR_FAILED"
+    }
+  ],
+  "failures": []
+}
