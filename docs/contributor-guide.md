@@ -3,6 +3,10 @@
 Curb is intentionally shaped as one deep local endpoint agent with thin clients
 and thin OS adapters.
 
+Read [product-principles.md](product-principles.md) before changing behavior,
+policy, privacy, enforcement, evidence, or module boundaries. It is the
+canonical product doctrine for Curb's philosophy, vision, and principles.
+
 ## Architecture
 
 - `src/main.rs`: CLI command composition and local app launch.
