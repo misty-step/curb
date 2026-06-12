@@ -11,22 +11,26 @@ ordering, not a replacement for the pre-merge gate.
 | Pillar | Level | Evidence | Main gap |
 |---|---:|---|---|
 | Style and validation | L4 candidate | `.editorconfig`, `cargo fmt`, `cargo clippy -D warnings`, ESLint, TypeScript strict mode, `scripts/check-fast.sh`, `scripts/validate.sh`, repo-managed pre-commit hook installation, and hosted PR CI all run the gate ladder. | Keep watching for gate runtime and flakes on later branches. |
-| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Latest `master` run `27380787071` passed every job after PR #2 was squash-merged. | Keep watching hosted runtime and the GitHub Actions Node 20 deprecation warning before the June 16, 2026 default Node 24 switch. |
+| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Latest verified behavior-bearing `master` run `27435399495` passed every job after PR #5 was squash-merged. | Keep watching hosted runtime and the GitHub Actions Node 20 deprecation warning before the June 16, 2026 default Node 24 switch. |
 | Testing | L4 candidate | Rust unit/integration tests, instrumented real-process E2E tests, CLI tests, UI Vitest tests, API/UI contract fixtures, mandatory deterministic dashboard browser smoke, demo dry-run, hosted Windows smoke, and coverage exist. | Coverage is now above the floor but still has weak files worth targeting in future hardening. |
-| Documentation | L3 | `AGENTS.md`, `README.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe workflows, decisions, runbooks, and readiness contracts. | Needs post-merge trimming and operator-facing polish so the large evidence set stays navigable. |
+| Documentation | L4 candidate | `AGENTS.md`, `README.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/release-evidence.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe workflows, decisions, runbooks, readiness contracts, and canonical release proof. | Keep the release evidence index current as new proof packets land. |
 | Dev environment | L3 | `.editorconfig`, `.node-version`, `rust-toolchain.toml`, `Cargo.lock`, `ui/package-lock.json`, `scripts/check-setup.sh`, `scripts/install-git-hooks.sh`, and local scripts pin the basics. | No devcontainer. |
 | Code quality and architecture | L3 | `curb-core` owns policy/runtime, the binary owns CLI/API/web, termination safety is behind platform targets, and API/service/runtime/usage/config/platform/usagewatch/ledger/binary-shell/observability facades plus write-path persistence/projection/identity validation and overview-delta projection have been split into deep use-case modules. | Remaining pressure is residual presenter/UI surfaces and any final facade simplification after hosted CI proof. |
-| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, and a two-hour long sidecar dogfood produced parsed NDJSON. | Long dogfood found operator-visible source-health failures and transient `watcher_runtime: cache busy` readiness degradation while live/health probes stayed available. |
-| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `26931762206` passed dependency audit and coverage. | Formal review/merge ownership is still draft-PR gated. |
+| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, two-hour long sidecar, and live browser QA dogfood produced parsed NDJSON. | Long dogfood found operator-visible source-health failures and transient `watcher_runtime: cache busy` readiness degradation while live/health probes stayed available. |
+| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `27435399495` passed dependency audit and coverage. | Keep review and merge ownership explicit on release branches. |
 
-Overall: **L3 Standardized with several L4 candidates. Hosted CI proof is now
-green on `master`, and the two-hour sidecar dogfood removed the "no long run"
-blocker. Remaining L4 blockers are operator-facing recovery for long-run
-readiness/source-health failures, evidence/docs trimming, UI polish, review
+Overall: **L3 Standardized with several L4 candidates. Hosted CI proof is green
+on `master`, the two-hour sidecar dogfood removed the "no long run" blocker,
+the live browser QA packet covers the operator dashboard path, and
+`docs/release-evidence.md` is the current proof index. Remaining L4 blockers are
+operator-facing recovery for long-run readiness/source-health failures, review
 ownership, and remaining deep-module polish.**
 
 ## Evidence Snapshot
 
+- Current release evidence index: `docs/release-evidence.md` is the canonical
+  map for current proof packets, historical retained evidence, and cleanup
+  disposition.
 - Full local gate: `scripts/validate.sh` passed after the headless,
   observability, UI stop-confirmation, and dogfood-oracle hardening slices. The
   June 4, 2026 run covered `scripts/check-fast.sh`, the desktop shell check, and
@@ -54,18 +58,19 @@ ownership, and remaining deep-module polish.**
   `ui/scripts/smoke-dashboard.mjs`; coverage also reported 82.78% against the
   84% floor. The follow-up fix installed Chromium in hosted UI gate jobs and
   added behavior tests for API backend adapters without lowering thresholds.
-- Latest shipped `master` proof: PR #2 squash-merged as
-  `c22e2c2c91fa24a65a2b41e365f5bd7e31b9f28d` with
-  `Closes-backlog: 034`. GitHub Actions run
-  `https://github.com/misty-step/curb/actions/runs/27380787071` passed
+- Latest behavior-bearing `master` proof: PR #5 squash-merged as
+  `33889504eca97e7951557ba21319afbd9053b8c1` with
+  `Closes-backlog: 037`. GitHub Actions run
+  `https://github.com/misty-step/curb/actions/runs/27435399495` passed
   `fast feedback (ubuntu)`, `full validate (ubuntu-latest)`,
   `full validate (macos-latest)`, `windows smoke`, `dependency audit`, and
-  `coverage` on June 11, 2026. The same run emitted the hosted Node 20 actions
+  `coverage` on June 12, 2026. The same run emitted the hosted Node 20 actions
   deprecation warning that should be handled before GitHub's Node 24 default
   switch.
 - Red hosted runs are preserved as context, not current breakage: older master
   runs `27037199553`, `26960092690`, and `26838533371` failed before the
-  current readiness tranche repairs; the latest two master runs are green.
+  current readiness tranche repairs; the current shipped `master` proof is
+  green.
 - Local coverage proof: `cargo llvm-cov --workspace --summary-only
   --fail-under-lines 84` passed on June 4, 2026 with TOTAL line coverage
   84.60%; `src/api.rs` rose to 94.78% line coverage.
@@ -147,6 +152,13 @@ ownership, and remaining deep-module polish.**
   proves no `/stop` POST occurs on the first click, and the deterministic
   dashboard smoke checks `Stop now`, `Confirm stop`, `Cancel`, and narrow/desktop
   overflow for the action strip.
+- Live browser QA proof: `evidence/dogfood/2026-06-12-live-dashboard-qa/`
+  verified first launch/recovery, active row selection, readiness, ack,
+  settings save/revert, notification test, stale stop rejection, confirmed
+  synthetic stop, API failure recovery, desktop/narrow screenshots, console
+  capture, viewport overflow checks, observability parser acceptance, and NDJSON
+  redaction checks against a real served dashboard with scratch state and
+  synthetic metadata-only Codex usage.
 - Platform target extraction: `curb-core/src/platform/target.rs` now owns sealed
   target construction, identity comparison, supervisor escalation, and
   child-first tree scoping behind the unchanged `Snapshot` facade.
@@ -198,14 +210,11 @@ ownership, and remaining deep-module polish.**
    cheap live/health probes, avoid prolonged opaque `watcher_runtime: cache
    busy` readiness, and summarize provider source-health failures without log
    spelunking.
-2. Trim evidence and documentation into release packets so current hosted CI,
-   long-dogfood, headless, safety, and UI proofs are navigable without broad
-   artifact scans.
-3. Continue behavior-preserving deep-module extractions in small milestones:
+2. Continue behavior-preserving deep-module extractions in small milestones:
    remaining presenter/UI surfaces and any final binary shell pressure,
    following `docs/refactor-map.md`. Fresh critic feedback rates more internal
    taxonomy-style splits below browser-verified operator-flow work.
-4. Continue UI polish through browser-verified operator flows, especially
+3. Continue UI polish through browser-verified operator flows, especially
    repeated real-session dogfood and narrow-viewport action states.
 
 ## Refactor Guardrails

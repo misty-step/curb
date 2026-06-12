@@ -44,6 +44,7 @@ The implementation is active. The most useful entry points are:
 - [docs/user-guide.md](docs/user-guide.md) - user operating guide.
 - [docs/contributor-guide.md](docs/contributor-guide.md) - contributor architecture and verification guide.
 - [docs/application-design.md](docs/application-design.md) - canonical dashboard architecture and UI design.
+- [docs/release-evidence.md](docs/release-evidence.md) - current release proof index and historical evidence disposition.
 - [docs/dogfooding.md](docs/dogfooding.md) - release-build dogfood guide and next grooming loop.
 - [docs/adr/README.md](docs/adr/README.md) - accepted architecture decisions for headless mode, observability, and termination safety.
 - [docs/runbooks/headless-sidecar.md](docs/runbooks/headless-sidecar.md) - headless server-side integration runbook.

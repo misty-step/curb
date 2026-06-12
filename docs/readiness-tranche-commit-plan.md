@@ -3,6 +3,10 @@
 Date: 2026-06-04
 Branch: `agent-readiness-closeout`
 
+Historical note, 2026-06-12: this is the June 4 readiness tranche staging plan,
+not current staging guidance. Current release proof and artifact disposition
+live in `docs/release-evidence.md`.
+
 This plan turns the current dirty readiness tranche into reviewable semantic
 commits. It is a staging plan, not a staging action. Do not commit these groups
 until the operator explicitly approves closeout.
