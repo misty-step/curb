@@ -109,6 +109,9 @@ periodic live/ready/health/overview snapshots, final readiness HTTP 200, parser
 acceptance, and redaction checks. It also found recurring provider
 source-health errors and intermittent `watcher_runtime: cache busy` readiness
 degradation while `/v1/live` and protected health stayed available.
+The bounded-readiness/source-recovery follow-up is covered by focused tests;
+the next two-hour packet should prove sampled `/v1/ready` no longer returns
+503 after the first snapshot and that source-health recovery remains sanitized.
 
 The current refreshed packet is
 `evidence/dogfood/2026-06-12-long-sidecar-refresh/`. It is verified by

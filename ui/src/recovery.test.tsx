@@ -98,7 +98,19 @@ function recoverySnapshot(): Snapshot {
           provider: "codex",
           files: 1,
           events: 0,
-          error: "/Users/phaedrus/.codex/private/transcript.json: permission denied prompt payload",
+          error: "provider usage metadata failed a metadata-only read",
+        },
+      ],
+      recovery: [
+        {
+          id: "source-codex",
+          label: "codex source",
+          status: "error",
+          message:
+            "codex usage metadata could not be read: provider usage metadata failed a metadata-only read. Raw provider paths and payloads are not shown in recovery.",
+          action: "Run `curb usage --since 24h`.",
+          command: "curb usage --since 24h",
+          runbook: "docs/user-guide.md#recovery-surface",
         },
       ],
     },
@@ -132,15 +144,6 @@ function onboardingFixture(snapshot: Snapshot) {
     final_sentence: "Curb will notify on high-token turns.",
     steps: [],
     recovery: [
-      {
-        id: "source-codex",
-        label: "codex source",
-        status: "error",
-        message: "codex usage metadata could not be read. Raw provider paths and payloads are not shown in recovery.",
-        action: "Run `curb usage --since 24h`.",
-        command: "curb usage --since 24h",
-        runbook: "docs/user-guide.md#recovery-surface",
-      },
       {
         id: "process-correlation",
         label: "Process correlation",

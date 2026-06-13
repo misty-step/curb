@@ -14,6 +14,7 @@ mod config_model;
 mod correlation;
 mod delta;
 mod events_model;
+mod recovery;
 mod snapshot_model;
 
 pub(crate) use ack_state::session_ack_path;
@@ -24,6 +25,7 @@ pub use config_model::{
 pub(crate) use correlation::{Correlation, best_session_for_match, correlate, process_matches};
 pub use delta::annotate_overview_delta;
 pub use events_model::{alert_views, event_views};
+pub(crate) use recovery::{sanitize_source_reports, source_health_recovery};
 pub(crate) use snapshot_model::{
     Session, build_session_view, build_sessions, find_session, usage_activity_start,
 };
@@ -116,6 +118,7 @@ pub struct Overview {
     pub busiest_turn_tokens: i64,
     pub last_scan: DateTime<Utc>,
     pub sources: Vec<SourceReport>,
+    pub recovery: Vec<RecoveryItemView>,
     pub changes: OverviewDelta,
     pub capabilities: PlatformCapabilities,
 }

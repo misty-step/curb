@@ -50,6 +50,7 @@ export const demoSnapshot: Snapshot = {
       { provider: "codex", files: 12, events: 340 },
       { provider: "claude", files: 8, events: 210 },
     ],
+    recovery: [],
     changes: {
       new_sessions: 0,
       sessions_with_new_turns: 1,

@@ -218,6 +218,42 @@ fn overview_delta_reports_new_usage_alerts_agents_and_source_errors() {
 }
 
 #[test]
+fn overview_exposes_sanitized_source_health_recovery() {
+    let cfg = Config::load(crate::config::example_config_path()).unwrap();
+    let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+    let snapshot = build_snapshot(
+        &cfg,
+        &[],
+        vec![SourceReport {
+            provider: "claude".to_string(),
+            files: 0,
+            events: 0,
+            error: Some(
+                "usage scan: usage line exceeds 1048576 bytes: /Users/phaedrus/.claude/private prompt payload"
+                    .to_string(),
+            ),
+        }],
+        now,
+    );
+
+    let source_error = snapshot.overview.sources[0].error.as_deref().unwrap();
+    assert_eq!(
+        source_error,
+        "usage line exceeded the 1 MiB metadata safety cap"
+    );
+    assert!(!source_error.contains("/Users/"));
+    assert!(!source_error.contains("prompt payload"));
+
+    let recovery = &snapshot.overview.recovery[0];
+    assert_eq!(recovery.id, "source-claude");
+    assert_eq!(recovery.label, "claude source");
+    assert_eq!(recovery.command.as_deref(), Some("curb usage --since 24h"));
+    assert!(recovery.message.contains(source_error));
+    assert!(!recovery.message.contains("/Users/"));
+    assert!(!recovery.message.contains("prompt payload"));
+}
+
+#[test]
 fn cwd_correlation_uses_path_components_not_string_prefixes() {
     let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
     cfg.usage.warn_turn_tokens = 100;

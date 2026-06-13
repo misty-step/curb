@@ -187,7 +187,7 @@ describe("selectRecovery", () => {
         id: "source-codex",
         label: "codex source",
         status: "error",
-        message: "codex usage metadata could not be read. Raw provider paths and payloads are not shown in recovery.",
+        message: "duplicate should lose",
         action: "Run `curb usage --since 24h`.",
         command: "curb usage --since 24h",
       },
@@ -215,18 +215,33 @@ describe("selectRecovery", () => {
         },
       ],
     };
+    const overviewRecovery = [
+      {
+        id: "source-codex",
+        label: "codex source",
+        status: "error",
+        message:
+          "codex usage metadata could not be read: usage line exceeded the 1 MiB metadata safety cap. Raw provider paths and payloads are not shown in recovery.",
+        action: "Run `curb usage --since 24h`.",
+        command: "curb usage --since 24h",
+      },
+    ];
 
-    const model = selectRecovery(currentOnboarding, currentReadiness);
+    const model = selectRecovery(currentOnboarding, currentReadiness, { overviewRecovery });
 
     expect(model.attention).toBe(true);
     expect(model.summary).toBe("2 recovery items");
     expect(model.nextStep).toBe("Run `curb usage --since 24h`.");
     expect(model.items.map((item) => item.id)).toEqual(["source-codex", "readiness-watcher_runtime"]);
+    expect(model.items[0].message).toContain("1 MiB metadata safety cap");
     expect(model.items[0].message).not.toContain("/Users/");
   });
 
   it("turns API failures into sanitized recovery actions", () => {
-    const model = selectRecovery(undefined, undefined, "Failed to fetch", "/tmp/curb/config.yaml");
+    const model = selectRecovery(undefined, undefined, {
+      connectionError: "Failed to fetch",
+      configPath: "/tmp/curb/config.yaml",
+    });
 
     expect(model.items).toEqual([
       expect.objectContaining({

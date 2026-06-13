@@ -16,7 +16,7 @@ ordering, not a replacement for the pre-merge gate.
 | Documentation | L4 candidate | `AGENTS.md`, `README.md`, `docs/product-principles.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/release-evidence.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe product doctrine, workflows, decisions, runbooks, readiness contracts, and canonical release proof. | Keep the release evidence index current as new proof packets land. |
 | Dev environment | L3 | `.editorconfig`, `.node-version`, `rust-toolchain.toml`, `Cargo.lock`, `ui/package-lock.json`, `scripts/check-setup.sh`, `scripts/install-git-hooks.sh`, and local scripts pin the basics. | No devcontainer. |
 | Code quality and architecture | L3 | `curb-core` owns policy/runtime, the binary owns CLI/API/web, termination safety is behind platform targets, and API/service/runtime/usage/config/platform/usagewatch/ledger/binary-shell/observability facades plus write-path persistence/projection/identity validation and overview-delta projection have been split into deep use-case modules. | Remaining pressure is residual presenter/UI surfaces and any final facade simplification after hosted CI proof. |
-| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, two-hour long sidecar, and live browser QA dogfood produced parsed NDJSON. | Long dogfood found operator-visible source-health failures and transient `watcher_runtime: cache busy` readiness degradation while live/health probes stayed available. |
+| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, two-hour long sidecar, and live browser QA dogfood produced parsed NDJSON. | Cached readiness and sanitized source recovery now have focused coverage; rerun the long sidecar to replace the packet that found transient `watcher_runtime: cache busy` 503s. |
 | Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `27470901295` passed dependency audit and coverage. | Keep review and merge ownership explicit on release branches. |
 
 Overall: **L3 Standardized with several L4 candidates. Hosted CI proof is green
@@ -205,10 +205,10 @@ ownership, and remaining deep-module polish.**
 
 ## Ordered Work
 
-1. Make long-run readiness/source-health recoverable for operators: preserve
-   cheap live/health probes, avoid prolonged opaque `watcher_runtime: cache
-   busy` readiness, and summarize provider source-health failures without log
-   spelunking.
+1. Refresh the two-hour long sidecar after the bounded-readiness/source-health
+   recovery fix: prove sampled `/v1/ready` stays HTTP 200 after the first
+   snapshot, source-health recovery is sanitized/actionable, and live/health
+   probes remain cheap.
 2. Continue behavior-preserving deep-module extractions in small milestones:
    remaining presenter/UI surfaces and any final binary shell pressure,
    following `docs/refactor-map.md`. Fresh critic feedback rates more internal
