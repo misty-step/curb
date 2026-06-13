@@ -46,14 +46,16 @@ try {
       await expectVisibleText(page, "executable", viewport.name);
       await expectVisibleText(page, "Stop now", viewport.name);
       await page.getByText("Stop now", { exact: false }).first().click();
+      // The confirmation is asked in the modal dialog costume.
       await expectVisibleText(page, "Confirm stop", viewport.name);
       await expectVisibleText(page, "Cancel", viewport.name);
+      await assertNoViewportOverflow(page, "dialog.ae-dialog", viewport.name);
+      await page.getByText("Cancel", { exact: false }).first().click();
       await assertNoViewportOverflow(page, ".topbar", viewport.name);
       await assertNoViewportOverflow(page, ".agents", viewport.name);
       await assertNoViewportOverflow(page, ".action-strip", viewport.name);
       await assertNoViewportOverflow(page, ".stop-checks", viewport.name);
       await assertNoViewportOverflow(page, ".row-actions", viewport.name);
-      await assertNoViewportOverflow(page, ".stop-confirm", viewport.name);
       await assertNoViewportOverflow(page, ".recovery", viewport.name);
       await assertNoViewportOverflow(page, ".readiness", viewport.name);
       await assertNoViewportOverflow(page, ".drawer", viewport.name);

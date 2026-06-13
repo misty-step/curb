@@ -29,7 +29,7 @@ describe("operator recovery", () => {
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("Recovery");
+    expect(page).toContain("RECOVERY");
     expect(page).toContain("codex source");
     expect(page).toContain("Process correlation");
     expect(page).toContain("Watcher runtime");
@@ -48,7 +48,7 @@ describe("operator recovery", () => {
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("Recovery");
+    expect(page).toContain("RECOVERY");
     expect(page).toContain("API connection");
     expect(page).toContain("curb app");
     expect(page).toContain("<state_dir>/api.token");
