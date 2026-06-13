@@ -110,6 +110,14 @@ acceptance, and redaction checks. It also found recurring provider
 source-health errors and intermittent `watcher_runtime: cache busy` readiness
 degradation while `/v1/live` and protected health stayed available.
 
+The current refreshed packet is
+`evidence/dogfood/2026-06-12-long-sidecar-refresh/`. It is verified by
+`scripts/verify-long-sidecar-evidence.py`, which recomputes the summary,
+requires final readiness HTTP 200, requires all sampled live/health/overview
+probes to be HTTP 200, checks NDJSON redaction, and enforces at least 90% of
+the ideal six-second watcher cadence so long scans remain visible without
+making the oracle depend on perfect scheduler timing.
+
 For the next long operator window, use:
 
 ```sh
