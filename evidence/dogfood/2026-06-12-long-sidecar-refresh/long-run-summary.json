@@ -1,0 +1,35 @@
+{
+  "counts": {
+    "api_request": 57,
+    "config_loaded": 1,
+    "health_check": 27,
+    "readiness_check": 27,
+    "server_started": 1,
+    "source_health_error": 1117,
+    "usage_scan": 1,
+    "watcher_tick": 1110
+  },
+  "duration_seconds": 7200,
+  "event_count": 2341,
+  "expected_watcher_ticks": 1080,
+  "ideal_watcher_ticks": 1200,
+  "max_cpu_percent": 93.4,
+  "max_policy_duration_ms": 54702,
+  "max_probe_latency_seconds": 10.657177,
+  "max_rss_kb": 219864,
+  "min_rss_kb": 66136,
+  "ready_status_codes": {
+    "200": 17,
+    "503": 8
+  },
+  "ready_statuses": {
+    "degraded": 8,
+    "ready": 17
+  },
+  "snapshot_count": 25,
+  "source_error_total": 2,
+  "source_health_error_events": 1117,
+  "usage_scan_count": 1,
+  "watcher_tick_count": 1110,
+  "watcher_tick_minimum_percent": 90
+}
