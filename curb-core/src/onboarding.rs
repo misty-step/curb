@@ -151,7 +151,6 @@ pub fn onboarding_view(
         required,
         &notifications,
         &capabilities,
-        &snapshot.overview.sources,
         &snapshot.sessions,
     );
     OnboardingView {
@@ -554,7 +553,6 @@ fn onboarding_recovery(
     required: bool,
     notifications: &NotificationView,
     capabilities: &PlatformCapabilities,
-    sources: &[SourceReport],
     sessions: &[SessionView],
 ) -> Vec<RecoveryItemView> {
     let config_path = config.path.clone();
@@ -607,16 +605,6 @@ fn onboarding_recovery(
                 config_path.clone(),
             ));
         }
-    }
-    for source in sources.iter().filter(|source| source.error.is_some()) {
-        items.push(recovery_item(
-            &format!("source-{}", source.provider),
-            &format!("{} source", source.provider),
-            "error",
-            format!("{} usage metadata could not be read. Raw provider paths and payloads are not shown in recovery.", source.provider),
-            Some("curb usage --since 24h".to_string()),
-            None,
-        ));
     }
     if sessions
         .iter()

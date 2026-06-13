@@ -60,8 +60,11 @@ Attach logs and probe responses under
 
 ## Failure Triage
 
-- `degraded` with `cache busy`: the server is responsive, but readiness refused
-  to block behind runtime ownership. Retry and inspect `usage_scan` timing.
+- `degraded` before the first snapshot: the server is responsive, but the
+  watcher has not produced an operator snapshot yet. Retry and inspect
+  `usage_scan` timing.
+- `ready` with `snapshot refresh in progress; serving cached snapshot`:
+  expected during cache contention after the first good snapshot.
 - `usage_reader` error: inspect provider root availability and source-health
   events. Do not add prompt/response logging to debug it.
 - protected route returns `401`: token lookup or request auth is wrong; public

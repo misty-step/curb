@@ -1165,6 +1165,7 @@ fn snapshot() -> Snapshot {
             busiest_turn_tokens: 789,
             last_scan: fixed_now(),
             sources: Vec::new(),
+            recovery: Vec::new(),
             changes: Default::default(),
             capabilities: PlatformCapabilities {
                 platform: "test".to_string(),

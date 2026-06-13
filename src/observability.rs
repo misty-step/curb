@@ -470,6 +470,7 @@ mod tests {
                     events: 1,
                     error: Some("bad provider source".to_string()),
                 }],
+                recovery: Vec::new(),
                 changes: OverviewDelta {
                     source_errors: 1,
                     ..OverviewDelta::default()

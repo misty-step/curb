@@ -89,6 +89,12 @@ export interface RecoveryModel {
   items: RecoveryItem[];
 }
 
+export interface RecoveryContext {
+  connectionError?: string;
+  configPath?: string;
+  overviewRecovery?: RecoveryItemView[];
+}
+
 const ALERT_RANK: Record<string, number> = { kill: 0, warn: 1, ok: 2 };
 
 // A working agent's checkpoints arrive in bursts with gaps between model calls
@@ -220,21 +226,34 @@ export function selectReadiness(
 export function selectRecovery(
   onboarding: OnboardingView | undefined,
   readiness: ReadinessView | undefined,
-  connectionError = "",
-  configPath?: string,
+  context: RecoveryContext = {},
 ): RecoveryModel {
-  const items = dedupeRecovery([
-    ...connectionRecovery(connectionError, configPath ?? onboarding?.config_path),
-    ...(onboarding?.recovery ?? []),
-    ...(readiness?.recovery ?? []),
-  ]);
+  const items = recoveryItems(onboarding, readiness, context);
   const attention = items.length > 0;
   return {
     attention,
-    summary: attention ? `${items.length} recovery ${items.length === 1 ? "item" : "items"}` : "No recovery needed",
+    summary: recoverySummary(items.length),
     nextStep: items[0]?.action ?? "Curb has no operator recovery items.",
     items,
   };
+}
+
+function recoveryItems(
+  onboarding: OnboardingView | undefined,
+  readiness: ReadinessView | undefined,
+  context: RecoveryContext,
+): RecoveryItem[] {
+  return dedupeRecovery([
+    ...connectionRecovery(context.connectionError ?? "", context.configPath ?? onboarding?.config_path),
+    ...(context.overviewRecovery ?? []),
+    ...(onboarding?.recovery ?? []),
+    ...(readiness?.recovery ?? []),
+  ]);
+}
+
+function recoverySummary(count: number): string {
+  if (count === 0) return "No recovery needed";
+  return `${count} recovery ${count === 1 ? "item" : "items"}`;
 }
 
 function clamp01(value: number): number {

@@ -11,6 +11,7 @@ pub(crate) enum SnapshotCacheStatus {
     Ready,
     Unavailable,
     Busy,
+    RefreshingCached,
     Poisoned,
 }
 
@@ -39,7 +40,7 @@ pub(crate) fn readiness_view(
             },
         ),
         readiness_check("notifications", notifications.map(|_| ())),
-        readiness_check("watcher_runtime", snapshot_cache.as_result()),
+        snapshot_cache_readiness(snapshot_cache),
     ];
     let ready = checks.iter().all(|check| check.status == "ok");
     ReadinessView {
@@ -63,6 +64,24 @@ fn readiness_check<E: ToString>(name: &str, result: Result<(), E>) -> ReadinessC
             status: "error".to_string(),
             reason: Some(error.to_string()),
         },
+    }
+}
+
+fn snapshot_cache_readiness(status: SnapshotCacheStatus) -> ReadinessCheckView {
+    match status {
+        SnapshotCacheStatus::Ready => readiness_check("watcher_runtime", Ok::<(), String>(())),
+        SnapshotCacheStatus::RefreshingCached => ReadinessCheckView {
+            name: "watcher_runtime".to_string(),
+            status: "ok".to_string(),
+            reason: Some("snapshot refresh in progress; serving cached snapshot".to_string()),
+        },
+        SnapshotCacheStatus::Unavailable => {
+            readiness_check("watcher_runtime", Err("snapshot unavailable"))
+        }
+        SnapshotCacheStatus::Busy => readiness_check("watcher_runtime", Err("cache busy")),
+        SnapshotCacheStatus::Poisoned => {
+            readiness_check("watcher_runtime", Err("cache mutex poisoned"))
+        }
     }
 }
 
@@ -143,15 +162,4 @@ fn readiness_recovery(cfg: &Config, checks: &[ReadinessCheckView]) -> Vec<Recove
             }
         })
         .collect()
-}
-
-impl SnapshotCacheStatus {
-    fn as_result(self) -> Result<(), String> {
-        match self {
-            Self::Ready => Ok(()),
-            Self::Unavailable => Err("snapshot unavailable".to_string()),
-            Self::Busy => Err("cache busy".to_string()),
-            Self::Poisoned => Err("cache mutex poisoned".to_string()),
-        }
-    }
 }

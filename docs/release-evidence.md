@@ -20,7 +20,7 @@ Latest behavior-proof baseline:
 |---|---|---|---|
 | Full pre-merge gate | `scripts/validate.sh`; hosted run `27470901295` passed full Ubuntu, full macOS, fast feedback, Windows smoke, coverage, and dependency audit after PR #9 landed. | `scripts/validate.sh`; `gh run view 27470901295 --json conclusion,status,url` | This is the latest behavior-bearing hosted proof. The CI workflow now uses Node 24-compatible official action majors (`actions/checkout@v5`, `actions/setup-node@v6`, and `actions/upload-artifact@v6`); run `27470901295` had no old Node.js 20 action-runtime warning. |
 | Browser-backed operator flow | `evidence/dogfood/2026-06-12-live-dashboard-qa/` | `bash scripts/qa-live-dashboard.sh evidence/dogfood/$(date +%F)-live-dashboard-qa` | Real `curb serve`, scratch state, synthetic metadata-only Codex usage, Playwright desktop/narrow screenshots, ack, settings save/revert, notification test, stale stop rejection, confirmed synthetic stop, API failure recovery, console capture, overflow checks, parser acceptance, and redaction check. Advisory until repeated runs justify making it mandatory. |
-| Long-running headless sidecar | `evidence/dogfood/2026-06-12-long-sidecar-refresh/` | `CURB_LONG_DOGFOOD_SECONDS=7200 CURB_LONG_DOGFOOD_SNAPSHOT_SECONDS=300 bash scripts/dogfood-long-sidecar.sh evidence/dogfood/$(date +%F)-long-sidecar`; `python3 scripts/verify-long-sidecar-evidence.py evidence/dogfood/2026-06-12-long-sidecar-refresh --duration-seconds 7200` | Fresh two-hour release sidecar against current branch with private state outside the repo, final ready HTTP 200, all sampled live/health/overview probes HTTP 200, parser acceptance, redaction check, 1,110 watcher ticks against a 1,080 minimum, and documented source-health/readiness degradation. Still an acceptance source for the next refactor/readiness ticket. |
+| Long-running headless sidecar | `evidence/dogfood/2026-06-12-long-sidecar-refresh/` | `CURB_LONG_DOGFOOD_SECONDS=7200 CURB_LONG_DOGFOOD_SNAPSHOT_SECONDS=300 bash scripts/dogfood-long-sidecar.sh evidence/dogfood/$(date +%F)-long-sidecar`; `python3 scripts/verify-long-sidecar-evidence.py evidence/dogfood/2026-06-12-long-sidecar-refresh --duration-seconds 7200` | Fresh two-hour release sidecar against current branch with private state outside the repo, final ready HTTP 200, all sampled live/health/overview probes HTTP 200, parser acceptance, redaction check, 1,110 watcher ticks against a 1,080 minimum, and documented source-health/readiness degradation. Use the same harness to prove the bounded-readiness/source-recovery fix with a new packet. |
 | Successful safe stop enforcement | `evidence/dogfood/2026-06-04-headless-enforcement/` | `bash scripts/dogfood-headless-enforcement.sh evidence/dogfood/$(date +%F)-headless-enforcement` | Release headless server stopped a uniquely marked synthetic worker through the protected API. Retain as the canonical positive enforcement proof. |
 | Stop rejection safety | `evidence/dogfood/2026-06-04-stop-rejection/` | Manual rerun from the packet README and protected stop API | Proves unsafe stop requests return `409 Conflict`, emit `stop_rejection`, and avoid token, reason, or raw session-key leakage. |
 | Headless runbook and loopback API | `evidence/dogfood/2026-06-04-runbook-headless/` | `docs/runbooks/headless-sidecar.md` | Proves release headless sidecar startup, public live/ready probes, protected health auth, root behavior, parsed NDJSON, and redaction checks. |
@@ -68,8 +68,10 @@ bash scripts/qa-live-dashboard.sh evidence/dogfood/$(date +%F)-live-dashboard-qa
 - Hosted run `27470901295` still emits unrelated Node `punycode` deprecation
   warnings from the cache action path; it does not emit the old Node.js 20
   action-runtime warning.
-- The long sidecar proof found source-health errors and transient
+- The old long sidecar proof found source-health errors and transient
   `watcher_runtime: cache busy` readiness degradation while live and health
-  stayed available.
+  stayed available. Focused tests now cover cached readiness and sanitized
+  source recovery; a fresh long sidecar should replace the old packet before a
+  release claim.
 - The live browser QA script is intentionally advisory until it proves stable
   enough for the default gate.

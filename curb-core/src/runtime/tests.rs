@@ -720,6 +720,34 @@ fn readiness_reports_busy_runtime_without_blocking_on_cache() {
 }
 
 #[test]
+fn readiness_stays_ready_while_cached_snapshot_refreshes() {
+    let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+    let home = temp_home();
+    let runtime = Runtime::new(
+        test_config(home.path(), Mode::Alert),
+        home.path(),
+        FakePlatform::new(Ok(platform::Snapshot::default())),
+    );
+    runtime.rescan(now).unwrap();
+    let _busy = runtime.cache.lock_for_test();
+
+    let view = runtime.readiness();
+
+    assert_eq!(view.status, "ready");
+    let watcher = view
+        .checks
+        .iter()
+        .find(|check| check.name == "watcher_runtime")
+        .unwrap();
+    assert_eq!(watcher.status, "ok");
+    assert_eq!(
+        watcher.reason.as_deref(),
+        Some("snapshot refresh in progress; serving cached snapshot")
+    );
+    assert!(view.recovery.is_empty());
+}
+
+#[test]
 fn readiness_reports_degraded_until_initial_snapshot_exists() {
     let home = temp_home();
     let runtime = Runtime::new(

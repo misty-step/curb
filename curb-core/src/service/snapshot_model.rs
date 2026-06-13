@@ -7,6 +7,7 @@ use super::correlation::ProcessMatch;
 use super::{
     AgentView, Correlation, Overview, OverviewDelta, ServiceError, SessionView, Snapshot, TurnView,
     active_session_ack, best_session_for_match, correlate, process_matches,
+    sanitize_source_reports, source_health_recovery,
 };
 use crate::config::{Agent, Config, Mode};
 use crate::onboarding::PlatformCapabilities;
@@ -338,6 +339,8 @@ fn build_overview(
     sources: Vec<SourceReport>,
     now: DateTime<Utc>,
 ) -> Overview {
+    let sources = sanitize_source_reports(sources);
+    let recovery = source_health_recovery(&sources);
     let working = sessions
         .iter()
         .filter(|session| session.status == "working")
@@ -373,6 +376,7 @@ fn build_overview(
         busiest_turn_tokens,
         last_scan: now,
         sources,
+        recovery,
         changes: OverviewDelta::default(),
         capabilities: PlatformCapabilities::default(),
     }

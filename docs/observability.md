@@ -93,10 +93,17 @@ state before enforcement, while `stop_attempted`, `stop_completed`, and
 `stop_rejected` expose the stop revalidation outcome without logging raw
 process command lines or operator reasons.
 
-Example busy readiness response:
+Example initial readiness response before the first snapshot exists:
 
 ```json
 {"status":"degraded","app":"curb","api_version":1,"checks":[{"name":"watcher_runtime","status":"error","reason":"cache busy"}]}
+```
+
+After a first snapshot exists, cache contention stays ready and names the
+cached-snapshot fallback instead of turning a responsive service into a 503:
+
+```json
+{"status":"ready","app":"curb","api_version":1,"checks":[{"name":"watcher_runtime","status":"ok","reason":"snapshot refresh in progress; serving cached snapshot"}],"recovery":[]}
 ```
 
 Attach dogfood artifacts under
