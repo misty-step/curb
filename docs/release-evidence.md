@@ -8,17 +8,17 @@ This is the cold-start map for Curb release proof. Use it before broad scans of
 Latest behavior-proof baseline:
 
 - Branch: `master`
-- Commit: `33889504eca97e7951557ba21319afbd9053b8c1`
-- Merge source: PR #5, `deliver/037-live-operator-browser-qa`
-- Post-merge hosted proof: GitHub Actions run `27435399495`
+- Commit: `ed7e2fb83cfbd52d54358e1bfed27df908e4a334`
+- Merge source: PR #9, `deliver/040-ci-dogfood-doctrine-next`
+- Post-merge hosted proof: GitHub Actions run `27470901295`
 - Local parity proof: `git rev-list --left-right --count master...origin/master`
-  returned `0 0` after PR #5 landed.
+  returned `0 0` after PR #9 landed.
 
 ## Canonical Current Proof
 
 | Claim | Canonical proof | Rerun command or live source | Notes |
 |---|---|---|---|
-| Full pre-merge gate | `scripts/validate.sh`; hosted run `27435399495` passed full Ubuntu, full macOS, fast feedback, Windows smoke, coverage, and dependency audit after PR #5 landed. | `scripts/validate.sh`; `gh run view 27435399495 --json conclusion,status,url` | This is the latest behavior-bearing hosted proof. Docs-only release commits can land after it without changing the product proof baseline. The CI workflow now uses Node 24-compatible official action majors (`actions/checkout@v5`, `actions/setup-node@v6`, and `actions/upload-artifact@v6`); the next hosted run is the post-upgrade proof source. |
+| Full pre-merge gate | `scripts/validate.sh`; hosted run `27470901295` passed full Ubuntu, full macOS, fast feedback, Windows smoke, coverage, and dependency audit after PR #9 landed. | `scripts/validate.sh`; `gh run view 27470901295 --json conclusion,status,url` | This is the latest behavior-bearing hosted proof. The CI workflow now uses Node 24-compatible official action majors (`actions/checkout@v5`, `actions/setup-node@v6`, and `actions/upload-artifact@v6`); run `27470901295` had no old Node.js 20 action-runtime warning. |
 | Browser-backed operator flow | `evidence/dogfood/2026-06-12-live-dashboard-qa/` | `bash scripts/qa-live-dashboard.sh evidence/dogfood/$(date +%F)-live-dashboard-qa` | Real `curb serve`, scratch state, synthetic metadata-only Codex usage, Playwright desktop/narrow screenshots, ack, settings save/revert, notification test, stale stop rejection, confirmed synthetic stop, API failure recovery, console capture, overflow checks, parser acceptance, and redaction check. Advisory until repeated runs justify making it mandatory. |
 | Long-running headless sidecar | `evidence/dogfood/2026-06-12-long-sidecar-refresh/` | `CURB_LONG_DOGFOOD_SECONDS=7200 CURB_LONG_DOGFOOD_SNAPSHOT_SECONDS=300 bash scripts/dogfood-long-sidecar.sh evidence/dogfood/$(date +%F)-long-sidecar`; `python3 scripts/verify-long-sidecar-evidence.py evidence/dogfood/2026-06-12-long-sidecar-refresh --duration-seconds 7200` | Fresh two-hour release sidecar against current branch with private state outside the repo, final ready HTTP 200, all sampled live/health/overview probes HTTP 200, parser acceptance, redaction check, 1,110 watcher ticks against a 1,080 minimum, and documented source-health/readiness degradation. Still an acceptance source for the next refactor/readiness ticket. |
 | Successful safe stop enforcement | `evidence/dogfood/2026-06-04-headless-enforcement/` | `bash scripts/dogfood-headless-enforcement.sh evidence/dogfood/$(date +%F)-headless-enforcement` | Release headless server stopped a uniquely marked synthetic worker through the protected API. Retain as the canonical positive enforcement proof. |
@@ -26,7 +26,7 @@ Latest behavior-proof baseline:
 | Headless runbook and loopback API | `evidence/dogfood/2026-06-04-runbook-headless/` | `docs/runbooks/headless-sidecar.md` | Proves release headless sidecar startup, public live/ready probes, protected health auth, root behavior, parsed NDJSON, and redaction checks. |
 | Timed observability | `evidence/dogfood/2026-06-04-headless-observability-3min/` | `CURB_DOGFOOD_SECONDS=180 bash scripts/dogfood-headless-observability.sh evidence/dogfood/$(date +%F)-headless-observability-3min` | Canonical short timed observability proof. The 20-second and 30-second packets are retained as historical/oracle-hardening context. |
 | Active provider metadata | `evidence/dogfood/2026-06-03-active-agent/` | `curb usage --since 24h`; release headless sidecar probes | Proves non-zero Codex, Claude, and Pi provider metadata without prompt/response capture and preserves the fixed default-home discovery bug proof. |
-| Dependency audit | Hosted run `27435399495`; `scripts/check-dependency-audit.sh` | `scripts/check-dependency-audit.sh --offline`; `bash scripts/check-dependency-audit.sh --online` | Online mode is hosted and explicit local proof. Offline mode avoids making the default local gate registry-dependent. |
+| Dependency audit | Hosted run `27470901295`; `scripts/check-dependency-audit.sh` | `scripts/check-dependency-audit.sh --offline`; `bash scripts/check-dependency-audit.sh --online` | Online mode is hosted and explicit local proof. Offline mode avoids making the default local gate registry-dependent. |
 
 ## Historical Evidence To Keep
 
@@ -54,7 +54,7 @@ git switch master
 git pull --ff-only
 git rev-list --left-right --count master...origin/master
 scripts/validate.sh
-gh run view 27435399495 --json conclusion,status,url
+gh run view 27470901295 --json conclusion,status,url
 ```
 
 For browser-backed operator evidence:
@@ -65,9 +65,9 @@ bash scripts/qa-live-dashboard.sh evidence/dogfood/$(date +%F)-live-dashboard-qa
 
 ## Residual Risks
 
-- GitHub Actions emitted the Node 20 deprecation warning on current green runs.
-- The next hosted run after the action-major upgrade is the proof that the
-  Node 20 warning is gone on GitHub's current runner image.
+- Hosted run `27470901295` still emits unrelated Node `punycode` deprecation
+  warnings from the cache action path; it does not emit the old Node.js 20
+  action-runtime warning.
 - The long sidecar proof found source-health errors and transient
   `watcher_runtime: cache busy` readiness degradation while live and health
   stayed available.

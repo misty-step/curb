@@ -11,13 +11,13 @@ ordering, not a replacement for the pre-merge gate.
 | Pillar | Level | Evidence | Main gap |
 |---|---:|---|---|
 | Style and validation | L4 candidate | `.editorconfig`, `cargo fmt`, `cargo clippy -D warnings`, ESLint, TypeScript strict mode, `scripts/check-fast.sh`, `scripts/check-product-principles.sh`, `scripts/validate.sh`, repo-managed pre-commit hook installation, and hosted PR CI all run the gate ladder. | Keep watching for gate runtime and flakes on later branches. |
-| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Node-backed official actions are pinned to Node 24-compatible majors (`checkout@v5`, `setup-node@v6`, `upload-artifact@v6`). Latest verified behavior-bearing `master` run `27435399495` passed every job after PR #5 was squash-merged. | Keep watching hosted runtime after action major upgrades. |
+| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Node-backed official actions are pinned to Node 24-compatible majors (`checkout@v5`, `setup-node@v6`, `upload-artifact@v6`). Latest verified behavior-bearing `master` run `27470901295` passed every job after PR #9 was squash-merged. | Keep watching hosted runtime warnings from third-party cache actions. |
 | Testing | L4 candidate | Rust unit/integration tests, instrumented real-process E2E tests, CLI tests, UI Vitest tests, API/UI contract fixtures, mandatory deterministic dashboard browser smoke, demo dry-run, hosted Windows smoke, and coverage exist. | Coverage is now above the floor but still has weak files worth targeting in future hardening. |
 | Documentation | L4 candidate | `AGENTS.md`, `README.md`, `docs/product-principles.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/release-evidence.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe product doctrine, workflows, decisions, runbooks, readiness contracts, and canonical release proof. | Keep the release evidence index current as new proof packets land. |
 | Dev environment | L3 | `.editorconfig`, `.node-version`, `rust-toolchain.toml`, `Cargo.lock`, `ui/package-lock.json`, `scripts/check-setup.sh`, `scripts/install-git-hooks.sh`, and local scripts pin the basics. | No devcontainer. |
 | Code quality and architecture | L3 | `curb-core` owns policy/runtime, the binary owns CLI/API/web, termination safety is behind platform targets, and API/service/runtime/usage/config/platform/usagewatch/ledger/binary-shell/observability facades plus write-path persistence/projection/identity validation and overview-delta projection have been split into deep use-case modules. | Remaining pressure is residual presenter/UI surfaces and any final facade simplification after hosted CI proof. |
 | Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, two-hour long sidecar, and live browser QA dogfood produced parsed NDJSON. | Long dogfood found operator-visible source-health failures and transient `watcher_runtime: cache busy` readiness degradation while live/health probes stayed available. |
-| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `27435399495` passed dependency audit and coverage. | Keep review and merge ownership explicit on release branches. |
+| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `27470901295` passed dependency audit and coverage. | Keep review and merge ownership explicit on release branches. |
 
 Overall: **L3 Standardized with several L4 candidates. Hosted CI proof is green
 on `master`, the two-hour sidecar dogfood removed the "no long run" blocker,
@@ -58,15 +58,14 @@ ownership, and remaining deep-module polish.**
   `ui/scripts/smoke-dashboard.mjs`; coverage also reported 82.78% against the
   84% floor. The follow-up fix installed Chromium in hosted UI gate jobs and
   added behavior tests for API backend adapters without lowering thresholds.
-- Latest behavior-bearing `master` proof: PR #5 squash-merged as
-  `33889504eca97e7951557ba21319afbd9053b8c1` with
-  `Closes-backlog: 037`. GitHub Actions run
-  `https://github.com/misty-step/curb/actions/runs/27435399495` passed
+- Latest behavior-bearing `master` proof: PR #9 squash-merged as
+  `ed7e2fb83cfbd52d54358e1bfed27df908e4a334`. GitHub Actions run
+  `https://github.com/misty-step/curb/actions/runs/27470901295` passed
   `fast feedback (ubuntu)`, `full validate (ubuntu-latest)`,
   `full validate (macos-latest)`, `windows smoke`, `dependency audit`, and
-  `coverage` on June 12, 2026. The same run emitted the hosted Node 20 actions
-  deprecation warning that should be handled before GitHub's Node 24 default
-  switch.
+  `coverage` on June 13, 2026. The same run did not emit the old Node.js 20
+  action-runtime warning; unrelated Node `punycode` deprecation warnings remain
+  from the cache action path.
 - Red hosted runs are preserved as context, not current breakage: older master
   runs `27037199553`, `26960092690`, and `26838533371` failed before the
   current readiness tranche repairs; the current shipped `master` proof is
