@@ -1,0 +1,13 @@
+exit_status=0
+curb usage
+  sources: codex 598 events; claude 363 events; pi 28 events
+  sessions: 56
+  codex <redacted-session-id> calls=36 total=3618474 cwd=<redacted-local-path>
+  claude <redacted-session-id> calls=95 total=37427815 cwd=<redacted-local-path>
+  codex <redacted-session-id> calls=18 total=3223336 cwd=<redacted-local-path>
+  codex <redacted-session-id> calls=18 total=2854029 cwd=<redacted-local-path>
+  codex <redacted-session-id> calls=32 total=4498719 cwd=<redacted-local-path>
+  codex <redacted-session-id> calls=10 total=998561 cwd=<redacted-local-path>
+  pi <redacted-session-id> calls=7 total=92723 cwd=<redacted-local-path>
+  claude <redacted-session-id> calls=11 total=454123 cwd=<redacted-local-path>
+  codex <redacted-session-id> calls=30 total=3987552 cwd=<redacted-local-path>

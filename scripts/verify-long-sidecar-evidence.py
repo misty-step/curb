@@ -16,6 +16,10 @@ SENSITIVE_RE = re.compile(
     r"provider payload|payload",
     re.IGNORECASE,
 )
+SESSION_ID_RE = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
 TEXT_EVIDENCE_SUFFIXES = {
     ".json",
     ".md",
@@ -152,6 +156,14 @@ def write_summary(evidence_dir: Path, duration_seconds: int) -> dict[str, object
     return summary
 
 
+def text_evidence_files(evidence_dir: Path) -> list[Path]:
+    return [
+        path
+        for path in sorted(evidence_dir.rglob("*"))
+        if path.is_file() and path.suffix in TEXT_EVIDENCE_SUFFIXES
+    ]
+
+
 def redact_local_paths(evidence_dir: Path, prefixes: list[str]) -> None:
     patterns = [
         re.compile(re.escape(prefix.rstrip("/")) + r"""[^\s"'):<>`]*""")
@@ -163,9 +175,7 @@ def redact_local_paths(evidence_dir: Path, prefixes: list[str]) -> None:
 
     changed_files = 0
     replacements = 0
-    for path in sorted(evidence_dir.rglob("*")):
-        if not path.is_file() or path.suffix not in TEXT_EVIDENCE_SUFFIXES:
-            continue
+    for path in text_evidence_files(evidence_dir):
         text = path.read_text(errors="ignore")
         redacted = text
         for pattern in patterns:
@@ -177,9 +187,7 @@ def redact_local_paths(evidence_dir: Path, prefixes: list[str]) -> None:
 
     marker_count = 0
     if not replacements:
-        for path in sorted(evidence_dir.rglob("*")):
-            if not path.is_file() or path.suffix not in TEXT_EVIDENCE_SUFFIXES:
-                continue
+        for path in text_evidence_files(evidence_dir):
             marker_count += path.read_text(errors="ignore").count("<redacted-local-path>")
 
     if replacements:
@@ -195,6 +203,57 @@ def redact_local_paths(evidence_dir: Path, prefixes: list[str]) -> None:
     else:
         message = "ok: no local path occurrences found for configured prefixes\n"
     (evidence_dir / "path-redaction.txt").write_text(message)
+
+    remaining = []
+    for path in text_evidence_files(evidence_dir):
+        text = path.read_text(errors="ignore")
+        for prefix in prefixes:
+            normalized = prefix.rstrip("/")
+            if normalized and normalized in text:
+                remaining.append(str(path.relative_to(evidence_dir)))
+                break
+    if remaining:
+        raise SystemExit(
+            "local path redaction incomplete: " + ", ".join(remaining[:5])
+        )
+
+
+def redact_session_ids(evidence_dir: Path) -> None:
+    changed_files = 0
+    replacements = 0
+    for path in text_evidence_files(evidence_dir):
+        text = path.read_text(errors="ignore")
+        redacted, count = SESSION_ID_RE.subn("<redacted-session-id>", text)
+        if count:
+            path.write_text(redacted)
+            changed_files += 1
+            replacements += count
+
+    marker_count = 0
+    remaining = []
+    for path in text_evidence_files(evidence_dir):
+        text = path.read_text(errors="ignore")
+        marker_count += text.count("<redacted-session-id>")
+        if SESSION_ID_RE.search(text):
+            remaining.append(str(path.relative_to(evidence_dir)))
+
+    if remaining:
+        raise SystemExit(
+            "session id redaction incomplete: " + ", ".join(remaining[:5])
+        )
+    if replacements:
+        message = (
+            "ok: redacted "
+            f"{replacements} session id occurrence(s) across {changed_files} file(s)\n"
+        )
+    elif marker_count:
+        message = (
+            "ok: session ids already redacted; found "
+            f"{marker_count} redaction marker occurrence(s)\n"
+        )
+    else:
+        message = "ok: no session id occurrences found\n"
+    (evidence_dir / "session-redaction.txt").write_text(message)
 
 
 def verify_probes(evidence_dir: Path) -> list[str]:
@@ -266,6 +325,7 @@ def main() -> int:
     require_path(evidence_dir)
     summary = write_summary(evidence_dir, args.duration_seconds)
     redact_local_paths(evidence_dir, args.redact_local_path_prefix)
+    redact_session_ids(evidence_dir)
     verify_redaction(evidence_dir, args.redaction_token)
 
     issues = verify_probes(evidence_dir)
@@ -286,7 +346,7 @@ def main() -> int:
         raise SystemExit("; ".join(issues))
     verification_path.write_text(
         "ok: final readiness/probes, usage scan, watcher tick floor, and "
-        "NDJSON redaction checks passed\n"
+        "evidence redaction checks passed\n"
     )
     print(f"long sidecar evidence ok: {evidence_dir}")
     return 0

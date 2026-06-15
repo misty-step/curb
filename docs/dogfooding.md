@@ -103,23 +103,29 @@ parser acceptance, and NDJSON redaction checks. Treat this as local dogfood
 evidence, not hosted or multi-hour deployment proof.
 
 Current long sidecar evidence includes
-`evidence/dogfood/2026-06-12-long-sidecar/`, a 7,200-second release-built
+`evidence/dogfood/2026-06-15-long-sidecar-refresh/`, a 7,200-second release-built
 `curb serve --headless` run with private runtime state outside the worktree,
 periodic live/ready/health/overview snapshots, final readiness HTTP 200, parser
-acceptance, and redaction checks. It also found recurring provider
-source-health errors and intermittent `watcher_runtime: cache busy` readiness
-degradation while `/v1/live` and protected health stayed available.
-The bounded-readiness/source-recovery follow-up is covered by focused tests;
-the next two-hour packet should prove sampled `/v1/ready` no longer returns
-503 after the first snapshot and that source-health recovery remains sanitized.
+acceptance, NDJSON redaction checks, path redaction, and session redaction. It
+replaced the old post-first-snapshot readiness blocker: all 25 periodic
+`/v1/ready` samples were HTTP 200 with status `ready`, while `/v1/live`,
+protected `/v1/health`, and protected `/v1/overview` also stayed HTTP 200
+during sampled probes.
+
+The same packet still captured 16 sanitized Codex source-health error events,
+max sampled overview latency of 4.633927 seconds, max watcher policy duration
+of 74524 ms, RSS from 19860 KB to 53764 KB, and no policy warnings or
+visibility-mode stop attempts. Treat those as operator recovery and performance
+evidence, not as the old readiness failure.
 
 The current refreshed packet is
-`evidence/dogfood/2026-06-12-long-sidecar-refresh/`. It is verified by
+`evidence/dogfood/2026-06-15-long-sidecar-refresh/`. It is verified by
 `scripts/verify-long-sidecar-evidence.py`, which recomputes the summary,
 requires final readiness HTTP 200, requires all sampled live/health/overview
-probes to be HTTP 200, checks NDJSON redaction, and enforces at least 90% of
-the ideal six-second watcher cadence so long scans remain visible without
-making the oracle depend on perfect scheduler timing.
+probes to be HTTP 200, checks NDJSON redaction, redacts and verifies configured
+local path prefixes, redacts and verifies UUID-like session IDs, and enforces at
+least 90% of the ideal six-second watcher cadence so long scans remain visible
+without making the oracle depend on perfect scheduler timing.
 
 For the next long operator window, use:
 
