@@ -198,6 +198,7 @@ python3 scripts/verify-long-sidecar-evidence.py \
   "${OUT}" \
   --duration-seconds "${DURATION}" \
   --redaction-token "${TOKEN}" \
+  --redact-local-path-prefix "${SCRATCH}" \
   --redact-local-path-prefix "${HOME_DIR}" \
   --redact-local-path-prefix "${ROOT}"
 
@@ -216,6 +217,8 @@ WATCHER_TICK_COUNT="$(jq -r '.watcher_tick_count' "${OUT}/long-run-summary.json"
 SOURCE_HEALTH_ERROR_EVENTS="$(jq -r '.source_health_error_events' "${OUT}/long-run-summary.json")"
 READY_COUNTS="$(jq -r '.ready_statuses | to_entries | map("\(.key)=\(.value)") | join(", ")' "${OUT}/long-run-summary.json")"
 READY_CODE_COUNTS="$(jq -r '.ready_status_codes | to_entries | map("\(.key)=\(.value)") | join(", ")' "${OUT}/long-run-summary.json")"
+READY_DEGRADED_SAMPLES="$(jq -r '[.ready_statuses | to_entries[]? | select(.key != "ready") | .value] | add // 0' "${OUT}/long-run-summary.json")"
+READY_NON_200_SAMPLES="$(jq -r '[.ready_status_codes | to_entries[]? | select(.key != "200") | .value] | add // 0' "${OUT}/long-run-summary.json")"
 SNAPSHOT_COUNT="$(jq -r '.snapshot_count' "${OUT}/long-run-summary.json")"
 RSS_MIN="$(jq -r '.min_rss_kb' "${OUT}/long-run-summary.json")"
 RSS_MAX="$(jq -r '.max_rss_kb' "${OUT}/long-run-summary.json")"
@@ -248,6 +251,12 @@ PY
 )"
 DISPLAY_ROOT="<redacted-local-path>"
 DISPLAY_HOME_DIR="<redacted-local-path>"
+DISPLAY_STATE_PATH="<redacted-local-path>"
+if [[ "${READY_DEGRADED_SAMPLES}" -gt 0 ]] || [[ "${READY_NON_200_SAMPLES}" -gt 0 ]]; then
+  READINESS_FOLLOWUP_ROW="| 1 | Reopen the readiness recovery path | ${READY_DEGRADED_SAMPLES} non-ready samples and ${READY_NON_200_SAMPLES} non-200 samples appeared while /v1/live and protected health stayed available. | Open or reactivate a readiness bug before any release claim. |"
+else
+  READINESS_FOLLOWUP_ROW="| 1 | Keep refreshed readiness proof as the release baseline | All ${SNAPSHOT_COUNT} periodic readiness samples were \`ready\` and HTTP 200 after startup. | Replace the old readiness-degradation blocker in release docs; continue watching probe latency and source-health errors. |"
+fi
 
 cat >"${OUT}/README.md" <<EOF
 # Long-Running Headless Sidecar Dogfood
@@ -275,7 +284,7 @@ Environment:
 - Config: \`config.yaml\`
 - Mode: visibility
 - Home scanned: \`${DISPLAY_HOME_DIR}\`
-- State path: private temporary directory under \`${SCRATCH}\`, outside the repo
+- State path: private temporary directory under \`${DISPLAY_STATE_PATH}\`, outside the repo
 - Ledger artifact: \`ledger.ndjson\`
 - Structured log: \`headless-sidecar.ndjson\`
 
@@ -291,7 +300,7 @@ Evidence:
   \`health-unauthenticated.status\`, and \`health-authenticated.json\`: public
   and protected API probes.
 - \`snapshots/\`: periodic live, ready, health, and overview probes.
-- \`ready-samples.tsv\`: degraded/readiness transitions by timestamp.
+- \`ready-samples.tsv\`: readiness status samples by timestamp.
 - \`probe-latency.tsv\`: live/health/overview latency samples.
 - \`resource-samples.tsv\`: server RSS/CPU samples.
 - \`overview-initial.json\`, \`overview-final.json\`,
@@ -301,10 +310,12 @@ Evidence:
   required runtime policy fields.
 - \`long-run-summary.json\` and \`long-run-summary.txt\`: source-health,
   readiness, watcher-tick, latency, and resource drift summary.
-- \`redaction-check.txt\`: token, auth header, prompt, response, screenshot,
-  keystroke, file-content, raw-provider, and payload terms were absent from
-  NDJSON.
+- \`redaction-check.txt\`: runtime API token when supplied, auth header, prompt,
+  response, screenshot, keystroke, file-content, raw-provider, and payload
+  terms were absent from NDJSON.
 - \`path-redaction.txt\`: local path prefixes were removed from committed
+  evidence artifacts.
+- \`session-redaction.txt\`: session IDs were removed from committed text
   evidence artifacts.
 
 Safety notes:
@@ -324,7 +335,7 @@ Operator notes:
   and the initial /v1/ready returned HTTP ${READY_INITIAL_STATUS}
   (${READY_INITIAL_STATE}) with watcher_runtime reason
   \`${READY_INITIAL_WATCHER_REASON}\`.
-- Degraded-readiness transitions: the ${DURATION}-second window produced
+- Readiness samples: the ${DURATION}-second window produced
   ${SNAPSHOT_COUNT} periodic readiness samples: ${READY_COUNTS}
   (${READY_CODE_COUNTS}). Final /v1/ready returned HTTP ${READY_FINAL_STATUS}
   (${READY_FINAL_STATE}); /v1/live and protected /v1/health stayed available
@@ -353,8 +364,8 @@ Follow-up ranking:
 
 | Rank | Item | Evidence | Decision |
 |---:|---|---|---|
-| 1 | Bound or snapshot readiness while watcher cache is busy | Degraded readiness samples appeared while /v1/live and protected health stayed available. | Route to \`backlog.d/039-finish-facade-and-presenter-simplification.md\` as part of the loopback transport/readiness milestone. |
-| 2 | Make provider source-health failures actionable | ${SOURCE_HEALTH_ERROR_EVENTS} source-health error events and the preflight source-health output are captured in this packet. | Route nonzero provider failures to \`backlog.d/036-build-operator-recovery-cockpit.md\` as an operator recovery state. |
+${READINESS_FOLLOWUP_ROW}
+| 2 | Keep provider source-health failures actionable | ${SOURCE_HEALTH_ERROR_EVENTS} source-health error events and the preflight source-health output are captured in this packet. | Treat repeated provider failures as recovery-cockpit evidence, not readiness failure; open parser/source-specific work only when the sanitized recovery state is not enough to act. |
 | 3 | Keep \`scripts/dogfood-long-sidecar.sh\` as the long-run harness | The wrapper produced release build, config validation, snapshots, parser output, summary, and redaction proof for ${EVENT_COUNT} events and ${WATCHER_TICK_COUNT} watcher ticks. | Do not add a repo-local QA/dogfood skill yet; defer until browser-backed live operator workflow evidence adds another repeatable procedure. |
 EOF
 
