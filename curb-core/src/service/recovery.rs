@@ -20,21 +20,75 @@ pub(crate) fn source_health_recovery(sources: &[SourceReport]) -> Vec<RecoveryIt
         .filter(|source| source.provider != "processes")
         .filter_map(|source| {
             let error = source.error.as_deref()?;
+            let advice = source_recovery_advice(&source.provider, error);
             Some(RecoveryItemView {
                 id: format!("source-{}", source.provider),
                 label: format!("{} source", source.provider),
-                status: "error".to_string(),
+                status: advice.status,
                 message: format!(
                     "{} usage metadata could not be read: {}. Raw provider paths and payloads are not shown in recovery.",
                     source.provider, error
                 ),
-                action: "Run `curb usage --since 24h`.".to_string(),
+                action: advice.action,
                 command: Some("curb usage --since 24h".to_string()),
                 path: None,
-                runbook: Some("docs/user-guide.md#recovery-surface".to_string()),
+                runbook: Some("docs/runbooks/source-health.md".to_string()),
             })
         })
         .collect()
+}
+
+struct SourceRecoveryAdvice {
+    status: String,
+    action: String,
+}
+
+fn source_recovery_advice(provider: &str, error: &str) -> SourceRecoveryAdvice {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("invalid utf-8") {
+        return SourceRecoveryAdvice {
+            status: "invalid utf-8".to_string(),
+            action: format!(
+                "Run `curb usage --since 24h`; if the error repeats, rotate or archive the malformed {provider} provider log and rerun."
+            ),
+        };
+    }
+    if lower.contains("json") {
+        return SourceRecoveryAdvice {
+            status: "invalid json".to_string(),
+            action: format!(
+                "Run `curb usage --since 24h`; if the error repeats, rotate or archive the malformed {provider} provider log and rerun."
+            ),
+        };
+    }
+    if lower.contains("1 mib") || lower.contains("safety cap") {
+        return SourceRecoveryAdvice {
+            status: "oversized line".to_string(),
+            action: format!(
+                "Rotate or archive the oversized {provider} provider log, then run `curb usage --since 24h`."
+            ),
+        };
+    }
+    if lower.contains("permission") {
+        return SourceRecoveryAdvice {
+            status: "permission denied".to_string(),
+            action: format!(
+                "Restore read permission for the {provider} provider metadata directory, then run `curb usage --since 24h`."
+            ),
+        };
+    }
+    if lower.contains("symlink") || lower.contains("outside") || lower.contains("trusted root") {
+        return SourceRecoveryAdvice {
+            status: "trusted root".to_string(),
+            action: format!(
+                "Remove the refused symlink or move {provider} metadata back under its trusted provider root, then run `curb usage --since 24h`."
+            ),
+        };
+    }
+    SourceRecoveryAdvice {
+        status: "unreadable".to_string(),
+        action: "Run `curb usage --since 24h`; if the error repeats, inspect the provider metadata source listed by that command.".to_string(),
+    }
 }
 
 fn sanitize_source_error(error: &str) -> String {

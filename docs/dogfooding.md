@@ -116,7 +116,9 @@ The same packet still captured 16 sanitized Codex source-health error events,
 max sampled overview latency of 4.633927 seconds, max watcher policy duration
 of 74524 ms, RSS from 19860 KB to 53764 KB, and no policy warnings or
 visibility-mode stop attempts. Treat those as operator recovery and performance
-evidence, not as the old readiness failure.
+evidence, not as the old readiness failure. Source-health recovery now
+classifies common sanitized provider errors into operator actions and points to
+`docs/runbooks/source-health.md`.
 
 The current refreshed packet is
 `evidence/dogfood/2026-06-15-long-sidecar-refresh/`. It is verified by
