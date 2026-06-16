@@ -3,6 +3,7 @@ use serde_json::json;
 
 use super::{ApiError, Backend, Request, Response, auth, dispatch, response, routes};
 
+#[derive(Clone)]
 pub struct Server<B: Backend> {
     token: String,
     pub(super) backend: B,

@@ -1,5 +1,7 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -12,6 +14,7 @@ use crate::api::{Backend, Request, Response, Server};
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_HEADER_LINES: usize = 100;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
+const MAX_CONCURRENT_STREAMS: usize = 64;
 const ACCEPTED_STREAM_READ_TIMEOUT: Duration = Duration::from_millis(250);
 const ACCEPTED_STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -37,19 +40,21 @@ pub fn bind_loopback(addr: &str) -> Result<TcpListener, HttpError> {
     Ok(listener)
 }
 
-pub fn serve_until<B: Backend>(
+pub fn serve_until<B: Backend + Clone + Send + 'static>(
     listener: TcpListener,
     server: &Server<B>,
     mut should_shutdown: impl FnMut() -> bool,
 ) -> Result<(), HttpError> {
     listener.set_nonblocking(true)?;
+    let server = server.clone();
+    let active_streams = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         if should_shutdown() {
             break;
         }
         match stream {
             Ok(stream) => {
-                let _ = handle_stream(stream, server);
+                handle_stream_async(stream, server.clone(), Arc::clone(&active_streams));
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -60,6 +65,40 @@ pub fn serve_until<B: Backend>(
         }
     }
     Ok(())
+}
+
+fn handle_stream_async<B: Backend + Send + 'static>(
+    stream: TcpStream,
+    server: Server<B>,
+    active_streams: Arc<AtomicUsize>,
+) {
+    if active_streams
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+            (active < MAX_CONCURRENT_STREAMS).then_some(active + 1)
+        })
+        .is_err()
+    {
+        drop(stream);
+        return;
+    }
+    thread::spawn(move || {
+        let _active = ActiveStream::new(&active_streams);
+        let _ = handle_stream(stream, &server);
+    });
+}
+
+struct ActiveStream<'a>(&'a AtomicUsize);
+
+impl<'a> ActiveStream<'a> {
+    fn new(active_streams: &'a AtomicUsize) -> Self {
+        Self(active_streams)
+    }
+}
+
+impl Drop for ActiveStream<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
 }
 
 pub fn handle_stream<B: Backend>(
@@ -178,6 +217,7 @@ fn reason_phrase(status: u16) -> &'static str {
         405 => "Method Not Allowed",
         409 => "Conflict",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         501 => "Not Implemented",
         _ => "OK",
     }
@@ -304,7 +344,6 @@ mod tests {
                 "test-token",
                 FakeBackend {
                     source_error_bytes: 600_000,
-                    ..Default::default()
                 },
             )
             .unwrap();
@@ -372,6 +411,77 @@ mod tests {
     }
 
     #[test]
+    fn serve_until_keeps_live_probe_responsive_while_desktop_socket_is_idle() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let server_thread = thread::spawn(move || {
+            let server = Server::new("test-token", FakeBackend::default()).unwrap();
+            serve_until(listener, &server, || server_shutdown.load(Ordering::SeqCst)).unwrap();
+            done_tx.send(()).unwrap();
+        });
+        let idle_client = TcpStream::connect(addr).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        let started = Instant::now();
+        let mut live_client = TcpStream::connect(addr).unwrap();
+        live_client
+            .write_all(b"GET /v1/live HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n")
+            .unwrap();
+        live_client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut response = Vec::new();
+
+        live_client.read_to_end(&mut response).unwrap();
+        let live_elapsed = started.elapsed();
+        assert!(live_elapsed < Duration::from_secs(1));
+        let shutdown_started = Instant::now();
+        shutdown.store(true, Ordering::SeqCst);
+        assert!(done_rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(shutdown_started.elapsed() < Duration::from_secs(1));
+        drop(idle_client);
+        server_thread.join().unwrap();
+
+        let text = String::from_utf8(response).unwrap();
+        assert!(text.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(text.contains(r#""status":"live""#));
+    }
+
+    #[test]
+    fn serve_until_drops_excess_idle_streams_without_blocking_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let server_thread = thread::spawn(move || {
+            let server = Server::new("test-token", FakeBackend::default()).unwrap();
+            serve_until(listener, &server, || server_shutdown.load(Ordering::SeqCst)).unwrap();
+            done_tx.send(()).unwrap();
+        });
+        let mut idle_clients = Vec::new();
+        for _ in 0..MAX_CONCURRENT_STREAMS {
+            idle_clients.push(TcpStream::connect(addr).unwrap());
+        }
+        thread::sleep(Duration::from_millis(100));
+        let overflow = TcpStream::connect(addr).unwrap();
+        overflow
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+
+        shutdown.store(true, Ordering::SeqCst);
+        assert!(done_rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(overflow);
+        drop(idle_clients);
+        server_thread.join().unwrap();
+    }
+
+    #[test]
     fn handle_stream_serves_embedded_ui_when_enabled() {
         let mut server = Server::new("test-token", FakeBackend::default()).unwrap();
         server.serve_ui();
@@ -401,9 +511,8 @@ mod tests {
         assert!(!is_loopback_host("192.168.1.50:8765"));
     }
 
-    #[derive(Default)]
+    #[derive(Clone, Default)]
     struct FakeBackend {
-        _calls: RefCell<usize>,
         source_error_bytes: usize,
     }
 
