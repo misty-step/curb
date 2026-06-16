@@ -1,0 +1,17 @@
+duration_seconds=7200
+events=1571
+usage_scan=1
+watcher_tick=1441
+ideal_watcher_tick_count=1200
+expected_watcher_tick_min=1080
+watcher_tick_minimum_percent=90
+source_error_total=7
+source_health_error_events=16
+ready_statuses={'ready': 25}
+ready_status_codes={'200': 25}
+snapshots=25
+max_policy_duration_ms=74524
+max_probe_latency_seconds=4.633927
+rss_kb_min=19860
+rss_kb_max=53764
+max_cpu_percent=91.7

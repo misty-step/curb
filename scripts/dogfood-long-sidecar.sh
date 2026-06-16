@@ -64,11 +64,6 @@ require python3
 positive_integer CURB_LONG_DOGFOOD_SECONDS "${DURATION}"
 positive_integer CURB_LONG_DOGFOOD_SNAPSHOT_SECONDS "${SNAPSHOT_SECONDS}"
 
-EXPECTED_WATCHER_TICKS="$(( DURATION / 6 ))"
-if [[ "${EXPECTED_WATCHER_TICKS}" -lt 2 ]]; then
-  EXPECTED_WATCHER_TICKS=2
-fi
-
 mkdir -p "${OUT}" "${STATE_DIR}" "${SNAPSHOTS}"
 rm -f \
   "${LOG}" \
@@ -199,90 +194,13 @@ SERVER_PID=""
 
 python3 scripts/parse-observability-smoke.py "${LOG}" >"${OUT}/parse-observability-smoke.txt"
 
-python3 - "${LOG}" "${READY_LOG}" "${PROBE_LOG}" "${RESOURCE_LOG}" "${OUT}/long-run-summary.json" "${OUT}/long-run-summary.txt" "${DURATION}" "${EXPECTED_WATCHER_TICKS}" <<'PY'
-from __future__ import annotations
-
-from collections import Counter
-import csv
-import json
-from pathlib import Path
-import sys
-
-log_path, ready_path, probe_path, resource_path, json_path, text_path = map(Path, sys.argv[1:7])
-duration_seconds = int(sys.argv[7])
-expected_watcher_ticks = int(sys.argv[8])
-events = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
-counts = Counter(event["event"] for event in events)
-policy_events = [
-    event for event in events if event["event"] in {"usage_scan", "watcher_tick"}
-]
-policy_durations = [event.get("duration_ms", 0) for event in policy_events]
-source_errors = sum(int(event.get("fields", {}).get("source_errors", 0)) for event in policy_events)
-source_health_error_count = counts.get("source_health_error", 0)
-
-ready_samples = list(csv.DictReader(ready_path.open(), delimiter="\t"))
-probe_samples = list(csv.DictReader(probe_path.open(), delimiter="\t"))
-resource_samples = list(csv.DictReader(resource_path.open(), delimiter="\t"))
-latencies = [float(row["total_seconds"]) for row in probe_samples if row.get("total_seconds")]
-rss_values = [int(row["rss_kb"]) for row in resource_samples if row.get("rss_kb", "").isdigit()]
-cpu_values = [float(row["cpu_percent"]) for row in resource_samples if row.get("cpu_percent")]
-ready_statuses = Counter(row["ready_status"] for row in ready_samples)
-ready_codes = Counter(row["status_code"] for row in ready_samples)
-
-summary = {
-    "duration_seconds": duration_seconds,
-    "event_count": len(events),
-    "counts": dict(sorted(counts.items())),
-    "expected_watcher_ticks": expected_watcher_ticks,
-    "watcher_tick_count": counts.get("watcher_tick", 0),
-    "usage_scan_count": counts.get("usage_scan", 0),
-    "source_error_total": source_errors,
-    "source_health_error_events": source_health_error_count,
-    "ready_statuses": dict(sorted(ready_statuses.items())),
-    "ready_status_codes": dict(sorted(ready_codes.items())),
-    "snapshot_count": len(ready_samples),
-    "max_policy_duration_ms": max(policy_durations) if policy_durations else 0,
-    "max_probe_latency_seconds": max(latencies) if latencies else 0,
-    "max_rss_kb": max(rss_values) if rss_values else 0,
-    "min_rss_kb": min(rss_values) if rss_values else 0,
-    "max_cpu_percent": max(cpu_values) if cpu_values else 0,
-}
-json_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-text_path.write_text(
-    f"duration_seconds={summary['duration_seconds']}\n"
-    f"events={summary['event_count']}\n"
-    f"usage_scan={summary['usage_scan_count']}\n"
-    f"watcher_tick={summary['watcher_tick_count']}\n"
-    f"expected_watcher_tick_min={summary['expected_watcher_ticks']}\n"
-    f"source_error_total={summary['source_error_total']}\n"
-    f"source_health_error_events={summary['source_health_error_events']}\n"
-    f"ready_statuses={summary['ready_statuses']}\n"
-    f"ready_status_codes={summary['ready_status_codes']}\n"
-    f"snapshots={summary['snapshot_count']}\n"
-    f"max_policy_duration_ms={summary['max_policy_duration_ms']}\n"
-    f"max_probe_latency_seconds={summary['max_probe_latency_seconds']}\n"
-    f"rss_kb_min={summary['min_rss_kb']}\n"
-    f"rss_kb_max={summary['max_rss_kb']}\n"
-    f"max_cpu_percent={summary['max_cpu_percent']}\n"
-)
-if summary["usage_scan_count"] < 1:
-    raise SystemExit("expected at least one usage_scan event")
-if summary["watcher_tick_count"] < expected_watcher_ticks:
-    raise SystemExit(
-        f"expected at least {expected_watcher_ticks} watcher_tick events "
-        f"for {duration_seconds}s window"
-    )
-PY
-
-if rg -F -n "${TOKEN}" "${LOG}" >"${OUT}/redaction-check.txt"; then
-  echo "unexpected token in ${LOG}" >&2
-  exit 1
-fi
-if rg -i -n "Authorization|Bearer|prompt|response|screenshot|keystroke|file[-_ ]?content|file contents|raw provider|raw_provider|provider payload|payload" "${LOG}" >"${OUT}/redaction-check.txt"; then
-  echo "unexpected sensitive material in ${LOG}" >&2
-  exit 1
-fi
-printf 'ok: no token, auth header, prompt, response, screenshot, keystroke, file-content, raw-provider, or payload terms in NDJSON\n' >"${OUT}/redaction-check.txt"
+python3 scripts/verify-long-sidecar-evidence.py \
+  "${OUT}" \
+  --duration-seconds "${DURATION}" \
+  --redaction-token "${TOKEN}" \
+  --redact-local-path-prefix "${SCRATCH}" \
+  --redact-local-path-prefix "${HOME_DIR}" \
+  --redact-local-path-prefix "${ROOT}"
 
 READY_INITIAL_STATUS="$(cat "${OUT}/ready-initial.status")"
 READY_INITIAL_STATE="$(jq -r '.status // "unknown"' "${OUT}/ready-initial.json")"
@@ -299,6 +217,8 @@ WATCHER_TICK_COUNT="$(jq -r '.watcher_tick_count' "${OUT}/long-run-summary.json"
 SOURCE_HEALTH_ERROR_EVENTS="$(jq -r '.source_health_error_events' "${OUT}/long-run-summary.json")"
 READY_COUNTS="$(jq -r '.ready_statuses | to_entries | map("\(.key)=\(.value)") | join(", ")' "${OUT}/long-run-summary.json")"
 READY_CODE_COUNTS="$(jq -r '.ready_status_codes | to_entries | map("\(.key)=\(.value)") | join(", ")' "${OUT}/long-run-summary.json")"
+READY_DEGRADED_SAMPLES="$(jq -r '[.ready_statuses | to_entries[]? | select(.key != "ready") | .value] | add // 0' "${OUT}/long-run-summary.json")"
+READY_NON_200_SAMPLES="$(jq -r '[.ready_status_codes | to_entries[]? | select(.key != "200") | .value] | add // 0' "${OUT}/long-run-summary.json")"
 SNAPSHOT_COUNT="$(jq -r '.snapshot_count' "${OUT}/long-run-summary.json")"
 RSS_MIN="$(jq -r '.min_rss_kb' "${OUT}/long-run-summary.json")"
 RSS_MAX="$(jq -r '.max_rss_kb' "${OUT}/long-run-summary.json")"
@@ -329,6 +249,14 @@ else:
     print(", ".join(f"{count:,} for {provider}" for provider, count in sorted(counts.items())))
 PY
 )"
+DISPLAY_ROOT="<redacted-local-path>"
+DISPLAY_HOME_DIR="<redacted-local-path>"
+DISPLAY_STATE_PATH="<redacted-local-path>"
+if [[ "${READY_DEGRADED_SAMPLES}" -gt 0 ]] || [[ "${READY_NON_200_SAMPLES}" -gt 0 ]]; then
+  READINESS_FOLLOWUP_ROW="| 1 | Reopen the readiness recovery path | ${READY_DEGRADED_SAMPLES} non-ready samples and ${READY_NON_200_SAMPLES} non-200 samples appeared while /v1/live and protected health stayed available. | Open or reactivate a readiness bug before any release claim. |"
+else
+  READINESS_FOLLOWUP_ROW="| 1 | Keep refreshed readiness proof as the release baseline | All ${SNAPSHOT_COUNT} periodic readiness samples were \`ready\` and HTTP 200 after startup. | Replace the old readiness-degradation blocker in release docs; continue watching probe latency and source-health errors. |"
+fi
 
 cat >"${OUT}/README.md" <<EOF
 # Long-Running Headless Sidecar Dogfood
@@ -350,13 +278,13 @@ bash scripts/dogfood-long-sidecar.sh ${OUT}
 Environment:
 
 - Build SHA: \`$(git rev-parse HEAD)\`
-- Branch/worktree: \`$(git branch --show-current)\` / \`${ROOT}\`
+- Branch/worktree: \`$(git branch --show-current)\` / \`${DISPLAY_ROOT}\`
 - OS: \`$(uname -srm)\`
 - Address: \`${ADDR}\`
 - Config: \`config.yaml\`
 - Mode: visibility
-- Home scanned: \`${HOME_DIR}\`
-- State path: private temporary directory under \`${SCRATCH}\`, outside the repo
+- Home scanned: \`${DISPLAY_HOME_DIR}\`
+- State path: private temporary directory under \`${DISPLAY_STATE_PATH}\`, outside the repo
 - Ledger artifact: \`ledger.ndjson\`
 - Structured log: \`headless-sidecar.ndjson\`
 
@@ -372,7 +300,7 @@ Evidence:
   \`health-unauthenticated.status\`, and \`health-authenticated.json\`: public
   and protected API probes.
 - \`snapshots/\`: periodic live, ready, health, and overview probes.
-- \`ready-samples.tsv\`: degraded/readiness transitions by timestamp.
+- \`ready-samples.tsv\`: readiness status samples by timestamp.
 - \`probe-latency.tsv\`: live/health/overview latency samples.
 - \`resource-samples.tsv\`: server RSS/CPU samples.
 - \`overview-initial.json\`, \`overview-final.json\`,
@@ -382,9 +310,13 @@ Evidence:
   required runtime policy fields.
 - \`long-run-summary.json\` and \`long-run-summary.txt\`: source-health,
   readiness, watcher-tick, latency, and resource drift summary.
-- \`redaction-check.txt\`: token, auth header, prompt, response, screenshot,
-  keystroke, file-content, raw-provider, and payload terms were absent from
-  NDJSON.
+- \`redaction-check.txt\`: runtime API token when supplied, auth header, prompt,
+  response, screenshot, keystroke, file-content, raw-provider, and payload
+  terms were absent from NDJSON.
+- \`path-redaction.txt\`: local path prefixes were removed from committed
+  evidence artifacts.
+- \`session-redaction.txt\`: session IDs were removed from committed text
+  evidence artifacts.
 
 Safety notes:
 
@@ -403,7 +335,7 @@ Operator notes:
   and the initial /v1/ready returned HTTP ${READY_INITIAL_STATUS}
   (${READY_INITIAL_STATE}) with watcher_runtime reason
   \`${READY_INITIAL_WATCHER_REASON}\`.
-- Degraded-readiness transitions: the ${DURATION}-second window produced
+- Readiness samples: the ${DURATION}-second window produced
   ${SNAPSHOT_COUNT} periodic readiness samples: ${READY_COUNTS}
   (${READY_CODE_COUNTS}). Final /v1/ready returned HTTP ${READY_FINAL_STATUS}
   (${READY_FINAL_STATE}); /v1/live and protected /v1/health stayed available
@@ -432,8 +364,8 @@ Follow-up ranking:
 
 | Rank | Item | Evidence | Decision |
 |---:|---|---|---|
-| 1 | Bound or snapshot readiness while watcher cache is busy | Degraded readiness samples appeared while /v1/live and protected health stayed available. | Route to \`backlog.d/039-finish-facade-and-presenter-simplification.md\` as part of the loopback transport/readiness milestone. |
-| 2 | Make provider source-health failures actionable | ${SOURCE_HEALTH_ERROR_EVENTS} source-health error events and the preflight source-health output are captured in this packet. | Route nonzero provider failures to \`backlog.d/036-build-operator-recovery-cockpit.md\` as an operator recovery state. |
+${READINESS_FOLLOWUP_ROW}
+| 2 | Keep provider source-health failures actionable | ${SOURCE_HEALTH_ERROR_EVENTS} source-health error events and the preflight source-health output are captured in this packet. | Treat repeated provider failures as recovery-cockpit evidence, not readiness failure; open parser/source-specific work only when the sanitized recovery state is not enough to act. |
 | 3 | Keep \`scripts/dogfood-long-sidecar.sh\` as the long-run harness | The wrapper produced release build, config validation, snapshots, parser output, summary, and redaction proof for ${EVENT_COUNT} events and ${WATCHER_TICK_COUNT} watcher ticks. | Do not add a repo-local QA/dogfood skill yet; defer until browser-backed live operator workflow evidence adds another repeatable procedure. |
 EOF
 

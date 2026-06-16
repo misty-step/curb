@@ -78,6 +78,7 @@ The injected boundary functions are not mocks of the domain. They are substitute
 scripts/check-setup.sh
 scripts/install-git-hooks.sh
 scripts/check-fast.sh
+scripts/check-product-principles.sh
 scripts/validate.sh
 scripts/build-ui.sh
 scripts/build-ui.sh --check
@@ -111,8 +112,9 @@ before commit; set `CURB_SKIP_PRE_COMMIT=1` only for emergency state
 preservation and record the reason in the handoff.
 `scripts/check-fast.sh` is the fastest high-signal product
 gate (`build-ui --check`, Rust fmt, clippy, file-length ratchet,
-termination-boundary scan, offline secret scan, Rust tests, UI typecheck, UI
-lint, UI tests, and deterministic dashboard browser smoke).
+termination-boundary scan, offline secret scan, product-principles guard, Rust
+tests, UI typecheck, UI lint, UI tests, and deterministic dashboard browser
+smoke).
 `scripts/validate.sh` is the full pre-merge gate and adds the desktop shell
 checks plus the synthetic demo dry-run. `cd ui && npm run smoke` runs the
 Playwright dashboard smoke directly against the Vite app with `/v1/*` fulfilled
@@ -150,7 +152,7 @@ The current gate ladder is:
 2. `scripts/install-git-hooks.sh` once per checkout to install the
    repo-managed pre-commit hook.
 3. `scripts/check-fast.sh` for fast code, type, lint, stale embed, secret,
-   rendered UI, and test regressions.
+   product-doctrine, rendered UI, and test regressions.
 4. `scripts/validate.sh` for the full local pre-merge gate.
 
 Gate policy:

@@ -1,6 +1,6 @@
 # Agent Readiness Roadmap
 
-Date: 2026-06-12
+Date: 2026-06-16
 
 This roadmap captures the current readiness posture after the first dogfood,
 headless, and structured-observability slices. It is evidence for backlog
@@ -10,21 +10,22 @@ ordering, not a replacement for the pre-merge gate.
 
 | Pillar | Level | Evidence | Main gap |
 |---|---:|---|---|
-| Style and validation | L4 candidate | `.editorconfig`, `cargo fmt`, `cargo clippy -D warnings`, ESLint, TypeScript strict mode, `scripts/check-fast.sh`, `scripts/validate.sh`, repo-managed pre-commit hook installation, and hosted PR CI all run the gate ladder. | Keep watching for gate runtime and flakes on later branches. |
-| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Latest verified behavior-bearing `master` run `27435399495` passed every job after PR #5 was squash-merged. | Keep watching hosted runtime and the GitHub Actions Node 20 deprecation warning before the June 16, 2026 default Node 24 switch. |
+| Style and validation | L4 candidate | `.editorconfig`, `cargo fmt`, `cargo clippy -D warnings`, ESLint, TypeScript strict mode, `scripts/check-fast.sh`, `scripts/check-product-principles.sh`, `scripts/validate.sh`, repo-managed pre-commit hook installation, and hosted PR CI all run the gate ladder. | Keep watching for gate runtime and flakes on later branches. |
+| Build and CI | L4 candidate | `.github/workflows/ci.yml` has a named fast-feedback Ubuntu lane, full Linux/macOS validation, Windows smoke, dependency audit, and macOS coverage with an 84% Rust line floor. Node-backed official actions are pinned to Node 24-compatible majors (`checkout@v5`, `setup-node@v6`, `upload-artifact@v6`). Latest verified behavior-bearing `master` run `27565453296` passed every job on `ad5e1b1`. | Keep watching hosted runtime warnings from third-party cache actions. |
 | Testing | L4 candidate | Rust unit/integration tests, instrumented real-process E2E tests, CLI tests, UI Vitest tests, API/UI contract fixtures, mandatory deterministic dashboard browser smoke, demo dry-run, hosted Windows smoke, and coverage exist. | Coverage is now above the floor but still has weak files worth targeting in future hardening. |
 | Documentation | L4 candidate | `AGENTS.md`, `README.md`, `docs/product-principles.md`, `docs/contributor-guide.md`, `docs/dogfooding.md`, `docs/release-evidence.md`, `docs/observability.md`, `docs/refactor-map.md`, `docs/adr/`, `docs/runbooks/`, and `.harness-kit/agent-readiness.yaml` describe product doctrine, workflows, decisions, runbooks, readiness contracts, and canonical release proof. | Keep the release evidence index current as new proof packets land. |
 | Dev environment | L3 | `.editorconfig`, `.node-version`, `rust-toolchain.toml`, `Cargo.lock`, `ui/package-lock.json`, `scripts/check-setup.sh`, `scripts/install-git-hooks.sh`, and local scripts pin the basics. | No devcontainer. |
 | Code quality and architecture | L3 | `curb-core` owns policy/runtime, the binary owns CLI/API/web, termination safety is behind platform targets, and API/service/runtime/usage/config/platform/usagewatch/ledger/binary-shell/observability facades plus write-path persistence/projection/identity validation and overview-delta projection have been split into deep use-case modules. | Remaining pressure is residual presenter/UI surfaces and any final facade simplification after hosted CI proof. |
-| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, two-hour long sidecar, and live browser QA dogfood produced parsed NDJSON. | Long dogfood found operator-visible source-health failures and transient `watcher_runtime: cache busy` readiness degradation while live/health probes stayed available. |
-| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `27435399495` passed dependency audit and coverage. | Keep review and merge ownership explicit on release branches. |
+| Observability | L3 | `CURB_LOG_FORMAT=json` emits versioned NDJSON for startup, requests, readiness, source-health, usage scans, watcher ticks, policy outcome counts, notifications, stop decisions, and shutdown; `/v1/live` and `/v1/ready` exist; active-session, timed headless-observability, stop-rejection, successful headless-enforcement, refreshed two-hour long sidecar, and live browser QA dogfood produced parsed NDJSON. The refreshed long sidecar showed 25/25 periodic readiness samples at `200 ready`, and source-health recovery now classifies common sanitized provider failures into operator actions. | Continue watching source-health recovery quality while attacking probe-latency outliers. |
+| Security and governance | L4 candidate | Strict config validation rejects prompt capture; token files are private; CI has coverage, validation, dependency audit, `SECURITY.md`, `CODEOWNERS`, and mandatory offline secret scan. Hosted run `27565453296` passed dependency audit and coverage. | Keep review and merge ownership explicit on release branches. |
 
 Overall: **L3 Standardized with several L4 candidates. Hosted CI proof is green
-on `master`, the two-hour sidecar dogfood removed the "no long run" blocker,
-the live browser QA packet covers the operator dashboard path, and
-`docs/release-evidence.md` is the current proof index. Remaining L4 blockers are
-operator-facing recovery for long-run readiness/source-health failures, review
-ownership, and remaining deep-module polish.**
+on `master`, the refreshed two-hour sidecar dogfood removed the
+post-first-snapshot readiness blocker, the live browser QA packet covers the
+operator dashboard path, and `docs/release-evidence.md` is the current proof
+index. Source-health recovery now has classified operator actions. Remaining L4
+blockers are probe-latency outlier investigation, review ownership, and
+remaining deep-module polish.**
 
 ## Evidence Snapshot
 
@@ -58,15 +59,12 @@ ownership, and remaining deep-module polish.**
   `ui/scripts/smoke-dashboard.mjs`; coverage also reported 82.78% against the
   84% floor. The follow-up fix installed Chromium in hosted UI gate jobs and
   added behavior tests for API backend adapters without lowering thresholds.
-- Latest behavior-bearing `master` proof: PR #5 squash-merged as
-  `33889504eca97e7951557ba21319afbd9053b8c1` with
-  `Closes-backlog: 037`. GitHub Actions run
-  `https://github.com/misty-step/curb/actions/runs/27435399495` passed
+- Latest behavior-bearing `master` proof:
+  `ad5e1b194a790e89819c3668711099f196740da9`. GitHub Actions run
+  `https://github.com/misty-step/curb/actions/runs/27565453296` passed
   `fast feedback (ubuntu)`, `full validate (ubuntu-latest)`,
   `full validate (macos-latest)`, `windows smoke`, `dependency audit`, and
-  `coverage` on June 12, 2026. The same run emitted the hosted Node 20 actions
-  deprecation warning that should be handled before GitHub's Node 24 default
-  switch.
+  `coverage` on June 15, 2026.
 - Red hosted runs are preserved as context, not current breakage: older master
   runs `27037199553`, `26960092690`, and `26838533371` failed before the
   current readiness tranche repairs; the current shipped `master` proof is
@@ -190,6 +188,15 @@ ownership, and remaining deep-module polish.**
   1.269932s, parser acceptance, and a token-specific redaction check. The
   wrapper threshold was corrected from one tick per five seconds to one per six
   seconds before this replacement run.
+- Refreshed long-running sidecar dogfood:
+  `evidence/dogfood/2026-06-15-long-sidecar-refresh/` ran the same release-built
+  sidecar path for 7,200 seconds against `090cfcf2` with private state outside
+  the worktree. It captured 1,571 NDJSON events, 1,441 `watcher_tick` events
+  against a 1,080 minimum, final `/v1/ready` HTTP 200, 25/25 periodic readiness
+  samples at `200 ready`, all sampled live/health/overview probes HTTP 200,
+  parser acceptance, NDJSON/path/session redaction checks, 16 sanitized Codex
+  source-health error events, RSS 19,860-53,764 KB, and max sampled probe latency
+  4.633927s.
 - Observability/config deepening: `src/observability/event.rs` owns the
   versioned log event schema and sanitization, `src/observability/registry.rs`
   owns event registration/path-template/outcome helpers, and
@@ -206,15 +213,18 @@ ownership, and remaining deep-module polish.**
 
 ## Ordered Work
 
-1. Make long-run readiness/source-health recoverable for operators: preserve
-   cheap live/health probes, avoid prolonged opaque `watcher_runtime: cache
-   busy` readiness, and summarize provider source-health failures without log
-   spelunking.
-2. Continue behavior-preserving deep-module extractions in small milestones:
+1. Keep dogfooding classified source-health recovery: repeated sanitized
+   provider failures should stay actionable without degrading readiness, and
+   parser/source-specific work should open only when the recovery state is not
+   enough to act.
+2. Investigate the long-run performance outliers: max sampled overview latency
+   was 4.633927s and max watcher policy duration was 74524 ms even though the
+   status oracle stayed green.
+3. Continue behavior-preserving deep-module extractions in small milestones:
    remaining presenter/UI surfaces and any final binary shell pressure,
    following `docs/refactor-map.md`. Fresh critic feedback rates more internal
    taxonomy-style splits below browser-verified operator-flow work.
-3. Continue UI polish through browser-verified operator flows, especially
+4. Continue UI polish through browser-verified operator flows, especially
    repeated real-session dogfood and narrow-viewport action states.
 
 ## Refactor Guardrails

@@ -1,16 +1,21 @@
-use std::sync::{Mutex, TryLockError};
+use std::sync::{
+    Mutex, TryLockError,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::runtime::readiness::SnapshotCacheStatus;
 use crate::service::{self, Snapshot};
 
 pub(crate) struct SnapshotCache {
     inner: Mutex<Option<Snapshot>>,
+    initialized: AtomicBool,
 }
 
 impl SnapshotCache {
     pub(crate) fn new() -> Self {
         Self {
             inner: Mutex::new(None),
+            initialized: AtomicBool::new(false),
         }
     }
 
@@ -28,10 +33,12 @@ impl SnapshotCache {
         let mut cache = self.inner.lock().expect("runtime cache mutex poisoned");
         let snapshot = service::annotate_overview_delta(cache.as_ref(), build()?);
         *cache = Some(snapshot.clone());
+        self.initialized.store(true, Ordering::Release);
         Ok(snapshot)
     }
 
     pub(crate) fn clear(&self) {
+        self.initialized.store(false, Ordering::Release);
         *self.inner.lock().expect("runtime cache mutex poisoned") = None;
     }
 
@@ -47,7 +54,13 @@ impl SnapshotCache {
             })
             .unwrap_or_else(|error| match error {
                 TryLockError::Poisoned(_) => SnapshotCacheStatus::Poisoned,
-                TryLockError::WouldBlock => SnapshotCacheStatus::Busy,
+                TryLockError::WouldBlock => {
+                    if self.initialized.load(Ordering::Acquire) {
+                        SnapshotCacheStatus::RefreshingCached
+                    } else {
+                        SnapshotCacheStatus::Busy
+                    }
+                }
             })
     }
 

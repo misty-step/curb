@@ -89,8 +89,17 @@ export function App() {
     [onboarding, notifications, snapshot.overview.capabilities],
   );
   const recovery = useMemo(
-    () => selectRecovery(onboarding, readinessView, connection === "error" ? error : "", config.path ?? onboarding?.config_path),
-    [onboarding, readinessView, connection, error, config.path],
+    () =>
+      selectRecovery(
+        onboarding,
+        readinessView,
+        {
+          connectionError: connection === "error" ? error : "",
+          configPath: config.path ?? onboarding?.config_path,
+          overviewRecovery: snapshot.overview.recovery,
+        },
+      ),
+    [onboarding, readinessView, connection, error, config.path, snapshot.overview.recovery],
   );
 
   useEffect(() => {

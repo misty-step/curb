@@ -12,10 +12,11 @@ gates:
   - scripts/check-setup.sh
   - scripts/install-git-hooks.sh installs a repo-managed pre-commit hook that runs scripts/check-fast.sh
   - scripts/check-fast.sh (includes deterministic dashboard browser smoke and offline secret scan)
+  - scripts/check-product-principles.sh (keeps product doctrine linked before review)
   - scripts/check-termination-boundary.sh
   - scripts/validate.sh
   ci:
-  - bash scripts/check-fast.sh on ubuntu-latest as fast feedback, including deterministic dashboard browser smoke and offline secret scan
+  - bash scripts/check-fast.sh on ubuntu-latest as fast feedback, including deterministic dashboard browser smoke, offline secret scan, and product-principles guard
   - bash scripts/validate.sh on ubuntu-latest and macos-latest
   - cargo build --bin curb plus focused config/platform tests on windows-latest
   - bash scripts/check-dependency-audit.sh --online on ubuntu-latest with fresh RustSec and npm advisory data

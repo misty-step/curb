@@ -218,6 +218,185 @@ fn overview_delta_reports_new_usage_alerts_agents_and_source_errors() {
 }
 
 #[test]
+fn overview_exposes_sanitized_source_health_recovery() {
+    let cfg = Config::load(crate::config::example_config_path()).unwrap();
+    let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+    let snapshot = build_snapshot(
+        &cfg,
+        &[],
+        vec![SourceReport {
+            provider: "claude".to_string(),
+            files: 0,
+            events: 0,
+            error: Some(
+                "usage scan: usage line exceeds 1048576 bytes: /Users/phaedrus/.claude/private prompt payload"
+                    .to_string(),
+            ),
+        }],
+        now,
+    );
+
+    let source_error = snapshot.overview.sources[0].error.as_deref().unwrap();
+    assert_eq!(
+        source_error,
+        "usage line exceeded the 1 MiB metadata safety cap"
+    );
+    assert!(!source_error.contains("/Users/"));
+    assert!(!source_error.contains("prompt payload"));
+
+    let recovery = &snapshot.overview.recovery[0];
+    assert_eq!(recovery.id, "source-claude");
+    assert_eq!(recovery.label, "claude source");
+    assert_eq!(recovery.command.as_deref(), Some("curb usage --since 24h"));
+    assert!(recovery.message.contains(source_error));
+    assert!(!recovery.message.contains("/Users/"));
+    assert!(!recovery.message.contains("prompt payload"));
+}
+
+#[test]
+fn source_health_recovery_classifies_operator_actions_without_degrading_status() {
+    let cfg = Config::load(crate::config::example_config_path()).unwrap();
+    let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+    let snapshot = build_snapshot(
+        &cfg,
+        &[],
+        vec![
+            SourceReport {
+                provider: "codex".to_string(),
+                files: 3,
+                events: 12,
+                error: Some(
+                    "usage json /Users/phaedrus/.codex/private-session.jsonl: invalid utf-8 prompt payload"
+                        .to_string(),
+                ),
+            },
+            SourceReport {
+                provider: "pi".to_string(),
+                files: 1,
+                events: 0,
+                error: Some(
+                    "usage scan: symlink outside trusted root /Users/phaedrus/.pi/private"
+                        .to_string(),
+                ),
+            },
+            SourceReport {
+                provider: "processes".to_string(),
+                files: 0,
+                events: 0,
+                error: Some("/Users/phaedrus/process payload stays diagnostic".to_string()),
+            },
+        ],
+        now,
+    );
+
+    assert_eq!(snapshot.overview.status, "OK");
+    assert_eq!(snapshot.overview.message, "Nothing spending");
+    assert_eq!(snapshot.overview.recovery.len(), 2);
+
+    let codex = snapshot
+        .overview
+        .recovery
+        .iter()
+        .find(|item| item.id == "source-codex")
+        .unwrap();
+    assert_eq!(codex.status, "invalid utf-8");
+    assert_eq!(codex.command.as_deref(), Some("curb usage --since 24h"));
+    assert_eq!(
+        codex.runbook.as_deref(),
+        Some("docs/runbooks/source-health.md")
+    );
+    assert!(
+        codex
+            .action
+            .contains("rotate or archive the malformed codex provider log")
+    );
+    assert!(
+        codex
+            .message
+            .contains("provider usage metadata contains invalid UTF-8")
+    );
+
+    let pi = snapshot
+        .overview
+        .recovery
+        .iter()
+        .find(|item| item.id == "source-pi")
+        .unwrap();
+    assert_eq!(pi.status, "trusted root");
+    assert!(pi.action.contains("Remove the refused symlink"));
+    assert_eq!(
+        pi.runbook.as_deref(),
+        Some("docs/runbooks/source-health.md")
+    );
+
+    let rendered = serde_json::to_string(&snapshot.overview.recovery).unwrap();
+    assert!(!rendered.contains("/Users/"));
+    assert!(!rendered.contains("prompt payload"));
+    assert!(!rendered.contains("private-session"));
+}
+
+#[test]
+fn source_health_recovery_classifies_every_common_source_error() {
+    let cfg = Config::load(crate::config::example_config_path()).unwrap();
+    let now = Utc.with_ymd_and_hms(2026, 5, 28, 16, 0, 0).unwrap();
+    let snapshot = build_snapshot(
+        &cfg,
+        &[],
+        vec![
+            SourceReport {
+                provider: "codex".to_string(),
+                files: 1,
+                events: 0,
+                error: Some("usage json /tmp/private: expected value".to_string()),
+            },
+            SourceReport {
+                provider: "claude".to_string(),
+                files: 1,
+                events: 0,
+                error: Some("usage line exceeds 1048576 bytes: /tmp/private".to_string()),
+            },
+            SourceReport {
+                provider: "pi".to_string(),
+                files: 1,
+                events: 0,
+                error: Some("permission denied: /tmp/private".to_string()),
+            },
+            SourceReport {
+                provider: "other".to_string(),
+                files: 1,
+                events: 0,
+                error: Some("unexpected provider failure: /tmp/private".to_string()),
+            },
+        ],
+        now,
+    );
+
+    let status_for = |id: &str| {
+        snapshot
+            .overview
+            .recovery
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.status.as_str())
+            .unwrap()
+    };
+    assert_eq!(status_for("source-codex"), "invalid json");
+    assert_eq!(status_for("source-claude"), "oversized line");
+    assert_eq!(status_for("source-pi"), "permission denied");
+    assert_eq!(status_for("source-other"), "unreadable");
+    assert!(
+        snapshot
+            .overview
+            .recovery
+            .iter()
+            .all(|item| item.runbook.as_deref() == Some("docs/runbooks/source-health.md"))
+    );
+
+    let rendered = serde_json::to_string(&snapshot.overview.recovery).unwrap();
+    assert!(!rendered.contains("/tmp/private"));
+}
+
+#[test]
 fn cwd_correlation_uses_path_components_not_string_prefixes() {
     let mut cfg = Config::load(crate::config::example_config_path()).unwrap();
     cfg.usage.warn_turn_tokens = 100;

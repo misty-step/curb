@@ -215,13 +215,14 @@ curb doctor --config configs/curb.example.yaml
 
 The local dashboard has one Recovery section for operator-actionable setup and
 runtime problems. The service builds those recovery items from `/v1/onboarding`,
-`/v1/ready`, notification health, provider source health, and process
-correlation; the UI only renders the service-owned labels, explanations,
-commands, paths, and runbook links.
+`/v1/ready`, `/v1/overview`, notification health, provider source health, and
+process correlation; the UI only renders the service-owned labels,
+explanations, commands, paths, and runbook links. Provider source-health
+recovery is covered in `docs/runbooks/source-health.md`.
 
 Recovery items intentionally do not include raw provider payloads, prompt text,
 response text, screenshots, keystrokes, or private file contents. Source-health
-errors name the provider and the recovery command, then point you at
+errors name the provider, summarize the sanitized cause, and point you at
 `curb usage --since 24h` or `curb doctor --config <path>` for a local
 diagnostic loop.
 

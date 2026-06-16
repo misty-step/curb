@@ -83,6 +83,7 @@ export interface Overview {
   busiest_turn_tokens: number;
   last_scan: string;
   sources: SourceHealth[];
+  recovery: RecoveryItemView[];
   changes: OverviewDelta;
   capabilities: PlatformCapabilities;
 }

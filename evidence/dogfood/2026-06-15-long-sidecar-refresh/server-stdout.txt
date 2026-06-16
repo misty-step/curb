@@ -1,0 +1,8 @@
+curb headless server
+  listening: http://127.0.0.1:60957/
+  token: <redacted-local-path>
+  auth: Authorization: Bearer $(cat token-file)
+  ui: disabled
+  live: http://127.0.0.1:60957/v1/live
+  ready: http://127.0.0.1:60957/v1/ready
+  watcher: usage policy scans run in this process

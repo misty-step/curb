@@ -529,6 +529,7 @@ mod tests {
                     busiest_turn_tokens: 0,
                     last_scan: fixed_now(),
                     sources: self.large_sources(),
+                    recovery: Vec::new(),
                     changes: Default::default(),
                     capabilities: Default::default(),
                 },
