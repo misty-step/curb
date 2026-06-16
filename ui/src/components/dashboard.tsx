@@ -1,26 +1,25 @@
-import { CircleDot, OctagonX, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Check, CircleDot, OctagonX, ShieldCheck, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
-import { commas, numberValue, relativeTime, tokens } from "../format";
+import { commas, relativeTime, tokens } from "../format";
 import { fillRatio, type SelectedSessionExplanation, warnRatio } from "../readModel";
-import {
-  type ConfigUpdate,
-  type ConfigView,
-  type Mode,
-  type NotificationView,
-  type SessionView,
-  type Status,
-  modeFromConfig,
-  modeToConfig,
-} from "../types";
+import { type ConfigView, type SessionView, type Status, modeFromConfig } from "../types";
 import { SelectedSessionPanel } from "./sessionPanels";
 import { SessionActionStrip } from "./sessionActions";
 
-export function StatusPill({ status }: { status: Status }): ReactNode {
-  const icon = status === "ACTION" ? <OctagonX size={14} /> : status === "WATCH" ? <TriangleAlert size={14} /> : <ShieldCheck size={14} />;
+// Status rides the glyph — the word stays a mono tag, never a filled pill.
+export function StatusWord({ status }: { status: Status }): ReactNode {
+  const icon =
+    status === "ACTION" ? (
+      <OctagonX className="ae-icon ae-err" />
+    ) : status === "WATCH" ? (
+      <TriangleAlert className="ae-icon ae-warn" />
+    ) : (
+      <ShieldCheck className="ae-icon ae-ok" />
+    );
   return (
-    <span className={`pill pill-${status.toLowerCase()}`}>
+    <span className="status-word">
       {icon}
-      {status}
+      <span className="ae-tag">{status}</span>
     </span>
   );
 }
@@ -42,11 +41,11 @@ export function connectionMessage(error: string): string {
 export function ConnectionBanner({ error }: { error: string }): ReactNode {
   return (
     <div className="connection-banner" role="status">
-      <TriangleAlert size={16} />
-      <div>
-        <strong>Live data unavailable</strong>
-        <span>{connectionMessage(error)}</span>
-      </div>
+      <TriangleAlert className="ae-icon ae-err" />
+      <span>
+        <span className="ae-item">Live data unavailable.</span>{" "}
+        <span className="ae-dim">{connectionMessage(error)}</span>
+      </span>
     </div>
   );
 }
@@ -59,8 +58,8 @@ export function providerLabel(provider: string): string {
   return provider;
 }
 
-// Active rows are running agents, so an in-limits row is "working" (green) for
-// its whole on-screen life — it does not gray out between model calls. Quiet
+// Active rows are running agents, so an in-limits row is "working" for its
+// whole on-screen life — it does not gray out between model calls. Quiet
 // agents live in the idle fold, which does not use this.
 function tone(session: SessionView): "kill" | "warn" | "working" {
   if (session.alert === "kill") return "kill";
@@ -68,31 +67,57 @@ function tone(session: SessionView): "kill" | "warn" | "working" {
   return "working";
 }
 
+// The spend meter: a ruled ink line against the kill line, hairline marks at
+// the warn gate and the kill edge. The fill takes a status ink only once a
+// threshold is the signal — in limits it stays plain ink.
 function SpendBar({ session, config }: { session: SessionView; config: ConfigView }): ReactNode {
   const fill = fillRatio(session.turn_tokens, config.kill_turn_tokens) * 100;
   const warnAt = warnRatio(config.warn_turn_tokens, config.kill_turn_tokens) * 100;
+  const state = tone(session);
+  const fillClass = state === "kill" ? " ae-err" : state === "warn" ? " ae-warn" : "";
   return (
     <div
-      className={`bar bar-${tone(session)}`}
+      className="ae-meter spend"
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={config.kill_turn_tokens}
       aria-valuenow={session.turn_tokens}
       aria-label={`${tokens(session.turn_tokens)} of ${tokens(config.kill_turn_tokens)} tokens this turn; warn at ${tokens(config.warn_turn_tokens)}`}
     >
-      <div className="bar-fill" style={{ width: `${fill}%` }} />
-      <span className="bar-tick" style={{ left: `${warnAt}%` }} title={`warn ${tokens(config.warn_turn_tokens)}`} />
+      <span className={`ae-meter-fill${fillClass}`} style={{ width: `${fill}%` }} />
+      <span className="ae-meter-mark" style={{ left: `${warnAt}%` }} title={`warn ${tokens(config.warn_turn_tokens)}`} />
+      <span className="ae-meter-mark spend-kill" title={`kill ${tokens(config.kill_turn_tokens)}`} />
     </div>
   );
 }
 
-// Derives the chip from the same `tone` the row colour uses, so label and colour
-// can never drift apart.
+// Derives the glyph and word from the same `tone` the meter uses, so label and
+// hue can never drift apart. The hue is on the glyph; the word is a tag.
 function StatusChip({ session }: { session: SessionView }): ReactNode {
-  if (session.acknowledged_until) return <span className="chip chip-ack">acknowledged</span>;
+  if (session.acknowledged_until) return <span className="ae-tag">acknowledged</span>;
   const state = tone(session);
-  const label = state === "kill" ? "over kill" : state === "warn" ? "over warn" : "working";
-  return <span className={`chip chip-${state}`}>{label}</span>;
+  if (state === "kill") {
+    return (
+      <span className="status-word">
+        <OctagonX className="ae-icon ae-err" />
+        <span className="ae-tag">over kill</span>
+      </span>
+    );
+  }
+  if (state === "warn") {
+    return (
+      <span className="status-word">
+        <TriangleAlert className="ae-icon ae-warn" />
+        <span className="ae-tag">over warn</span>
+      </span>
+    );
+  }
+  return (
+    <span className="status-word">
+      <Check className="ae-icon ae-ok" />
+      <span className="ae-tag">working</span>
+    </span>
+  );
 }
 
 interface RowProps {
@@ -108,40 +133,44 @@ interface RowProps {
 
 function AgentRow({ session, config, selected, onSelect, onAck, onStop, busy, detail }: RowProps): ReactNode {
   return (
-    <div className={`row row-${tone(session)} ${selected ? "row-open" : ""}`}>
+    <article className="row">
       <button type="button" className="row-head" onClick={() => onSelect(selected ? "" : session.key)}>
-        <div className="row-top">
-          <div className="row-id">
-            <span className="row-project">{session.project ?? session.id}</span>
-            <span className="row-meta">
+        <span className="row-top">
+          <span className="row-id">
+            <span className="ae-item">{session.project ?? session.id}</span>
+            <span className="ae-chrome row-meta">
               {providerLabel(session.provider)} · {relativeTime(session.last_activity_at)}
             </span>
-          </div>
-          <div className="row-spend">
-            <span className="row-tokens">{tokens(session.turn_tokens)}</span>
+          </span>
+          <span className="row-spend">
+            <span className="ae-num ae-item">{tokens(session.turn_tokens)}</span>
             <StatusChip session={session} />
-          </div>
-        </div>
+          </span>
+        </span>
         <SpendBar session={session} config={config} />
       </button>
       {selected ? (
-        <div className="row-detail">
-          <p className="row-why">{session.explanation}</p>
+        <div className="row-detail ae-view">
+          <p>{session.explanation}</p>
           <dl className="row-facts">
-            <Fact label="This turn" value={tokens(session.turn_tokens)} />
-            <Fact label="Total spent" value={tokens(session.total_tokens)} />
-            <Fact label="Model calls" value={String(session.calls)} />
-            <Fact label="Last activity" value={relativeTime(session.last_activity_at)} />
-            {session.models.length ? <Fact label="Model" value={session.models.join(", ")} /> : null}
-            {session.pid ? <Fact label="Worker" value={`pid ${session.pid}`} /> : null}
+            <Fact label="THIS TURN" value={tokens(session.turn_tokens)} />
+            <Fact label="TOTAL SPENT" value={tokens(session.total_tokens)} />
+            <Fact label="MODEL CALLS" value={String(session.calls)} />
+            <Fact label="LAST ACTIVITY" value={relativeTime(session.last_activity_at)} />
+            {session.models.length ? <Fact label="MODEL" value={session.models.join(", ")} /> : null}
+            {session.pid ? <Fact label="WORKER" value={`pid ${session.pid}`} /> : null}
           </dl>
           {detail ? <SelectedSessionPanel detail={detail} /> : <p className="row-busy">Loading session detail…</p>}
           {session.cwd ? <p className="row-cwd">{session.cwd}</p> : null}
           <SessionActionStrip session={session} onAck={onAck} onStop={onStop} />
-          {busy ? <p className="row-busy">{busy}</p> : null}
+          {busy ? (
+            <p className="row-busy" role="status">
+              {busy}
+            </p>
+          ) : null}
         </div>
       ) : null}
-    </div>
+    </article>
   );
 }
 
@@ -170,7 +199,7 @@ interface AgentListProps {
 export function AgentList(props: AgentListProps): ReactNode {
   const { active, idle, config, selectedKey, onSelect, onAck, onStop, busyKey, busyMessage, selectedDetail } = props;
   return (
-    <section className="agents">
+    <section className="agents ae-group">
       {active.length === 0 ? (
         <EmptyState config={config} />
       ) : (
@@ -189,7 +218,7 @@ export function AgentList(props: AgentListProps): ReactNode {
         ))
       )}
       {idle.length ? (
-        <details className="idle-fold">
+        <details className="ae-fold idle-fold">
           <summary>
             {idle.length} idle {idle.length === 1 ? "agent" : "agents"} — active in the last{" "}
             {Math.max(1, Math.round(config.usage_window_seconds / 60))} min, not spending now
@@ -197,10 +226,10 @@ export function AgentList(props: AgentListProps): ReactNode {
           <div className="idle-list">
             {idle.map((session) => (
               <div className="idle-row" key={session.key}>
-                <span className="row-project">{session.project ?? session.id}</span>
-                <span className="row-meta">{providerLabel(session.provider)}</span>
-                <span className="idle-tokens">{tokens(session.turn_tokens)} last turn</span>
-                <span className="idle-when">{relativeTime(session.last_activity_at)}</span>
+                <span>{session.project ?? session.id}</span>
+                <span>{providerLabel(session.provider)}</span>
+                <span className="ae-num">{tokens(session.turn_tokens)} last turn</span>
+                <span className="ae-num">{relativeTime(session.last_activity_at)}</span>
               </div>
             ))}
           </div>
@@ -210,144 +239,26 @@ export function AgentList(props: AgentListProps): ReactNode {
   );
 }
 
-// The calm, good state: nothing is spending. Instead of a bare line, it
-// confirms Curb is armed — what it watches and at what limits — so the quiet is
-// reassuring rather than ambiguous (is it working? is it connected?).
+// The calm, good state: nothing is spending. The product's instrument at
+// rest — a zero meter with the armed thresholds still marked — and an honest
+// sentence about what Curb is watching.
 function EmptyState({ config }: { config: ConfigView }): ReactNode {
   const enforce = modeFromConfig(config.mode) === "enforce";
+  const warnAt = warnRatio(config.warn_turn_tokens, config.kill_turn_tokens) * 100;
   return (
-    <div className="empty">
-      <span className="empty-gauge" aria-hidden="true">
-        <span className="empty-gauge-tick" />
-      </span>
-      <p className="empty-title">
-        <ShieldCheck size={15} /> Nothing spending right now
+    <div className="empty ae-empty">
+      <div className="ae-meter" aria-hidden="true">
+        <span className="ae-meter-fill" style={{ width: "0%" }} />
+        <span className="ae-meter-mark" style={{ left: `${warnAt}%` }} />
+        <span className="ae-meter-mark spend-kill" />
+      </div>
+      <p>
+        <ShieldCheck className="ae-icon ae-ok" /> <span className="ae-item">Nothing spending right now</span>
       </p>
-      <p className="empty-sub">
+      <p className="ae-dim">
         Watching Codex and Claude Code. Curb warns over {commas(config.warn_turn_tokens)} tokens a
         turn{enforce ? ` and stops a runaway over ${commas(config.kill_turn_tokens)}` : ""}.
       </p>
-    </div>
-  );
-}
-
-interface SettingsProps {
-  config: ConfigView;
-  notifications: NotificationView;
-  message: string;
-  onSave: (update: ConfigUpdate) => void;
-  onTestNotification: () => void;
-}
-
-export function Settings({ config, notifications, message, onSave, onTestNotification }: SettingsProps): ReactNode {
-  const mode = modeFromConfig(config.mode);
-  return (
-    <div className="settings">
-      <p className="setting-hint">
-        A turn is the work an agent does between your inputs. Limits apply to each turn.
-      </p>
-      <LimitField
-        id="warn"
-        label="Warn at"
-        value={config.warn_turn_tokens}
-        onSave={(value) => onSave({ warn_turn_tokens: value })}
-      />
-      <LimitField
-        id="kill"
-        label="Kill at"
-        value={config.kill_turn_tokens}
-        onSave={(value) => onSave({ kill_turn_tokens: value })}
-      />
-      <div className="setting">
-        <span className="setting-label">When an agent crosses the kill line</span>
-        <ModeToggle mode={mode} onChange={(next) => onSave({ mode: modeToConfig(next) })} />
-        {mode === "enforce" ? (
-          <label className="setting-check">
-            <input
-              type="checkbox"
-              checked={config.escalate_supervised}
-              onChange={(event) => onSave({ escalate_supervised: event.target.checked })}
-            />
-            <span className="setting-check-text">
-              Also stop supervised desktop agents
-              <span className="note">
-                Desktop apps can respawn workers. This stops the supervisor and every task running under it.
-              </span>
-            </span>
-          </label>
-        ) : null}
-      </div>
-      <div className="setting setting-row">
-        <label htmlFor="notify">Notify me</label>
-        <input
-          id="notify"
-          type="checkbox"
-          checked={config.local_notifications}
-          onChange={(event) => onSave({ local_notifications: event.target.checked })}
-        />
-        <button type="button" className="btn btn-ghost" onClick={onTestNotification}>
-          Test
-        </button>
-        <span className={`note ${notifications.available ? "" : "note-warn"}`}>{notifications.message}</span>
-      </div>
-      {message ? <p className="settings-msg">{message}</p> : null}
-    </div>
-  );
-}
-
-// A token limit shown with thousands separators (1,000,000) and parsed back to
-// a plain number on blur.
-function LimitField({
-  id,
-  label,
-  value,
-  onSave,
-}: {
-  id: string;
-  label: string;
-  value: number;
-  onSave: (value: number) => void;
-}): ReactNode {
-  return (
-    <div className="setting">
-      <label htmlFor={id}>{label}</label>
-      <div className="token-input">
-        <input
-          id={id}
-          type="text"
-          inputMode="numeric"
-          defaultValue={commas(value)}
-          onBlur={(event) => {
-            const parsed = numberValue(event.target.value.replace(/[^0-9]/g, ""));
-            event.target.value = commas(parsed);
-            onSave(parsed);
-          }}
-        />
-        <span>tokens / turn</span>
-      </div>
-    </div>
-  );
-}
-
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (mode: Mode) => void }): ReactNode {
-  return (
-    <div className="toggle" role="group" aria-label="Mode">
-      <button
-        type="button"
-        aria-pressed={mode === "watch"}
-        className={mode === "watch" ? "on" : ""}
-        onClick={() => onChange("watch")}
-      >
-        Warn only
-      </button>
-      <button
-        type="button"
-        aria-pressed={mode === "enforce"}
-        className={mode === "enforce" ? "on enforce" : ""}
-        onClick={() => onChange("enforce")}
-      >
-        Stop runaways
-      </button>
     </div>
   );
 }
@@ -360,12 +271,13 @@ export function ConnectionNote({
   error: string;
 }): ReactNode {
   const label = connection === "live" ? "Live local daemon" : connection === "error" ? "Connection issue" : "Demo data";
+  const glyph = connection === "live" ? "ae-ok" : connection === "error" ? "ae-err" : "ae-warn";
   return (
-    <div className={`connection connection-${connection}`}>
-      <CircleDot size={12} />
+    <span className="connection">
+      <CircleDot className={`ae-icon ${glyph}`} />
       <span>{label}</span>
-      {connection === "demo" ? <span className="note">Run curb app for live agent data.</span> : null}
-      {error ? <span className="note note-warn">{connectionMessage(error)}</span> : null}
-    </div>
+      {connection === "demo" ? <span className="ae-dim">Run curb app for live agent data.</span> : null}
+      {error ? <span className="ae-dim">{connectionMessage(error)}</span> : null}
+    </span>
   );
 }

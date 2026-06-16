@@ -51,7 +51,7 @@ describe("Curb dashboard", () => {
     const page = document.body.textContent ?? "";
     expect(page).toContain("1 over the kill line");
     expect(page).toContain("Curb will notify on high-token turns.");
-    expect(page).toContain("Recovery");
+    expect(page).toContain("RECOVERY");
     expect(page).toContain("First-run setup");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
@@ -116,13 +116,13 @@ describe("Curb dashboard", () => {
     await actRender(null, () => {
       drawer.open = true;
     });
-    const stop = Array.from(document.querySelectorAll(".toggle button")).find((button) =>
-      button.textContent?.includes("Stop runaways"),
-    );
+    const stop = Array.from(document.querySelectorAll("label.ae-choice"))
+      .find((label) => label.textContent?.includes("Stop runaways"))
+      ?.querySelector("input");
     expect(stop).toBeTruthy();
-    await actRender(null, () => (stop as HTMLButtonElement).click());
+    await actRender(null, () => (stop as HTMLInputElement).click());
 
-    expect((stop as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect((stop as HTMLInputElement).checked).toBe(true);
     expect(document.body.textContent).toContain("Warn at 1,000,000 · stop at 3,000,000");
 
     pendingSave.resolve(jsonResponse({ ...demoConfig, mode: "enforcement" }));
@@ -143,14 +143,14 @@ describe("Curb dashboard", () => {
     await actRender(null, () => (head as HTMLButtonElement).click());
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("Setup");
+    expect(page).toContain("SETUP");
     expect(page).toContain("Using safe defaults");
     expect(page).toContain("OK");
     expect(page).toContain("Diagnostics");
     expect(page).toContain("Optional");
     expect(page).not.toContain("checks clear");
     expect((document.querySelector(".readiness-details") as HTMLDetailsElement).open).toBe(false);
-    expect(page).toContain("Turn timeline");
+    expect(page).toContain("TURN TIMELINE");
     expect(page).toContain("gpt-5.5");
     expect(page).toContain("Input 1.2M");
     expect(page).toContain("Cached 180k");

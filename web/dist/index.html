@@ -4,8 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Curb</title>
-    <script type="module" crossorigin src="/assets/index-CBEaxc93.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DBsvQDGn.css">
+    <!-- aesthetic mode boot: apply the persisted choice before first paint
+         so the page never flashes the wrong mode. -->
+    <script>
+      try {
+        var m = localStorage.getItem('ae-mode');
+        if (m === 'dark' || m === 'light') {
+          document.documentElement.classList.add(m);
+          document.documentElement.style.colorScheme = m;
+        }
+      } catch (e) {}
+    </script>
+    <!-- Geist for the hosted/online case. The embedded dashboard must work
+         offline: when this fetch fails the --ae-font stacks fall back to
+         system faces and nothing else changes. display=swap keeps first
+         paint on the fallback either way. -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap"
+    />
+    <script type="module" crossorigin src="/assets/index-DSVKmXb0.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-kAIbNb4k.css">
   </head>
   <body>
     <div id="root"></div>

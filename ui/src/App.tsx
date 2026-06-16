@@ -1,4 +1,4 @@
-import { RefreshCw, Shield, SlidersHorizontal } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   acknowledgeSession,
@@ -15,8 +15,10 @@ import {
   testNotification,
   type ApiSettings,
 } from "./api";
-import { AgentList, ConnectionBanner, ConnectionNote, Settings, StatusPill } from "./components/dashboard";
+import { AgentList, ConnectionBanner, ConnectionNote, StatusWord } from "./components/dashboard";
+import { ModeToggle } from "./components/mode";
 import { ReadinessPanel, RecoveryPanel } from "./components/sessionPanels";
+import { Settings } from "./components/settings";
 import { demoConfig, demoNotifications, demoSnapshot } from "./demo";
 import { commas } from "./format";
 import { selectDashboard, selectReadiness, selectRecovery, selectSessionExplanation } from "./readModel";
@@ -197,64 +199,69 @@ export function App() {
       : `Warn at ${commas(config.warn_turn_tokens)} · stop disabled`;
 
   return (
-    <main className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">
-            <Shield size={17} />
-          </span>
-          <span>Curb</span>
-        </div>
-        <div className="top-copy">
-          <p className="headline">{model.headline}</p>
-          <p className="top-subline">{headerDetail}</p>
-        </div>
-        <div className="top-actions">
-          <StatusPill status={snapshot.overview.status} />
-          <span className="mode-tag">{mode === "enforce" ? "enforce" : "watch"}</span>
-          <button type="button" className="icon-btn" aria-label="Rescan now" onClick={() => void refresh(true)}>
-            <RefreshCw size={15} />
+    <div className="ae-screen ae-wide">
+      <header className="ae-bar topbar">
+        <span className="ae-name">CURB</span>
+        <span className="topbar-acts">
+          <StatusWord status={snapshot.overview.status} />
+          <span className="ae-tag">{mode === "enforce" ? "enforce" : "watch"}</span>
+          <button
+            type="button"
+            className="ae-button ae-button-quiet ae-button-compact"
+            onClick={() => void refresh(true)}
+          >
+            <RefreshCw className="ae-icon" />
+            Rescan
           </button>
-        </div>
+          <ModeToggle />
+        </span>
       </header>
 
-      {connection === "error" ? <ConnectionBanner error={error} /> : null}
+      <main className="ae-stage ae-stage-scroll">
+        <div>
+          <section className="ae-group">
+            <h1 className="ae-strong">{model.headline}</h1>
+            <p className="ae-dim lede-detail">{headerDetail}</p>
+          </section>
 
-      <AgentList
-        active={model.active}
-        idle={model.idle}
-        config={config}
-        selectedKey={selectedKey}
-        onSelect={setSelectedKey}
-        onAck={acknowledge}
-        onStop={stop}
-        busyKey={busyKey}
-        busyMessage={busyMsg}
-        selectedDetail={selectedDetail}
-      />
+          {connection === "error" ? <ConnectionBanner error={error} /> : null}
 
-      <RecoveryPanel model={recovery} />
+          <AgentList
+            active={model.active}
+            idle={model.idle}
+            config={config}
+            selectedKey={selectedKey}
+            onSelect={setSelectedKey}
+            onAck={acknowledge}
+            onStop={stop}
+            busyKey={busyKey}
+            busyMessage={busyMsg}
+            selectedDetail={selectedDetail}
+          />
 
-      <ReadinessPanel model={readiness} />
+          <RecoveryPanel model={recovery} />
 
-      <details className="drawer">
-        <summary>
-          <SlidersHorizontal size={15} />
-          <span>Limits &amp; mode</span>
-          <em>{policySummary}</em>
-        </summary>
-        <Settings
-          config={config}
-          notifications={notifications}
-          message={settingsMsg}
-          onSave={persist}
-          onTestNotification={() => void runTest()}
-        />
-      </details>
+          <ReadinessPanel model={readiness} />
 
-      <footer className="footer">
+          <details className="ae-fold drawer">
+            <summary>
+              Limits &amp; mode
+              <em className="ae-num">{policySummary}</em>
+            </summary>
+            <Settings
+              config={config}
+              notifications={notifications}
+              message={settingsMsg}
+              onSave={persist}
+              onTestNotification={() => void runTest()}
+            />
+          </details>
+        </div>
+      </main>
+
+      <footer className="ae-bar ae-chrome footbar">
         <ConnectionNote connection={connection} error={error} />
       </footer>
-    </main>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
-import { OctagonX } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Check, OctagonX, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SessionView } from "../types";
 
 export function SessionActionStrip({
@@ -11,72 +11,85 @@ export function SessionActionStrip({
   onAck: (session: SessionView) => void;
   onStop: (session: SessionView) => void;
 }): ReactNode {
-  const [armed, setArmed] = useState(false);
+  const [asking, setAsking] = useState(false);
   if (!session.can_acknowledge && !session.can_stop) return null;
   return (
     <div className="action-strip">
       {session.can_stop ? <StopIdentityChecks session={session} /> : null}
       <div className="row-actions">
         {session.can_acknowledge ? (
-          <button type="button" className="btn btn-ack" onClick={() => onAck(session)}>
+          <button type="button" className="ae-button ae-button-quiet ae-button-compact" onClick={() => onAck(session)}>
             Acknowledge
           </button>
         ) : null}
         {session.can_stop ? (
-          <StopActionButton
-            armed={armed}
-            onArm={() => setArmed(true)}
-            onCancel={() => setArmed(false)}
-            onConfirm={() => onStop(session)}
-          />
+          <button type="button" className="ae-button ae-button-quiet ae-button-compact" onClick={() => setAsking(true)}>
+            <OctagonX className="ae-icon ae-err" />
+            Stop now
+          </button>
         ) : null}
       </div>
+      {asking ? (
+        <StopDialog
+          session={session}
+          onCancel={() => setAsking(false)}
+          onConfirm={() => {
+            setAsking(false);
+            onStop(session);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function StopActionButton({
-  armed,
-  onArm,
+// The decision is asked in the panel costume: a modal dialog over a whisper
+// of paper dim. Escape and the quiet button decline it.
+function StopDialog({
+  session,
   onCancel,
   onConfirm,
 }: {
-  armed: boolean;
-  onArm: () => void;
+  session: SessionView;
   onCancel: () => void;
   onConfirm: () => void;
 }): ReactNode {
-  if (!armed) {
-    return (
-      <button type="button" className="btn btn-stop" onClick={onArm}>
-        <OctagonX size={14} />
-        Stop now
-      </button>
-    );
-  }
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
   return (
-    <span className="stop-confirm">
-      <button type="button" className="btn btn-ghost" onClick={onCancel}>
-        Cancel
-      </button>
-      <button type="button" className="btn btn-stop btn-stop-confirm" onClick={onConfirm}>
-        <OctagonX size={14} />
-        Confirm stop
-      </button>
-    </span>
+    <dialog className="ae-dialog" ref={ref} onClose={onCancel}>
+      <p className="ae-dialog-title">Stop {session.project ?? session.id}?</p>
+      <p className="ae-dim">
+        Curb revalidates the worker's identity (PID, start time, owner, executable) and stops only that
+        correlated process, after the grace period.
+      </p>
+      <div className="ae-dialog-acts">
+        <button type="button" className="ae-button ae-button-quiet" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="ae-button" onClick={onConfirm}>
+          Confirm stop
+        </button>
+      </div>
+    </dialog>
   );
 }
 
+// Identity checks: the hue rides each glyph; the words stay ink.
 function StopIdentityChecks({ session }: { session: SessionView }): ReactNode {
   return (
-    <div className="stop-checks" aria-label="Stop identity checks">
-      <span className="stop-check-title">Stop requires</span>
+    <span className="stop-checks" aria-label="Stop identity checks">
+      <span>Stop requires</span>
       {stopIdentityChecks(session).map((check) => (
-        <span className={`stop-check ${check.ready ? "ready" : "missing"}`} key={check.label}>
+        <span className="stop-check" key={check.label}>
+          {check.ready ? <Check className="ae-icon ae-ok" /> : <X className="ae-icon ae-err" />}
           {check.label}
         </span>
       ))}
-    </div>
+    </span>
   );
 }
 

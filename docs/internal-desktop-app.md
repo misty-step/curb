@@ -26,6 +26,11 @@ The shell intentionally does not attach to a pre-existing listener. That keeps
 the Tauri window from granting desktop-app privileges to arbitrary local HTTP
 content that won the port race.
 
+The loopback server must stay responsive while the native webview keeps idle or
+long-lived sockets open during page load. `src/http.rs` handles accepted streams
+concurrently so a stalled webview connection cannot block `/v1/live`, the
+embedded dashboard, or later API calls.
+
 ## Configuration
 
 - `CURB_DESKTOP_CURB_BIN`: absolute path to the `curb` binary. If omitted, the
