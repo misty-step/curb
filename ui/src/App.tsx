@@ -1,5 +1,5 @@
-import { RefreshCw, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Maximize2, Minimize2, RefreshCw, TriangleAlert } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   acknowledgeSession,
   fetchConfig,
@@ -21,7 +21,7 @@ import { Settings } from "./components/settings";
 import { demoConfig, demoNotifications, demoSnapshot } from "./demo";
 import { commas } from "./format";
 import { selectDashboard, selectRecovery, selectSessionExplanation, type RecoveryModel } from "./readModel";
-import { modeFromConfig, type CapabilityView, type ConfigUpdate, type ConfigView, type Mode, type NotificationView, type OnboardingView, type ReadinessView, type SessionView, type Snapshot, type TurnView } from "./types";
+import { modeFromConfig, type CapabilityView, type ConfigUpdate, type ConfigView, type Mode, type NotificationView, type OnboardingView, type ReadinessView, type SessionView, type Snapshot, type Status, type TurnView } from "./types";
 
 // curb app serves the dashboard same-origin and authenticates with an HttpOnly
 // cookie, so there is no URL or token to enter — we just talk to our own origin.
@@ -72,6 +72,56 @@ function dashboardChrome(args: {
   return { headerDetail, policySummary, healthWarnings };
 }
 
+// The slim top bar: brand and live status on the left, controls on the right.
+// In compact the mode tag and the Rescan label drop away to icon-only controls;
+// the expand toggle flips between the table-only view and the full dashboard.
+function DashboardBar({
+  status,
+  mode,
+  expanded,
+  onRescan,
+  onToggleExpanded,
+}: {
+  status: Status;
+  mode: Mode;
+  expanded: boolean;
+  onRescan: () => void;
+  onToggleExpanded: () => void;
+}): ReactNode {
+  return (
+    <header className="ae-bar topbar">
+      <span className="ae-name">CURB</span>
+      <span className="topbar-acts">
+        <StatusWord status={status} />
+        {expanded ? (
+          <span className="ae-tag ae-tag-bare topbar-mode">{mode === "enforce" ? "enforce" : "watch"}</span>
+        ) : null}
+        <button
+          type="button"
+          className="ae-button ae-button-quiet ae-button-compact"
+          onClick={onRescan}
+          aria-label="Rescan usage"
+          title="Rescan usage"
+        >
+          <RefreshCw className="ae-icon" />
+          {expanded ? "Rescan" : null}
+        </button>
+        <button
+          type="button"
+          className="ae-mode"
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse to the compact agent table" : "Expand for limits and detail"}
+          title={expanded ? "Compact view" : "Expand"}
+        >
+          {expanded ? <Minimize2 className="ae-icon" /> : <Maximize2 className="ae-icon" />}
+        </button>
+        <ModeToggle />
+      </span>
+    </header>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demoSnapshot);
   const [config, setConfig] = useState<ConfigView>(demoConfig);
@@ -86,6 +136,29 @@ export function App() {
   const [settingsMsg, setSettingsMsg] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [busyMsg, setBusyMsg] = useState("");
+  // Compact is the default: a slim bar over the agent table. Expand reveals the
+  // headline lede and the Limits & mode drawer. The choice persists so the
+  // window reopens the way you left it. The menu-bar app carries the at-a-glance
+  // headline, so the in-window paragraph is redundant detail when compact.
+  const [expanded, setExpanded] = useState(() => {
+    try {
+      return localStorage.getItem("curb-view") === "expanded";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleExpanded = useCallback(() => {
+    setExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("curb-view", next ? "expanded" : "compact");
+      } catch {
+        // Private mode: the choice simply does not persist.
+      }
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async (forceRescan = false) => {
     const nextReadiness = await fetchReadiness(SETTINGS).catch<ReadinessView | undefined>(() => undefined);
@@ -233,35 +306,36 @@ export function App() {
   });
 
   return (
-    <div className="ae-screen ae-wide">
-      <header className="ae-bar topbar">
-        <span className="ae-name">CURB</span>
-        <span className="topbar-acts">
-          <StatusWord status={snapshot.overview.status} />
-          <span className="ae-tag ae-tag-bare topbar-mode">{mode === "enforce" ? "enforce" : "watch"}</span>
-          <button
-            type="button"
-            className="ae-button ae-button-quiet ae-button-compact"
-            onClick={() => void refresh(true)}
-          >
-            <RefreshCw className="ae-icon" />
-            Rescan
-          </button>
-          <ModeToggle />
-        </span>
-      </header>
+    <div className={expanded ? "ae-screen ae-wide" : "ae-screen curb-compact"}>
+      <DashboardBar
+        status={snapshot.overview.status}
+        mode={mode}
+        expanded={expanded}
+        onRescan={() => void refresh(true)}
+        onToggleExpanded={toggleExpanded}
+      />
 
       <main className="ae-stage ae-stage-scroll">
         <div>
-          <section className="ae-group">
-            <h1 className="ae-strong">{model.headline}</h1>
-            <p className="ae-dim lede-detail">{headerDetail}</p>
-            {healthWarnings.map((warning) => (
-              <p className="health-note" key={warning}>
-                <TriangleAlert className="ae-icon ae-warn" /> {warning}
-              </p>
-            ))}
-          </section>
+          {expanded ? (
+            <section className="ae-group">
+              <h1 className="ae-strong">{model.headline}</h1>
+              <p className="ae-dim lede-detail">{headerDetail}</p>
+            </section>
+          ) : null}
+
+          {/* Health warnings ride above the table in both views: a user must
+              always see when Curb may miss spend or can't warn — that is the
+              one thing more important than the table itself. */}
+          {healthWarnings.length ? (
+            <section className="health-block">
+              {healthWarnings.map((warning) => (
+                <p className="health-note" key={warning}>
+                  <TriangleAlert className="ae-icon ae-warn" /> {warning}
+                </p>
+              ))}
+            </section>
+          ) : null}
 
           {connection === "error" ? <ConnectionBanner error={error} /> : null}
 
@@ -278,19 +352,21 @@ export function App() {
             selectedDetail={selectedDetail}
           />
 
-          <details className="ae-fold drawer">
-            <summary>
-              Limits &amp; mode
-              <em className="ae-num">{policySummary}</em>
-            </summary>
-            <Settings
-              config={config}
-              notifications={notifications}
-              message={settingsMsg}
-              onSave={persist}
-              onTestNotification={() => void runTest()}
-            />
-          </details>
+          {expanded ? (
+            <details className="ae-fold drawer">
+              <summary>
+                Limits &amp; mode
+                <em className="ae-num">{policySummary}</em>
+              </summary>
+              <Settings
+                config={config}
+                notifications={notifications}
+                message={settingsMsg}
+                onSave={persist}
+                onTestNotification={() => void runTest()}
+              />
+            </details>
+          ) : null}
         </div>
       </main>
     </div>

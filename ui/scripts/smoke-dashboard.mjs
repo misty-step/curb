@@ -29,6 +29,12 @@ try {
       await expectVisibleText(page, "Curb", viewport.name);
       await expectVisibleText(page, "repo", viewport.name);
       await expectVisibleText(page, "over warn", viewport.name);
+      // Compact is the default surface: the slim bar over the agent table must
+      // fit before we expand. The headline lede and drawer are tucked away here.
+      await assertNoViewportOverflow(page, ".topbar", viewport.name);
+      await assertNoViewportOverflow(page, ".agents", viewport.name);
+      // Expand reveals the Limits & mode drawer and the headline lede.
+      await page.getByRole("button", { name: "Expand for limits and detail" }).click();
       await expectVisibleText(page, "Limits & mode", viewport.name);
       await page.getByText("repo", { exact: false }).first().click();
       await expectVisibleText(page, "This turn", viewport.name);

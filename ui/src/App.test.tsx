@@ -42,20 +42,17 @@ describe("Curb dashboard", () => {
     );
   });
 
-  it("leads with the status headline and one row per working agent, no jargon", async () => {
+  it("shows one row per working agent with status, and keeps operator jargon out", async () => {
     installFetch(demoSnapshot);
     const { App } = await import("./App");
     root = createRoot(document.getElementById("root")!);
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("1 over the kill line");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
     expect(page).toContain("over warn");
     expect(page).toContain("over kill");
-    expect(page).toContain("Limits & mode");
-    expect(page).toContain("Warn at 1,000,000 · stop disabled");
     // Idle agents fold into a count rather than cluttering the list.
     expect(page).toContain("idle agent");
     // The dashboard is the agent list. Operator consoles (recovery, setup,
@@ -111,6 +108,7 @@ describe("Curb dashboard", () => {
   });
 
   it("reflects mode changes immediately while config save is still pending", async () => {
+    localStorage.setItem("curb-view", "expanded");
     const pendingSave = deferred<Response>();
     installFetch(demoSnapshot, pendingSave.promise);
     const { App } = await import("./App");

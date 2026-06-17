@@ -30,12 +30,6 @@
   overflow-x: hidden;
 }
 
-.topbar-state {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.7em;
-}
-
 .topbar-acts {
   display: inline-flex;
   align-items: center;
@@ -56,6 +50,60 @@
 
 .lede-detail {
   max-width: 52em;
+}
+
+/* ---- compact view: a slim instrument for a small window ----
+   The default. The menu-bar app carries the at-a-glance headline, so the window
+   strips to the agent table: a slim bar (brand · status · icon controls) over
+   the rows, with the lede and Limits & mode tucked behind the expand toggle. */
+
+/* The kit reserves a 5rem instrument gutter (100% - 5rem). In a ~360–480px
+   window that eats most of the width — claw it back so the table breathes. */
+.curb-compact .ae-bar,
+.curb-compact .ae-stage {
+  width: min(var(--ae-measure), 100% - 1.8rem);
+}
+
+/* a slimmer bar and a tighter top margin: the table is the point, get to it */
+.curb-compact .ae-bar {
+  padding: 0.85em 0;
+}
+
+.curb-compact .ae-stage-scroll > * {
+  padding-block: 1em 1.4em;
+}
+
+/* status word + three icon controls must not wrap in a narrow bar */
+.curb-compact .topbar-acts {
+  gap: 0.55em;
+}
+
+/* Icon-only Rescan in compact: drop the button box so the three right-side
+   controls (rescan · expand · theme) read as one matched set of borderless icon
+   buttons. Size, ink, and hover all track .ae-mode. */
+.curb-compact .topbar-acts .ae-button-compact {
+  width: 2.2em;
+  height: 2.2em;
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  color: var(--ae-ink-muted);
+}
+
+.curb-compact .topbar-acts .ae-button-compact:hover {
+  background: transparent;
+  color: var(--ae-ink);
+}
+
+.curb-compact .topbar-acts .ae-button-compact .ae-icon {
+  width: 1.25em;
+  height: 1.25em;
+}
+
+/* health warnings as the first element (no headline above them in compact):
+   keep the rhythm without crowding the bar */
+.health-block {
+  padding-bottom: 0.2em;
 }
 
 /* ---- connection banner: a hairline slip, status on the glyph ---- */

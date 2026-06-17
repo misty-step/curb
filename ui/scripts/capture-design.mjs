@@ -184,6 +184,8 @@ function payloadFor(pathname) {
 
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
+  // the real compact desktop window: a small pane the menu-bar app pops open
+  { name: "compact", width: 460, height: 720 },
   { name: "mobile", width: 390, height: 844 },
 ];
 const modes = ["light", "dark"];
@@ -238,6 +240,13 @@ try {
 
       await capture(page, `${tag}-01-overview`);
       await capture(page, `${tag}-01-overview-full`, { unroll: true });
+
+      // Compact is the default surface. Expand reveals the headline lede and the
+      // Limits & mode drawer; capture that fuller state before driving settings.
+      await page.getByRole("button", { name: "Expand for limits and detail" }).click();
+      await page.getByText("Limits & mode", { exact: false }).first().waitFor({ state: "visible", timeout: 10_000 });
+      await capture(page, `${tag}-01b-expanded`);
+      await capture(page, `${tag}-01b-expanded-full`, { unroll: true });
 
       // Expand the runaway session.
       await page.getByText("olympus", { exact: false }).first().click();
