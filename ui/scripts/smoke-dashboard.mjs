@@ -30,12 +30,6 @@ try {
       await expectVisibleText(page, "repo", viewport.name);
       await expectVisibleText(page, "over warn", viewport.name);
       await expectVisibleText(page, "Limits & mode", viewport.name);
-      await expectVisibleText(page, "Using safe defaults", viewport.name);
-      await expectVisibleText(page, "Recovery", viewport.name);
-      await expectVisibleText(page, "First-run setup", viewport.name);
-      await expectVisibleText(page, "curb init --config /tmp/curb/config.yaml", viewport.name);
-      await expectVisibleText(page, "Diagnostics", viewport.name);
-      await expectVisibleText(page, "Optional", viewport.name);
       await page.getByText("repo", { exact: false }).first().click();
       await expectVisibleText(page, "This turn", viewport.name);
       await expectVisibleText(page, "Model calls", viewport.name);
@@ -56,8 +50,6 @@ try {
       await assertNoViewportOverflow(page, ".action-strip", viewport.name);
       await assertNoViewportOverflow(page, ".stop-checks", viewport.name);
       await assertNoViewportOverflow(page, ".row-actions", viewport.name);
-      await assertNoViewportOverflow(page, ".recovery", viewport.name);
-      await assertNoViewportOverflow(page, ".readiness", viewport.name);
       await assertNoViewportOverflow(page, ".drawer", viewport.name);
     } catch (error) {
       failures.push(`${viewport.name}: ${error instanceof Error ? error.message : String(error)}`);

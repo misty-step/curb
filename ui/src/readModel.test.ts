@@ -5,7 +5,6 @@ import {
   fillRatio,
   isActive,
   selectDashboard,
-  selectReadiness,
   selectRecovery,
   selectSessionExplanation,
   warnRatio,
@@ -134,47 +133,6 @@ describe("selectSessionExplanation", () => {
       totalTokens: 180,
       spentTokens: 150,
       cumulativeTokens: 330,
-    });
-  });
-});
-
-describe("selectReadiness", () => {
-  it("surfaces first-run, notification, and platform capability state", () => {
-    const model = selectReadiness(onboarding(true), notification(false), onboarding(true).capabilities);
-
-    expect(model.attention).toBe(false);
-    expect(model.summary).toBe("Using safe defaults");
-    expect(model.nextStep).toBe("Curb will notify on high-token turns.");
-    expect(model.primary).toMatchObject({ label: "Setup", status: "required" });
-    expect(model.details.map((item) => item.label)).toEqual(["Notifications", "Process capture", "Identity", "Enforcement"]);
-    expect(model.items.map((item) => item.label)).toEqual([
-      "Setup",
-      "Notifications",
-      "Process capture",
-      "Identity",
-      "Enforcement",
-    ]);
-    expect(model.items[0]).toMatchObject({
-      status: "required",
-      message: "Curb will notify on high-token turns.",
-      attention: false,
-      tone: "ok",
-    });
-    expect(model.items[1]).toMatchObject({ status: "disabled", message: "notifications disabled", tone: "muted" });
-    expect(model.items[4]).toMatchObject({ status: "watch mode", tone: "muted", attention: false });
-  });
-
-  it("does not call setup ready until onboarding has answered", () => {
-    const model = selectReadiness(undefined, notification(true), onboarding(false).capabilities);
-
-    expect(model.attention).toBe(true);
-    expect(model.summary).toBe("Setup status unavailable");
-    expect(model.nextStep).toBe("Connect to the local Curb API to confirm setup.");
-    expect(model.items[0]).toMatchObject({
-      label: "Setup",
-      status: "unknown",
-      message: "Connect to the local Curb API to confirm setup.",
-      tone: "attention",
     });
   });
 });

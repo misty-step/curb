@@ -69,6 +69,12 @@ pub(super) fn scan_all(
     for provider in providers() {
         match scan_provider(state, state_dir, home, &provider, since) {
             Ok((provider_events, report)) => {
+                // A provider can succeed overall while one of its files was
+                // unreadable; fold that per-file health into the scan-level
+                // error so callers still see something needs attention.
+                if let Some(error) = &report.error {
+                    errors.push(error.clone());
+                }
                 events.extend(provider_events);
                 sources.push(report);
             }
@@ -113,6 +119,7 @@ fn scan_provider(
 ) -> Result<(Vec<Event>, SourceReport), UsageError> {
     let mut events = Vec::new();
     let mut file_count = 0;
+    let mut file_errors: Vec<String> = Vec::new();
     for root in (provider.roots)(home) {
         let mut paths = match root.layout {
             Layout::OneLevel => jsonl_files_one_level(&root.path)?,
@@ -129,8 +136,14 @@ fn scan_provider(
             };
             match read {
                 Ok(file_events) => events.extend(file_events),
+                // A file that vanished mid-scan is not an error.
                 Err(error) if error.is_not_found() => continue,
-                Err(error) => return Err(error),
+                // One unreadable file — an oversized line/file, malformed JSON,
+                // a read failure on that path — must not blind the whole
+                // provider. Skip it, record it as source health, and keep
+                // reading the rest so a single giant pasted blob in one session
+                // log cannot hide every other agent.
+                Err(error) => file_errors.push(error.to_string()),
             }
         }
     }
@@ -141,7 +154,11 @@ fn scan_provider(
         provider: provider.id.to_string(),
         files: file_count,
         events: events.len(),
-        error: None,
+        error: if file_errors.is_empty() {
+            None
+        } else {
+            Some(file_errors.join("; "))
+        },
     };
     Ok((events, report))
 }

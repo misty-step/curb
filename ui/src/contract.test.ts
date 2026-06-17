@@ -8,7 +8,7 @@ import readyFixture from "../../contracts/api/ready.json";
 import sessionFixture from "../../contracts/api/session.json";
 import snapshotFixture from "../../contracts/api/snapshot.json";
 import turnsFixture from "../../contracts/api/turns.json";
-import { selectDashboard, selectReadiness, selectRecovery, selectSessionExplanation } from "./readModel";
+import { selectDashboard, selectRecovery, selectSessionExplanation } from "./readModel";
 import type {
   ConfigView,
   LiveView,
@@ -78,14 +78,6 @@ describe("shared API contract fixtures", () => {
       reasoningTokens: 78,
       source: "test usage log",
     });
-
-    const readiness = selectReadiness(
-      onboarding,
-      onboarding.notifications,
-      onboarding.capabilities,
-    );
-    expect(readiness.summary).toBe("Using safe defaults");
-    expect(readiness.items.some((item) => item.label === "Setup")).toBe(true);
 
     const recovery = selectRecovery(onboarding, readyFixture as ReadinessView);
     expect(recovery.items.map((item) => item.id)).toEqual(["setup"]);

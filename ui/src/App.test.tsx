@@ -50,9 +50,6 @@ describe("Curb dashboard", () => {
 
     const page = document.body.textContent ?? "";
     expect(page).toContain("1 over the kill line");
-    expect(page).toContain("Curb will notify on high-token turns.");
-    expect(page).toContain("RECOVERY");
-    expect(page).toContain("First-run setup");
     expect(page).toContain("gradient");
     expect(page).toContain("1.4M");
     expect(page).toContain("over warn");
@@ -61,6 +58,14 @@ describe("Curb dashboard", () => {
     expect(page).toContain("Warn at 1,000,000 · stop disabled");
     // Idle agents fold into a count rather than cluttering the list.
     expect(page).toContain("idle agent");
+    // The dashboard is the agent list. Operator consoles (recovery, setup,
+    // diagnostics) and their CLI/runbook plumbing are stripped from the UI.
+    expect(page).not.toContain("RECOVERY");
+    expect(page).not.toContain("First-run setup");
+    expect(page).not.toContain("Diagnostics");
+    expect(page).not.toContain("RUNBOOK");
+    expect(page).not.toContain("curb usage --since 24h");
+    expect(page).not.toContain("curb init");
     // Redundant and confusing copy is gone.
     expect(page).not.toContain("all within limits");
     expect(page).not.toContain("checkpoint");
@@ -130,7 +135,7 @@ describe("Curb dashboard", () => {
     await actRender(null);
   });
 
-  it("opens a selected-session cockpit with turn timeline, evidence, and readiness", async () => {
+  it("opens a selected-session cockpit with turn timeline and evidence", async () => {
     const requests = installFetch(demoSnapshot);
     const { App } = await import("./App");
     root = createRoot(document.getElementById("root")!);
@@ -143,13 +148,9 @@ describe("Curb dashboard", () => {
     await actRender(null, () => (head as HTMLButtonElement).click());
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("SETUP");
-    expect(page).toContain("Using safe defaults");
-    expect(page).toContain("OK");
-    expect(page).toContain("Diagnostics");
-    expect(page).toContain("Optional");
-    expect(page).not.toContain("checks clear");
-    expect((document.querySelector(".readiness-details") as HTMLDetailsElement).open).toBe(false);
+    // The session cockpit is the detail surface; SETUP/Diagnostics consoles are gone.
+    expect(page).not.toContain("SETUP");
+    expect(page).not.toContain("Diagnostics");
     expect(page).toContain("TURN TIMELINE");
     expect(page).toContain("gpt-5.5");
     expect(page).toContain("Input 1.2M");

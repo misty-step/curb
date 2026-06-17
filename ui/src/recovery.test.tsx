@@ -21,38 +21,41 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("operator recovery", () => {
-  it("shows actionable recovery without leaking raw provider source errors", async () => {
+describe("source health", () => {
+  it("collapses a source problem to one plain line — no operator console or leakage", async () => {
     installRecoveryFetch();
     const { App } = await import("./App");
     root = createRoot(document.getElementById("root")!);
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("RECOVERY");
-    expect(page).toContain("codex source");
-    expect(page).toContain("Process correlation");
-    expect(page).toContain("Watcher runtime");
-    expect(page).toContain("curb usage --since 24h");
-    expect(page).toContain("curb scan --json --config /tmp/curb/config.yaml");
-    expect(page).toContain("curb watch --once");
+    // The operator console and its CLI/runbook plumbing are not on a user's dashboard.
+    expect(page).not.toContain("RECOVERY");
+    expect(page).not.toContain("Process correlation");
+    expect(page).not.toContain("Watcher runtime");
+    expect(page).not.toContain("curb usage --since 24h");
+    expect(page).not.toContain("RUNBOOK");
+    // Raw provider paths and payloads never reach the UI.
     expect(page).not.toContain("/Users/phaedrus/.codex/private");
     expect(page).not.toContain("prompt payload");
     expect(page).not.toContain("Failed to fetch");
+    // The single user-facing fact — Curb may be missing spend — survives in plain
+    // words, above the fold, with the provider name resolved (not a raw id).
+    expect(page).toContain("Codex");
+    expect(page).toContain("read all of your");
+    expect(page).toContain("may miss spend");
   });
 
-  it("routes API connection failures through the recovery panel", async () => {
+  it("shows a plain connection banner when the local API is unreachable", async () => {
     installConnectionFailureFetch();
     const { App } = await import("./App");
     root = createRoot(document.getElementById("root")!);
     await actRender(<App />);
 
     const page = document.body.textContent ?? "";
-    expect(page).toContain("RECOVERY");
-    expect(page).toContain("API connection");
-    expect(page).toContain("curb app");
-    expect(page).toContain("<state_dir>/api.token");
-    expect(page).toContain("docs/user-guide.md#local-ui-api");
+    expect(page).toContain("Live data unavailable");
+    expect(page).toContain("Curb's local service isn't responding");
+    expect(page).not.toContain("RECOVERY");
     expect(page).not.toContain("Failed to fetch");
   });
 });

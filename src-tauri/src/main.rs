@@ -64,6 +64,10 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
 
     TrayIconBuilder::new()
+        // Without an explicit icon the macOS status item renders zero-width and
+        // is effectively invisible in the menu bar. Embed the app icon at
+        // compile time so the tray entry actually shows up.
+        .icon(tauri::include_image!("icons/icon.png"))
         .tooltip("Curb")
         .menu(&menu)
         .show_menu_on_left_click(true)

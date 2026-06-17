@@ -15,6 +15,21 @@
 
 /* ---- top bar: identity left, state and controls right ---- */
 
+/* The kit bar aligns children on the baseline — right for text, wrong for a row
+   mixing an icon, small-caps text, a bordered button, and an icon button.
+   Center the whole bar so wordmark, status, mode, Rescan, and the theme toggle
+   sit on one visual line. */
+.topbar {
+  align-items: center;
+}
+
+/* The stage may scroll vertically; it must never scroll horizontally. On macOS a
+   vertical scrollbar steals width, which otherwise spawns a phantom horizontal
+   bar — clamp it. */
+.ae-stage {
+  overflow-x: hidden;
+}
+
 .topbar-state {
   display: inline-flex;
   align-items: baseline;
@@ -27,10 +42,12 @@
   gap: 1em;
 }
 
-/* a status reading: glyph carries the hue, the word stays a mono tag */
+/* a status reading: glyph carries the hue, the word stays a mono tag. The glyph
+   and word center on each other (baseline left the icon sitting low next to the
+   small-caps word). */
 .status-word {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.45em;
   white-space: nowrap;
 }
@@ -126,10 +143,23 @@
   height: 4px;
 }
 
-/* the kill line is the channel's end, made explicit as a terminal tick */
+/* The whole instrument answers "how close to the warn/kill line." The kit's
+   default mark is a 1px muted tick — legible on a 38rem column, invisible on
+   this 68rem one and lost entirely inside a colored fill. Curb leans on these
+   gates, so ink them and give them height: they read against the empty track
+   AND a kill/warn fill, without becoming a second fill of their own. */
+.spend .ae-meter-mark {
+  top: -5px;
+  bottom: -5px;
+  background: var(--ae-ink);
+}
+
+/* the kill line is the channel's end — a slightly heavier terminal tick so the
+   ceiling reads even when the bar is nowhere near it */
 .spend-kill {
   left: auto;
   right: -1px;
+  width: 2px;
 }
 
 /* expanded row detail: whitespace and hairlines, no box-in-box */
@@ -214,26 +244,45 @@
 .turn-head {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 1.5em;
   color: var(--ae-ink-muted);
 }
 
-.turn-head span:first-child {
+/* Spent is the turn's load-bearing figure — the runaway signal Curb warns and
+   enforces on. Lead with it in ink; the token decomposition below is faint
+   supporting detail, available but never competing with the headline number. */
+.turn-spent {
+  color: var(--ae-ink-muted);
+}
+
+.turn-spent strong {
   color: var(--ae-ink);
   font-weight: var(--ae-w-medium);
+  margin-right: 0.35em;
+}
+
+.turn-when {
+  text-align: right;
 }
 
 .turn-breakdown {
   display: flex;
   flex-wrap: wrap;
   gap: 0.2em 1.1em;
+  margin-top: 0.25em;
+  /* muted, not faint: the emphasized lead figure already carries the
+     hierarchy, and this is real token data that must clear WCAG AA contrast. */
   color: var(--ae-ink-muted);
 }
 
 .row-cwd {
   font-family: var(--ae-font-mono);
   font-size: 13px;
-  color: var(--ae-ink-faint);
+  /* the working-directory path is real, readable data, not a decorative
+     whisper — muted keeps it secondary while clearing WCAG AA (faint fails
+     ~2.6:1 in light and ~2.8:1 in dark). */
+  color: var(--ae-ink-muted);
   overflow-wrap: anywhere;
   margin-bottom: 0.8em;
 }
@@ -425,6 +474,21 @@
   border: 1px solid var(--ae-line);
   padding: 0.25em 0.6em;
   overflow-wrap: anywhere;
+}
+
+/* the one user-facing health line: a quiet warning inside the fold, no command
+   or runbook plumbing */
+.health-note {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  font-size: 13px;
+  color: var(--ae-ink-muted);
+  margin-bottom: 1.4em;
+}
+
+.health-note .ae-icon {
+  flex: none;
 }
 
 /* ---- the settings fold ---- */

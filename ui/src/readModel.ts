@@ -1,8 +1,5 @@
 import type {
-  CapabilityView,
-  NotificationView,
   OnboardingView,
-  PlatformCapabilities,
   ReadinessView,
   RecoveryItemView,
   SessionView,
@@ -51,24 +48,6 @@ export interface SelectedSessionExplanation {
   turns: TimelineTurn[];
   correlationEvidence: EvidenceItem[];
   actionEvidence: EvidenceItem[];
-}
-
-export interface ReadinessItem {
-  label: string;
-  status: string;
-  message: string;
-  attention: boolean;
-  tone: "ok" | "attention" | "warn" | "muted";
-}
-
-export interface ReadinessModel {
-  attention: boolean;
-  summary: string;
-  nextStep: string;
-  readyCount: number;
-  primary: ReadinessItem;
-  details: ReadinessItem[];
-  items: ReadinessItem[];
 }
 
 export interface RecoveryItem {
@@ -181,48 +160,6 @@ export function selectSessionExplanation(
   };
 }
 
-export function selectReadiness(
-  onboarding: OnboardingView | undefined,
-  notifications: NotificationView,
-  capabilities: PlatformCapabilities,
-): ReadinessModel {
-  const items: ReadinessItem[] = [
-    onboardingItem(onboarding),
-    {
-      label: "Notifications",
-      status: notifications.status,
-      message: notifications.message,
-      attention: notifications.enabled && !notifications.available,
-      tone: notifications.enabled && !notifications.available ? "attention" : notifications.enabled ? "ok" : "muted",
-    },
-    capabilityItem("Process capture", capabilities.process_capture),
-    capabilityItem("Identity", capabilities.process_identity),
-    capabilityItem("Enforcement", capabilities.enforcement),
-  ];
-  const attention = items.some((item) => item.attention);
-  const firstAttention = items.find((item) => item.attention);
-  const setup = items[0];
-  const primary = firstAttention ?? setup;
-  const readyCount = items.filter((item) => item.tone === "ok").length;
-  return {
-    attention,
-    summary: firstAttention
-      ? setupSummary(firstAttention.status)
-      : setup.status === "required"
-        ? setupSummary(setup.status)
-        : "Monitoring is ready",
-    nextStep: firstAttention
-      ? firstAttention.message
-      : setup.status === "required"
-        ? setup.message
-      : "Curb is watching agent spend with your current limits.",
-    readyCount,
-    primary,
-    details: items.filter((item) => item !== primary),
-    items,
-  };
-}
-
 export function selectRecovery(
   onboarding: OnboardingView | undefined,
   readiness: ReadinessView | undefined,
@@ -283,52 +220,6 @@ function actionEvidence(session: SessionView): EvidenceItem[] {
     { label: "Stop", value: stop },
     { label: "Acknowledge", value: ack },
   ];
-}
-
-function onboardingItem(onboarding: OnboardingView | undefined): ReadinessItem {
-  if (!onboarding) {
-    return {
-      label: "Setup",
-      status: "unknown",
-      message: "Connect to the local Curb API to confirm setup.",
-      attention: true,
-      tone: "attention",
-    };
-  }
-  if (onboarding.required) {
-    return {
-      label: "Setup",
-      status: "required",
-      message: onboarding.final_sentence || "Curb is using safe defaults. Review setup when you want to tune it.",
-      attention: false,
-      tone: "ok",
-    };
-  }
-  return {
-    label: "Setup",
-    status: "ready",
-    message: onboarding.final_sentence || "First-run setup complete",
-    attention: false,
-    tone: "ok",
-  };
-}
-
-function capabilityItem(label: string, capability: CapabilityView): ReadinessItem {
-  const attention = !capability.available && capability.status !== "disabled";
-  const disabled = capability.status === "disabled";
-  return {
-    label,
-    status: label === "Enforcement" && disabled ? "watch mode" : capability.status,
-    message: capability.message,
-    attention,
-    tone: attention ? "attention" : disabled ? "muted" : capability.available ? "ok" : "warn",
-  };
-}
-
-function setupSummary(status: string): string {
-  if (status === "unknown") return "Setup status unavailable";
-  if (status === "required") return "Using safe defaults";
-  return "Setup needs attention";
 }
 
 function dedupeRecovery(items: RecoveryItemView[]): RecoveryItem[] {

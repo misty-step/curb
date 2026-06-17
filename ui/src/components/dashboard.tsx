@@ -1,4 +1,4 @@
-import { Check, CircleDot, OctagonX, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Check, OctagonX, ShieldCheck, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { commas, relativeTime, tokens } from "../format";
 import { fillRatio, type SelectedSessionExplanation, warnRatio } from "../readModel";
@@ -16,10 +16,12 @@ export function StatusWord({ status }: { status: Status }): ReactNode {
     ) : (
       <ShieldCheck className="ae-icon ae-ok" />
     );
+  // A bordered tag means an active alert; a bare word is steady-state. OK is
+  // calm — let the glyph carry it so ACTION/WATCH read louder.
   return (
     <span className="status-word">
       {icon}
-      <span className="ae-tag">{status}</span>
+      <span className={status === "OK" ? "ae-tag ae-tag-bare" : "ae-tag"}>{status}</span>
     </span>
   );
 }
@@ -30,10 +32,10 @@ export function connectionMessage(error: string): string {
     return "The dashboard reached the dev server instead of the Curb API. Run curb app for live data.";
   }
   if (error === "Failed to fetch" || error.includes("NetworkError")) {
-    return "The dashboard could not reach the local Curb API. Open the Recovery section for the daemon command and token path.";
+    return "Curb's local service isn't responding. Start it from your terminal, then Rescan.";
   }
   if (/^40[13]\b/.test(error)) {
-    return "The dashboard reached the Curb API, but this browser session is not authenticated. Open the Recovery section for the token path.";
+    return "Curb's local service is running but this window isn't authenticated. Reopen Curb from your terminal.";
   }
   return error;
 }
@@ -94,7 +96,7 @@ function SpendBar({ session, config }: { session: SessionView; config: ConfigVie
 // Derives the glyph and word from the same `tone` the meter uses, so label and
 // hue can never drift apart. The hue is on the glyph; the word is a tag.
 function StatusChip({ session }: { session: SessionView }): ReactNode {
-  if (session.acknowledged_until) return <span className="ae-tag">acknowledged</span>;
+  if (session.acknowledged_until) return <span className="ae-tag ae-tag-bare">acknowledged</span>;
   const state = tone(session);
   if (state === "kill") {
     return (
@@ -115,7 +117,7 @@ function StatusChip({ session }: { session: SessionView }): ReactNode {
   return (
     <span className="status-word">
       <Check className="ae-icon ae-ok" />
-      <span className="ae-tag">working</span>
+      <span className="ae-tag ae-tag-bare">working</span>
     </span>
   );
 }
@@ -263,21 +265,3 @@ function EmptyState({ config }: { config: ConfigView }): ReactNode {
   );
 }
 
-export function ConnectionNote({
-  connection,
-  error,
-}: {
-  connection: "demo" | "live" | "error";
-  error: string;
-}): ReactNode {
-  const label = connection === "live" ? "Live local daemon" : connection === "error" ? "Connection issue" : "Demo data";
-  const glyph = connection === "live" ? "ae-ok" : connection === "error" ? "ae-err" : "ae-warn";
-  return (
-    <span className="connection">
-      <CircleDot className={`ae-icon ${glyph}`} />
-      <span>{label}</span>
-      {connection === "demo" ? <span className="ae-dim">Run curb app for live agent data.</span> : null}
-      {error ? <span className="ae-dim">{connectionMessage(error)}</span> : null}
-    </span>
-  );
-}

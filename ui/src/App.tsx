@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   acknowledgeSession,
@@ -15,20 +15,62 @@ import {
   testNotification,
   type ApiSettings,
 } from "./api";
-import { AgentList, ConnectionBanner, ConnectionNote, StatusWord } from "./components/dashboard";
+import { AgentList, ConnectionBanner, StatusWord, providerLabel } from "./components/dashboard";
 import { ModeToggle } from "./components/mode";
-import { ReadinessPanel, RecoveryPanel } from "./components/sessionPanels";
 import { Settings } from "./components/settings";
 import { demoConfig, demoNotifications, demoSnapshot } from "./demo";
 import { commas } from "./format";
-import { selectDashboard, selectReadiness, selectRecovery, selectSessionExplanation } from "./readModel";
-import { modeFromConfig, type ConfigUpdate, type ConfigView, type NotificationView, type OnboardingView, type ReadinessView, type SessionView, type Snapshot, type TurnView } from "./types";
+import { selectDashboard, selectRecovery, selectSessionExplanation, type RecoveryModel } from "./readModel";
+import { modeFromConfig, type CapabilityView, type ConfigUpdate, type ConfigView, type Mode, type NotificationView, type OnboardingView, type ReadinessView, type SessionView, type Snapshot, type TurnView } from "./types";
 
 // curb app serves the dashboard same-origin and authenticates with an HttpOnly
 // cookie, so there is no URL or token to enter — we just talk to our own origin.
 const SAME_ORIGIN = window.location.protocol.startsWith("http") ? window.location.origin : "";
 const SETTINGS: ApiSettings = { baseUrl: SAME_ORIGIN, token: "" };
 const POLL_MS = 2000;
+
+// Pure derivation of the dashboard's chrome from service state, kept out of the
+// component so the branching lives in one testable place. It surfaces only what
+// a user must see: whether enforcement can actually act (the lede never claims
+// "armed" without evidence) and the broken-promise health lines (may miss spend
+// / may not be warned). Operator plumbing stays out of the UI.
+function dashboardChrome(args: {
+  connection: "demo" | "live" | "error";
+  mode: Mode;
+  enforcement?: CapabilityView;
+  recovery: RecoveryModel;
+  notifications: NotificationView;
+  config: ConfigView;
+}): { headerDetail: string; policySummary: string; healthWarnings: string[] } {
+  const { connection, mode, enforcement, recovery, notifications, config } = args;
+  const enforceBlocked = mode === "enforce" ? !enforcement?.available : false;
+  const headerDetail =
+    connection === "error"
+      ? "Showing demo data until the local API responds."
+      : mode !== "enforce"
+        ? "Warn only is armed; Curb will not stop processes."
+        : enforceBlocked
+          ? "Stop runaways is set, but Curb can't stop anything right now."
+          : "Stop runaways is armed for correlated worker processes.";
+  const policySummary =
+    mode === "enforce"
+      ? `Warn at ${commas(config.warn_turn_tokens)} · stop at ${commas(config.kill_turn_tokens)}`
+      : `Warn at ${commas(config.warn_turn_tokens)} · stop disabled`;
+  // No health lines while disconnected — the snapshot is stale demo data then.
+  if (connection === "error") return { headerDetail, policySummary, healthWarnings: [] };
+  const degradedProviders = recovery.items
+    .filter((item) => item.id.startsWith("source-"))
+    .map((item) => providerLabel(item.id.slice("source-".length)));
+  const healthWarnings = [
+    ...(degradedProviders.length
+      ? [`Curb can't read all of your ${degradedProviders.join(" and ")} usage right now, so it may miss spend there.`]
+      : []),
+    ...(notifications.enabled && !notifications.available
+      ? ["Notifications are on, but Curb can't show them right now — you may not be warned."]
+      : []),
+  ];
+  return { headerDetail, policySummary, healthWarnings };
+}
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demoSnapshot);
@@ -83,10 +125,6 @@ export function App() {
   const selectedDetail = useMemo(
     () => selectSessionExplanation(selectedSession, selectedTurns),
     [selectedSession, selectedTurns],
-  );
-  const readiness = useMemo(
-    () => selectReadiness(onboarding, notifications, snapshot.overview.capabilities),
-    [onboarding, notifications, snapshot.overview.capabilities],
   );
   const recovery = useMemo(
     () =>
@@ -183,20 +221,16 @@ export function App() {
   }
 
   const mode = modeFromConfig(config.mode);
-  const headerDetail =
-    connection === "error"
-      ? "Showing demo data until the local API responds."
-      : readiness.attention
-        ? readiness.nextStep
-        : recovery.attention
-          ? recovery.nextStep
-        : mode === "enforce"
-          ? "Stop runaways is armed for correlated worker processes."
-          : "Warn only is armed; Curb will not stop processes.";
-  const policySummary =
-    mode === "enforce"
-      ? `Warn at ${commas(config.warn_turn_tokens)} · stop at ${commas(config.kill_turn_tokens)}`
-      : `Warn at ${commas(config.warn_turn_tokens)} · stop disabled`;
+  // Never claim enforcement is armed when the platform can't actually stop:
+  // a user who chose "Stop runaways" must not be told it works when it doesn't.
+  const { headerDetail, policySummary, healthWarnings } = dashboardChrome({
+    connection,
+    mode,
+    enforcement: snapshot.overview.capabilities?.enforcement,
+    recovery,
+    notifications,
+    config,
+  });
 
   return (
     <div className="ae-screen ae-wide">
@@ -204,7 +238,7 @@ export function App() {
         <span className="ae-name">CURB</span>
         <span className="topbar-acts">
           <StatusWord status={snapshot.overview.status} />
-          <span className="ae-tag">{mode === "enforce" ? "enforce" : "watch"}</span>
+          <span className="ae-tag ae-tag-bare topbar-mode">{mode === "enforce" ? "enforce" : "watch"}</span>
           <button
             type="button"
             className="ae-button ae-button-quiet ae-button-compact"
@@ -222,6 +256,11 @@ export function App() {
           <section className="ae-group">
             <h1 className="ae-strong">{model.headline}</h1>
             <p className="ae-dim lede-detail">{headerDetail}</p>
+            {healthWarnings.map((warning) => (
+              <p className="health-note" key={warning}>
+                <TriangleAlert className="ae-icon ae-warn" /> {warning}
+              </p>
+            ))}
           </section>
 
           {connection === "error" ? <ConnectionBanner error={error} /> : null}
@@ -239,10 +278,6 @@ export function App() {
             selectedDetail={selectedDetail}
           />
 
-          <RecoveryPanel model={recovery} />
-
-          <ReadinessPanel model={readiness} />
-
           <details className="ae-fold drawer">
             <summary>
               Limits &amp; mode
@@ -258,10 +293,6 @@ export function App() {
           </details>
         </div>
       </main>
-
-      <footer className="ae-bar ae-chrome footbar">
-        <ConnectionNote connection={connection} error={error} />
-      </footer>
     </div>
   );
 }

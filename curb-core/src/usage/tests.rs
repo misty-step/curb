@@ -539,6 +539,53 @@ fn oversized_usage_files_are_source_health_errors_before_parsing() {
 }
 
 #[test]
+fn one_oversized_file_does_not_blind_the_whole_provider() {
+    let home = tempdir().unwrap();
+    let codex = home.path().join(".codex").join("archived_sessions");
+    fs::create_dir_all(&codex).unwrap();
+    // A healthy session Curb can read.
+    fs::write(
+        codex.join("good.jsonl"),
+        codex_fixture("session_good", "/repo", "2026-05-19T16:00:00Z", 107, 107),
+    )
+    .unwrap();
+    // A sibling file whose single line blows the 1 MiB cap.
+    let padding = lines::oversized_line_padding();
+    fs::write(
+        codex.join("huge.jsonl"),
+        format!(
+            r#"{{"timestamp":"2026-05-19T16:00:00Z","type":"session_meta","payload":{{"id":"s","cwd":"/repo"}},"padding":"{padding}"}}
+"#
+        ),
+    )
+    .unwrap();
+
+    let scan = Reader::new(home.path()).scan_since(None).unwrap();
+
+    // The healthy session is still ingested instead of the whole provider going dark.
+    assert_eq!(
+        scan.events.len(),
+        1,
+        "a healthy session must survive a sibling oversized file"
+    );
+    assert_eq!(scan.events[0].session_id.as_deref(), Some("session_good"));
+    // ...and the oversized file is still surfaced as a source-health error.
+    let codex_source = scan
+        .sources
+        .iter()
+        .find(|source| source.provider == "codex")
+        .expect("codex source health present");
+    assert!(
+        codex_source
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("exceeds"),
+        "the oversized file must still surface as a source-health error"
+    );
+}
+
+#[test]
 fn oversized_usage_lines_fail_before_json_parsing() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("large-line.jsonl");
