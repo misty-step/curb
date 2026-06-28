@@ -138,6 +138,16 @@ compilation, example config validation, notification capability behavior, and
 Windows termination-command construction. It also runs a dedicated
 `dependency audit` job for RustSec and npm advisory checks.
 The rendered dashboard smoke is mandatory through `scripts/check-fast.sh`.
+
+Recommended required checks for branch protection:
+
+- `fast feedback (ubuntu)`
+- `full validate (ubuntu-latest)`
+- `full validate (macos-latest)`
+- `windows smoke`
+- `dependency audit`
+- `coverage`
+
 Run `cd ui && npm run smoke` directly when iterating on UI. By default it
 starts Vite, serves committed API fixtures from `contracts/api/`, and writes
 screenshots plus `manifest.json` under `ui/artifacts/smoke-dashboard/`.
